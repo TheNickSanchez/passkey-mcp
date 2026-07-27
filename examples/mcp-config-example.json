@@ -1,0 +1,32 @@
+{
+  "_comment": "Example MCP configuration using passkey for secrets injection",
+  "_before_comment": "INSECURE - secrets stored in plaintext",
+  "_before_example": {
+    "servers": {
+      "slack": {
+        "command": "python",
+        "args": ["-m", "slack.server"],
+        "env": {
+          "SLACK_XOXC_TOKEN": "xoxc-PLAINTEXT-SECRET-HERE",
+          "SLACK_XOXD_COOKIE": "xoxd-ANOTHER-SECRET-HERE"
+        }
+      }
+    }
+  },
+  "_after_comment": "SECURE - secrets loaded from Keychain at runtime",
+  "servers": {
+    "slack": {
+      "command": "passkey",
+      "args": ["run", "slack", "--", "python", "-m", "slack.server"]
+    },
+    "github": {
+      "command": "passkey",
+      "args": ["run", "github", "--", "python", "-m", "github.server"]
+    },
+    "multi-secret-server": {
+      "_comment": "Load secrets from multiple entries - later entries override earlier ones",
+      "command": "passkey",
+      "args": ["run", "aws", "github", "--", "python", "-m", "myserver"]
+    }
+  }
+}
