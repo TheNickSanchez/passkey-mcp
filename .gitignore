@@ -11,4 +11,4 @@ build/
 venv/
 .env
 *.enc
-.claude/settings.local.json
+.claude/
