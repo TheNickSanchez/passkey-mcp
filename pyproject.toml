@@ -50,8 +50,8 @@ passkey = "passkey.cli:main"
 passkey-mcp-server = "passkey.mcp_server:main"
 
 [project.urls]
-Homepage = "https://github.com/DTS-CPE/passkey-mcp"
-Changelog = "https://github.com/DTS-CPE/passkey-mcp/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/TheNickSanchez/passkey-mcp"
+Changelog = "https://github.com/TheNickSanchez/passkey-mcp/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["."]
