@@ -65,6 +65,18 @@ class TestPasskeyGetEntryFields:
 class TestPasskeyStatus:
     """Tests for passkey_status tool."""
 
+    def _make_adapter(self, tmp_path, root_key="mcpServers"):
+        """Helper to create a minimal adapter pointing to a tmp_path config."""
+        import sys
+
+        from passkey.mcp_config import ToolAdapter
+        cfg = tmp_path / "config.json"
+        cfg.touch()
+        return ToolAdapter(
+            name="test", display_name="Test", root_key=root_key,
+            global_paths={sys.platform: cfg}, project_paths={},
+        )
+
     @patch('passkey.mcp_server.load_config')
     def test_handles_missing_config(self, mock_load):
         mock_load.side_effect = FileNotFoundError()
@@ -88,9 +100,155 @@ class TestPasskeyStatus:
         result = passkey_status()
         assert result["servers"] == []
 
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.load_config')
+    def test_detects_secured_server(self, mock_load, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path)
+        mock_load.return_value = {
+            "mcpServers": {
+                "myserver": {
+                    "command": "passkey",
+                    "args": ["run", "myserver", "--", "python", "-m", "server"],
+                }
+            }
+        }
+        mock_list.return_value = ["myserver"]
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_status()
+        assert len(result["servers"]) == 1
+        assert result["servers"][0]["status"] == "secured"
+        assert result["summary"]["secured"] == 1
 
-class TestPasskeySetupServer:
-    """Tests for passkey_setup_server tool."""
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.load_config')
+    def test_detects_exposed_server(self, mock_load, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path)
+        mock_load.return_value = {
+            "mcpServers": {
+                "myserver": {
+                    "command": "python",
+                    "env": {"API_TOKEN": "secret123"},
+                }
+            }
+        }
+        mock_list.return_value = []
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_status()
+        assert len(result["servers"]) == 1
+        assert result["servers"][0]["status"] == "exposed"
+        assert result["summary"]["exposed"] == 1
+
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.load_config')
+    def test_detects_partial_server(self, mock_load, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path)
+        mock_load.return_value = {
+            "mcpServers": {
+                "myserver": {
+                    "command": "passkey",
+                    "args": ["run", "myserver", "--", "python"],
+                    "env": {"LEFTOVER_TOKEN": "oops"},
+                }
+            }
+        }
+        mock_list.return_value = ["myserver"]
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_status()
+        assert len(result["servers"]) == 1
+        assert result["servers"][0]["status"] == "partial"
+        assert result["summary"]["partial"] == 1
+
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.load_config')
+    def test_detects_broken_server(self, mock_load, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path)
+        mock_load.return_value = {
+            "mcpServers": {
+                "myserver": {
+                    "command": "passkey",
+                    "args": ["run", "myserver", "--", "python"],
+                }
+            }
+        }
+        mock_list.return_value = []
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_status()
+        assert len(result["servers"]) == 1
+        assert result["servers"][0]["status"] == "broken"
+        # 'broken' isn't counted in the summary dict, but the server is reported
+
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.load_config')
+    def test_detects_no_secrets_server(self, mock_load, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path)
+        mock_load.return_value = {
+            "mcpServers": {
+                "myserver": {
+                    "command": "python",
+                    "env": {"PYTHONPATH": "/lib"},
+                }
+            }
+        }
+        mock_list.return_value = []
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_status()
+        assert len(result["servers"]) == 1
+        assert result["servers"][0]["status"] == "no_secrets"
+        assert result["summary"]["no_secrets"] == 1
+
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.load_config')
+    def test_handles_keychain_error_gracefully(self, mock_load, mock_list, tmp_path):
+        from passkey.keychain import PasskeyError
+        adapter = self._make_adapter(tmp_path)
+        mock_load.return_value = {
+            "mcpServers": {
+                "myserver": {
+                    "command": "python",
+                    "env": {"API_TOKEN": "secret"},
+                }
+            }
+        }
+        mock_list.side_effect = PasskeyError("Access denied")
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_status()
+        # Should still report exposed, not crash
+        assert len(result["servers"]) == 1
+        assert result["servers"][0]["status"] == "exposed"
+
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.load_config')
+    def test_skips_empty_servers(self, mock_load, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path)
+        mock_load.return_value = {"mcpServers": {}}
+        mock_list.return_value = []
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_status()
+        assert result["servers"] == []
+        assert all(v == 0 for v in result["summary"].values())
+
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.load_config')
+    def test_multiple_adapters(self, mock_load, mock_list, tmp_path):
+        adapter1 = self._make_adapter(tmp_path, root_key="mcpServers")
+        adapter2 = self._make_adapter(tmp_path, root_key="servers")
+        config = {
+            "mcpServers": {"srv1": {"command": "python", "env": {"TOKEN": "x"}}},
+            "servers": {"srv2": {"command": "passkey", "args": ["run", "srv2", "--", "node"]}},
+        }
+        mock_load.return_value = config
+        mock_list.return_value = ["srv2"]
+        with patch('passkey.mcp_server.ADAPTERS', {"a1": adapter1, "a2": adapter2}):
+            result = passkey_status()
+        assert len(result["servers"]) == 2
+        # Each adapter reads from the same file but uses different root_keys
+        statuses = {s["server"]: s["status"] for s in result["servers"]}
+        assert statuses["srv1"] == "exposed"
+        assert statuses["srv2"] == "secured"
+
+
+class TestPasskeyWrapServer:
+    """Tests for passkey_wrap_server tool (aliased as passkey_setup_server)."""
 
     @patch('passkey.mcp_server.get_entry')
     def test_handles_missing_entry(self, mock_get):
@@ -162,9 +320,118 @@ class TestPasskeySetupServer:
         assert len(result["configs_updated"]) == 1
         mock_save.assert_called_once()
 
+    @patch('passkey.mcp_server.save_config')
+    @patch('passkey.mcp_server.rewrite_server_for_passkey')
+    @patch('passkey.mcp_server.is_passkey_wrapped')
+    @patch('passkey.mcp_server.get_mcp_servers')
+    @patch('passkey.mcp_server.find_adapter_for_path')
+    @patch('passkey.mcp_server.load_config')
+    @patch('passkey.mcp_server.get_entry')
+    def test_auto_detects_all_config_paths(self, mock_get_entry, mock_load, mock_find_adapter,
+                                            mock_get_servers, mock_wrapped, mock_rewrite,
+                                            mock_save, tmp_path):
+        """Test config_paths=None auto-detects all adapter paths."""
+        cfg1 = tmp_path / "cfg1.json"
+        cfg2 = tmp_path / "cfg2.json"
+        cfg1.write_text('{"mcpServers": {"myserver": {"command": "node"}}}')
+        cfg2.write_text('{}')
+
+        import sys
+
+        from passkey.mcp_config import ToolAdapter
+        adapter1 = ToolAdapter(
+            name="t1", display_name="T1", root_key="mcpServers",
+            global_paths={sys.platform: cfg1}, project_paths={},
+        )
+        adapter2 = ToolAdapter(
+            name="t2", display_name="T2", root_key="mcpServers",
+            global_paths={sys.platform: cfg2}, project_paths={},
+        )
+
+        mock_get_entry.return_value = Entry(name="myserver", fields={"TOKEN": "value"})
+        mock_find_adapter.side_effect = lambda p: adapter1 if p == cfg1 else adapter2
+        mock_get_servers.side_effect = lambda config, _: config.get("mcpServers", {})
+        mock_wrapped.return_value = False
+        mock_rewrite.return_value = {"command": "passkey", "args": ["run", "myserver", "--", "node"]}
+        mock_load.side_effect = [{"mcpServers": {"myserver": {"command": "node"}}}, {}]
+
+        with patch('passkey.mcp_server.ADAPTERS', {"t1": adapter1, "t2": adapter2}):
+            result = passkey_setup_server("myserver")
+
+        assert len(result["configs_updated"]) == 1
+        assert str(cfg1) in result["configs_updated"]
+        mock_save.assert_called_once()
+
+    @patch('passkey.mcp_server.save_config')
+    @patch('passkey.mcp_server.rewrite_server_for_passkey')
+    @patch('passkey.mcp_server.is_passkey_wrapped')
+    @patch('passkey.mcp_server.get_mcp_servers')
+    @patch('passkey.mcp_server.find_adapter_for_path')
+    @patch('passkey.mcp_server.load_config')
+    @patch('passkey.mcp_server.get_entry')
+    def test_handles_unknown_adapter_path(self, mock_get_entry, mock_load, mock_find_adapter,
+                                           mock_get_servers, mock_wrapped, mock_rewrite,
+                                           mock_save, tmp_path):
+        config_path = tmp_path / "unknown.json"
+        config_path.write_text('{"servers": {"srv": {"command": "node"}}}')
+
+        mock_get_entry.return_value = Entry(name="srv", fields={"TOKEN": "value"})
+        mock_load.return_value = {"servers": {"srv": {"command": "node"}}}
+        mock_find_adapter.return_value = None  # No adapter found for this path
+        result = passkey_setup_server("srv", config_paths=[str(config_path)])
+        assert len(result["configs_skipped"]) == 1
+        assert result["configs_skipped"][0]["reason"] == "unknown config format"
+
+    @patch('passkey.mcp_server.find_adapter_for_path')
+    @patch('passkey.mcp_server.get_entry')
+    def test_server_not_found_in_config(self, mock_get, mock_find, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text('{"mcpServers": {"other-server": {"command": "node"}}}')
+
+        mock_get.return_value = Entry(name="myserver", fields={"TOKEN": "value"})
+        mock_find.return_value = ADAPTERS["claude"]
+        result = passkey_setup_server("myserver", config_paths=[str(config_path)])
+        assert len(result["configs_skipped"]) == 1
+        assert result["configs_skipped"][0]["reason"] == "server not found"
+
+    @patch('passkey.mcp_server.save_config')
+    @patch('passkey.mcp_server.find_adapter_for_path')
+    @patch('passkey.mcp_server.get_entry')
+    def test_save_error_returns_error(self, mock_get, mock_find, mock_save, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text('{"mcpServers": {"myserver": {"command": "node"}}}')
+
+        mock_get.return_value = Entry(name="myserver", fields={"TOKEN": "value"})
+        mock_find.return_value = ADAPTERS["claude"]
+        mock_save.side_effect = PermissionError("Permission denied")
+        result = passkey_setup_server("myserver", config_paths=[str(config_path)])
+        assert result["success"] is False
+        assert len(result["errors"]) >= 1
+        assert "denied" in result["errors"][0]
+
+    @patch('passkey.mcp_server.get_entry')
+    def test_config_file_not_found(self, mock_get, tmp_path):
+        config_path = tmp_path / "nonexistent.json"
+
+        mock_get.return_value = Entry(name="myserver", fields={"TOKEN": "value"})
+        result = passkey_setup_server("myserver", config_paths=[str(config_path)])
+        assert len(result["errors"]) >= 1
+        assert "not found" in result["errors"][0].lower()
+
 
 class TestPasskeyDoctor:
     """Tests for passkey_doctor tool."""
+
+    def _make_adapter(self, tmp_path, root_key="mcpServers"):
+        import sys
+
+        from passkey.mcp_config import ToolAdapter
+        cfg = tmp_path / "config.json"
+        cfg.touch()
+        return ToolAdapter(
+            name="test", display_name="Test", root_key=root_key,
+            global_paths={sys.platform: cfg}, project_paths={},
+        )
 
     @patch('passkey.mcp_server.load_config')
     def test_detects_missing_config(self, mock_load):
@@ -191,3 +458,68 @@ class TestPasskeyDoctor:
         mock_list.return_value = []
         result = passkey_doctor()
         assert result["summary"]["failed"] == 0
+
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.find_passkey_command')
+    @patch('passkey.mcp_server.load_config')
+    def test_reports_broken_server(self, mock_load, mock_find, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path)
+        mock_load.return_value = {
+            "mcpServers": {
+                "myserver": {
+                    "command": "passkey",
+                    "args": ["run", "myserver", "--", "python"],
+                }
+            }
+        }
+        mock_find.return_value = "/usr/local/bin/passkey"
+        mock_list.return_value = []
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_doctor()
+        assert any("broken" in i.lower() or "missing" in i.lower() for i in result["issues"])
+
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.find_passkey_command')
+    @patch('passkey.mcp_server.load_config')
+    def test_reports_exposed_server(self, mock_load, mock_find, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path)
+        mock_load.return_value = {
+            "mcpServers": {
+                "myserver": {
+                    "command": "python",
+                    "env": {"API_TOKEN": "secret123"},
+                }
+            }
+        }
+        mock_find.return_value = "/usr/local/bin/passkey"
+        mock_list.return_value = []
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_doctor()
+        assert any("exposed" in i.lower() for i in result["issues"])
+
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.find_passkey_command')
+    @patch('passkey.mcp_server.load_config')
+    def test_handles_keychain_failure(self, mock_load, mock_find, mock_list, tmp_path):
+        from passkey.keychain import PasskeyError
+        adapter = self._make_adapter(tmp_path)
+        mock_load.return_value = {"mcpServers": {}}
+        mock_find.return_value = "/usr/local/bin/passkey"
+        mock_list.side_effect = PasskeyError("Access denied")
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_doctor()
+        assert any(c["status"] == "fail" and "keychain" in c["name"] for c in result["checks"])
+
+    @patch('passkey.mcp_server.list_entries')
+    @patch('passkey.mcp_server.find_passkey_command')
+    @patch('passkey.mcp_server.load_config')
+    def test_handles_invalid_adapter_config(self, mock_load, mock_find, mock_list, tmp_path):
+        from passkey.mcp_config import MCPConfigError
+        adapter = self._make_adapter(tmp_path)
+        mock_find.return_value = "/usr/local/bin/passkey"
+        mock_list.return_value = []
+        # Make load_config fail with MCPConfigError to simulate invalid JSON
+        mock_load.side_effect = MCPConfigError("Broken config")
+        with patch('passkey.mcp_server.ADAPTERS', {"test": adapter}):
+            result = passkey_doctor()
+        assert any(c["status"] == "fail" and "config" in c["name"] for c in result["checks"])

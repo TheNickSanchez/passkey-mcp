@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.2.0 (2026-07-26)
+
+### Added
+- **`passkey generate`** — cryptographically secure random secret generation
+  - Guarantees character diversity (uppercase, lowercase, digits, symbols)
+  - Configurable length (`--length N`, default 32)
+  - Auto-copy to clipboard (disable with `--no-copy`)
+  - Integrated into `passkey new` interactive flow ("Generate a secure value?")
+- **Credential templates** — pre-built configs for popular services
+  - 8 built-in templates: GitHub, AWS, Slack, OpenAI, Stripe, Vercel, PostgreSQL, MySQL
+  - `passkey template list|show|apply|add` commands
+  - Custom templates saved to `~/.config/passkey/templates/`
+  - Secret values stripped when saving custom templates
+  - Integrated into `passkey new` flow ("Start from a template?")
+- **`passkey share`** — share entries via encrypted file + passphrase
+  - 256-word built-in passphrase wordlist (~32 bits entropy, 4 words)
+  - Displays passphrase for human relay (no key exchange needed)
+  - `shared_by` and `shared_at` metadata tracked in encrypted payload
+- **`passkey receive`** — import shared entries by passphrase
+  - Decrypts bundle file with passphrase
+  - Single-entry or full-bundle import
+- **`passkey rotate`** — mark an entry as rotated
+  - Updates `last_rotated` timestamp for lifecycle tracking
+- **`passkey doctor --deep`** — expanded diagnostics
+  - Entry age checks (warns if >90 days without rotation)
+  - MCP config security check (warns about plaintext secrets)
+  - Bundle file permission check
+- **`passkey audit --summary`** — aggregate audit statistics
+  - Total operations, operations by type, most accessed entries
+  - Oldest entry, oldest rotation, entries never rotated
+- `last_rotated` field added to entry metadata (serialized in exports)
+
+### Changed
+- `passkey new` now offers generate and template options during creation
+- `passkey info` displays `Last Rotated` timestamp when available
+
 ## 1.1.0 (2026-07-26)
 
 ### Added

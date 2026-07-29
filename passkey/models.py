@@ -20,6 +20,7 @@ class Entry:
         created: ISO timestamp when entry was created
         modified: ISO timestamp when entry was last modified
         source: How the entry was created (manual, import-mcp, import-chrome)
+        last_rotated: ISO timestamp when entry was last rotated
     """
 
     name: str
@@ -28,6 +29,7 @@ class Entry:
     created: str | None = None
     modified: str | None = None
     source: str | None = None
+    last_rotated: str | None = None
 
     def __post_init__(self):
         """Validate entry name and set timestamps."""
@@ -62,11 +64,13 @@ class Entry:
             "fields": self.fields,
             "config": self.config,
         }
+        if self.last_rotated:
+            data["_meta"]["last_rotated"] = self.last_rotated
         return json.dumps(data)
 
     def to_export_dict(self, no_secrets: bool = False) -> dict:
         """Convert entry to dictionary for export."""
-        return {
+        result = {
             "name": self.name,
             "fields": {} if no_secrets else self.fields,
             "config": self.config,
@@ -74,6 +78,9 @@ class Entry:
             "modified": self.modified,
             "source": self.source,
         }
+        if self.last_rotated:
+            result["last_rotated"] = self.last_rotated
+        return result
 
     @classmethod
     def from_json(cls, name: str, data: str) -> "Entry":
@@ -101,6 +108,7 @@ class Entry:
                 created=meta.get("created"),
                 modified=meta.get("modified"),
                 source=meta.get("source"),
+                last_rotated=meta.get("last_rotated"),
             )
         else:
             # Legacy format - just fields dict
@@ -161,3 +169,8 @@ class Entry:
             self.touch()
             return True
         return False
+
+    def rotate(self) -> None:
+        """Mark entry as rotated by updating the last_rotated timestamp."""
+        self.last_rotated = datetime.now().isoformat()
+        self.touch()

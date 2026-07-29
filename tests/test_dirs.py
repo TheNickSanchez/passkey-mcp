@@ -141,10 +141,9 @@ class TestProcessLocking:
         lock_file = tmp_path / "metadata.lock"
         lock_file.write_text("9999999")  # Very unlikely real PID
 
-        with patch.object(kc, "_get_lock_file", return_value=lock_file):
-            # Force the process to be "not alive"
-            with patch.object(kc, "_is_process_alive", return_value=False):
-                assert kc._is_lock_stale() is True
+        with patch.object(kc, "_get_lock_file", return_value=lock_file), \
+                patch.object(kc, "_is_process_alive", return_value=False):
+            assert kc._is_lock_stale() is True
 
     def test_fresh_lock_not_stale(self, tmp_path):
         """Lock file with current PID is not stale."""
@@ -152,6 +151,6 @@ class TestProcessLocking:
         lock_file = tmp_path / "metadata.lock"
         lock_file.write_text(str(os.getpid()))
 
-        with patch.object(kc, "_get_lock_file", return_value=lock_file):
-            with patch.object(kc, "_is_process_alive", return_value=True):
-                assert kc._is_lock_stale() is False
+        with patch.object(kc, "_get_lock_file", return_value=lock_file), \
+                patch.object(kc, "_is_process_alive", return_value=True):
+            assert kc._is_lock_stale() is False

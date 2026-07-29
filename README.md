@@ -11,9 +11,13 @@ No plaintext secrets in config files. No cloud sync. Touch ID / system auth prot
 - **Tool-agnostic** — works with Claude, Gemini, VS Code, Cursor, OpenCode, Windsurf, Cline, Zed, and more
 - Interactive fuzzy-search entry picker (arrow keys + type-to-filter)
 - **Tab completion** for bash, zsh, and fish
+- **Generate** cryptographically secure random secrets (configurable length, guaranteed character diversity)
+- **Templates** for popular services (GitHub, AWS, Slack, OpenAI, Stripe, Vercel, PostgreSQL, MySQL)
+- **Share & receive** entries via encrypted file + passphrase (no key exchange needed)
+- **Lifecycle tracking** — `last_rotated` timestamps, `passkey rotate`, `passkey doctor --deep`
 - Import from Chrome password exports, existing MCP configs, or passkey backups
 - Encrypted bundle export/import for safe machine-to-machine transfer
-- Full audit logging of all operations
+- Full audit logging with `passkey audit --summary`
 - **Touch ID** / system auth protection (honors your sudo PAM config)
 - Cross-platform: macOS, Linux, Windows
 
@@ -159,6 +163,11 @@ passkey init                    # Auto-detect all tools
 passkey init --tool claude      # Specific tool
 passkey init --tool vscode
 
+# Add or update credentials for an MCP server
+passkey add my-server                            # Interactive field entry
+passkey add my-server --tool claude              # Target a specific tool config
+passkey add my-server API_KEY=abc TOKEN=xyz      # Non-interactive (KEY=VALUE)
+
 # Show security status across all tools
 passkey status
 
@@ -215,6 +224,7 @@ passkey import claude_desktop_config.json
 passkey audit              # View recent operations
 passkey audit --limit 50   # Show more entries
 passkey audit --clear      # Clear the log
+passkey audit --summary    # Aggregate statistics
 ```
 
 ### Verify Entry Health
@@ -222,6 +232,55 @@ passkey audit --clear      # Clear the log
 ```bash
 # Exit non-zero if any required fields are missing
 passkey check github GITHUB_TOKEN GITHUB_USERNAME
+```
+
+### Generate Secrets
+
+```bash
+# Generate a 32-char random secret (default)
+passkey generate
+
+# Generate with custom length
+passkey generate --length 64
+
+# Generate without auto-copying to clipboard
+passkey generate --no-copy
+```
+
+### Credential Templates
+
+```bash
+# List built-in templates
+passkey template list
+
+# Show a template's fields
+passkey template show github
+
+# Apply a template to create a new entry
+passkey template apply github
+
+# Save a custom template from an existing entry
+passkey template add my-service --from myapi
+```
+
+### Share & Receive
+
+```bash
+# Share an entry (generates encrypted file + passphrase)
+passkey share github --output github-shared.passkey
+
+# Receive a shared entry
+passkey receive github-shared.passkey
+```
+
+### Lifecycle Management
+
+```bash
+# Mark an entry as rotated (updates last_rotated timestamp)
+passkey rotate github
+
+# Run expanded diagnostics
+passkey doctor --deep
 ```
 
 ## Authentication

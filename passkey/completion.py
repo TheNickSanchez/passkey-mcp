@@ -33,7 +33,7 @@ _passkey_completions() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    commands="new list get edit delete info clone set-field run export import check audit mcp-serve init status doctor servers add claude completion"
+    commands="new list get edit delete info clone set-field run export import check audit mcp-serve init status doctor servers add claude completion generate template share receive rotate"
 
     # First argument: complete subcommands or entry names
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -99,7 +99,7 @@ _ZSH_SCRIPT = '''\
 
 _passkey() {
     local commands entries
-    commands=(new list get edit delete info clone set-field run export import check audit mcp-serve init status doctor servers add claude completion)
+    commands=(new list get edit delete info clone set-field run export import check audit mcp-serve init status doctor servers add claude completion generate template share receive rotate)
 
     if (( CURRENT == 2 )); then
         entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
@@ -166,6 +166,11 @@ complete -c passkey -n '__fish_use_subcommand' -a status -d 'Show security statu
 complete -c passkey -n '__fish_use_subcommand' -a doctor -d 'Run diagnostics'
 complete -c passkey -n '__fish_use_subcommand' -a servers -d 'List MCP servers'
 complete -c passkey -n '__fish_use_subcommand' -a add -d 'Add MCP server credentials'
+complete -c passkey -n '__fish_use_subcommand' -a generate -d 'Generate a random secret'
+complete -c passkey -n '__fish_use_subcommand' -a template -d 'Manage credential templates'
+complete -c passkey -n '__fish_use_subcommand' -a share -d 'Share an entry with someone'
+complete -c passkey -n '__fish_use_subcommand' -a receive -d 'Receive a shared entry'
+complete -c passkey -n '__fish_use_subcommand' -a rotate -d 'Rotate an entry value'
 complete -c passkey -n '__fish_use_subcommand' -a completion -d 'Shell completion setup'
 complete -c passkey -n '__fish_use_subcommand' -a claude -d 'Claude integration (compat)'
 

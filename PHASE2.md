@@ -1,6 +1,6 @@
 # Phase 2 Plan: passkey-mcp
 
-**Status**: Pending review
+**Status**: Approved
 **Scope**: 4 focused features — personal + team use
 **Dependencies**: Minimal (no new major deps)
 **Target**: Ship fast, iterate quickly
@@ -14,26 +14,15 @@
 
 ### What it does
 
-Generates cryptographically secure secrets directly from the CLI, with clipboard support and integration into the entry creation flow.
+Generates cryptographically secure passwords from the CLI, with clipboard support and integration into the entry creation flow.
 
 ### Commands
 
 ```
-passkey generate                          # Random password, 32 chars
-passkey generate --length 48              # Custom length
-passkey generate --type api-key           # Hex string (sk-... prefix)
-passkey generate --type uuid              # UUID v4
-passkey generate --copy                   # Copy to clipboard with auto-clear
-passkey generate --type password --length 64 --copy
+passkey generate                # Random password, 32 chars, copied to clipboard
+passkey generate --length 48    # Custom length
+passkey generate --no-copy      # Print only, don't copy
 ```
-
-### Generation types
-
-| Type | Format | Example | Use case |
-|------|--------|---------|----------|
-| `password` | Random string with guaranteed char diversity | `aB3$kL9!xM2@...` | General secrets, database passwords |
-| `api-key` | Hex string with optional prefix | `sk-a1b2c3d4e5f6...` | API tokens, service keys |
-| `uuid` | UUID v4 | `550e8400-e29b-41d4-a716-446655440000` | IDs, nonces |
 
 ### Password generation algorithm
 
@@ -57,7 +46,7 @@ Generate a secure value? [y/N]:
 
 ### Dependencies
 
-None — uses stdlib `secrets` and `uuid`.
+None — uses stdlib `secrets`.
 
 ---
 
@@ -102,9 +91,9 @@ Each template is a Python dict:
     "name": "github",
     "description": "GitHub personal access token or OAuth app",
     "fields": [
-        {"name": "GITHUB_TOKEN", "description": "Personal access token (ghp_...)", "secret": True},
+        {"name": "GITHUB_TOKEN", "description": "Personal access token (ghp_...)", "secret": True, "generate": True},
         {"name": "GITHUB_CLIENT_ID", "description": "OAuth app client ID", "secret": False},
-        {"name": "GITHUB_CLIENT_SECRET", "description": "OAuth app client secret", "secret": True},
+        {"name": "GITHUB_CLIENT_SECRET", "description": "OAuth app client secret", "secret": True, "generate": True},
     ]
 }
 ```
@@ -113,6 +102,7 @@ Each template is a Python dict:
 
 - Saved to `~/.config/passkey/templates/<name>.json`
 - Created via `passkey template add` (prompts for name, uses current entry's fields)
+- Secret values are stripped — only field names and descriptions are saved
 - Listed alongside built-in templates
 - Custom templates override built-in ones (same name wins)
 
@@ -124,9 +114,9 @@ $ passkey new
 Start from a template? [y/N]: y
 ? Select template: GitHub
 Entry name (github): my-github
-? GITHUB_TOKEN: (hidden) ****
+? GITHUB_TOKEN: (hidden) ****  [generated]
 ? GITHUB_CLIENT_ID: my-app-id
-? GITHUB_CLIENT_SECRET: (hidden) ****
+? GITHUB_CLIENT_SECRET: (hidden) ****  [generated]
 ✓ Created entry "my-github" with 3 fields
 ```
 
@@ -182,14 +172,14 @@ $ passkey receive github-alice.enc
 
 ### Passphrase generation
 
-`passkey share --generate-passphrase` produces a 4-word passphrase using `secrets.choice` from a curated wordlist (eff_large_wordlist or similar — ~7776 words = ~51 bits of entropy). Sufficient for sharing, easy to verbalize.
+`passkey share --generate-passphrase` produces a 4-word passphrase using `secrets.choice` from a built-in 256-word list (~32 bits of entropy). Sufficient for sharing, easy to verbalize.
 
 ### Metadata in bundles
 
-Enhanced bundle format adds optional metadata (backward-compatible):
+The bundle's encrypted payload includes optional metadata (backward-compatible):
+
 ```json
 {
-  "passkey_export_version": 1,
   "shared_by": "alice",
   "shared_at": "2026-07-27T10:30:00Z",
   "entries": [...]
@@ -198,12 +188,16 @@ Enhanced bundle format adds optional metadata (backward-compatible):
 
 Existing bundles without this metadata import normally.
 
+### Error handling
+
+`passkey share` on an entry with zero secret fields → error: "Entry 'X' has no secret fields to share."
+
 ---
 
 ## Feature 4: Secret Lifecycle + Health Dashboard
 
 **Module**: `passkey/health.py` (new)
-**Commands**: Enhanced `passkey doctor`, `passkey rotate`, `passkey audit` filters
+**Commands**: Enhanced `passkey doctor`, `passkey rotate`, `passkey audit`
 
 ### What it does
 
@@ -213,11 +207,8 @@ Gives users visibility into secret age, exposure, and health across their keycha
 
 ```
 passkey doctor --deep                      # Extended diagnostics
-passkey rotate github                      # Mark entry as rotated (opens edit)
-passkey rotate github GITHUB_TOKEN         # Mark specific field as rotated
+passkey rotate github                      # Mark entry as rotated (timestamp only)
 passkey audit --summary                    # Aggregate view
-passkey audit --operation create --since 7d  # Filter by type and time
-passkey audit --entry github               # Filter by entry name
 ```
 
 ### Rotation tracking
@@ -237,8 +228,9 @@ Add optional `last_rotated` timestamp to entry metadata:
 ```
 
 - Set automatically on `passkey new` and `passkey rotate`
-- Updated on `passkey edit` when a secret field is changed (detected via value comparison)
+- Updated on `passkey edit` when a secret field value changes (detected via value comparison)
 - Displayed in `passkey info` output
+- `format` stays at 2 — `last_rotated` is additive, old code ignores unknown fields
 
 ### `passkey doctor --deep`
 
@@ -250,7 +242,7 @@ Extends existing `passkey doctor` with:
 | Exposed secrets | MCP servers with plaintext secrets in config |
 | Bundle permissions | Check for insecure bundle files (`.enc` with group/other perms) |
 | Config health | Validate all detected MCP configs parse correctly |
-| Duplicate fields | Same field name across multiple entries (potential confusion) |
+| Duplicate fields | Same field name across multiple entries (flag only) |
 
 Output example:
 ```
@@ -274,15 +266,12 @@ Recommendations:
 
 ```
 $ passkey rotate github
-✓ Marked "github" as rotated (2026-07-27)
-  Opening editor to update secrets...
-  (opens edit loop, user updates values, saves)
-✓ Entry saved. Last rotated: 2026-07-27T14:30:00Z
+✓ Marked "github" as rotated (2026-07-27T14:30:00Z)
 ```
 
-If called without `--edit`, just updates the timestamp. With interactive mode, opens the edit loop.
+Timestamp only. Use `passkey edit` to update secret values.
 
-### `passkey audit` enhancements
+### `passkey audit --summary`
 
 ```
 passkey audit --summary
@@ -296,10 +285,6 @@ passkey audit --summary
 
   Most accessed: github (15 reads)
   Oldest entry:  aws-production (created 2026-01-15)
-
-passkey audit --operation create --since 7d --entry github
-  2026-07-27T10:00:00Z  create  github  success
-  2026-07-24T15:30:00Z  create  github  success
 ```
 
 ### Dependencies
@@ -314,10 +299,10 @@ Embedded in each feature + filling existing gaps:
 
 | Area | What to add |
 |------|-------------|
-| `passkey/generator.py` | Unit tests for all 3 types, length validation, character diversity |
+| `passkey/generator.py` | Unit tests for generation, length validation, character diversity |
 | `passkey/templates.py` | Built-in template integrity, custom template save/load, apply flow |
 | `passkey share/receive` | Passphrase generation, simplified workflow, metadata handling |
-| `passkey/health.py` | Rotation tracking, doctor --deep checks, audit filters |
+| `passkey/health.py` | Rotation tracking, doctor --deep checks, audit summary |
 | `auth.py` | Mocked tests for require_auth flow (macOS/Linux/fallback) |
 | `mcp_commands.py` | Tests for cmd_init, cmd_status, cmd_doctor, cmd_servers, cmd_add |
 | `importers.py` | Tests for import_mcp, import_chrome, import_auto, merge mode |
@@ -337,6 +322,8 @@ Embedded in each feature + filling existing gaps:
 | Team roles/permissions | Too complex for focused phase |
 | New major dependencies | Keeping footprint minimal; stdlib suffices for all 4 features |
 | Web dashboard | Out of scope — CLI-first tool |
+| API key / UUID generation types | Can be added later if needed; password covers 95% of use cases |
+| Audit filters (--since, --entry) | Can be added later; --summary is enough for v1 |
 
 ---
 

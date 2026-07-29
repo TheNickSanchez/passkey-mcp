@@ -209,5 +209,5 @@ class TestImportBundle:
         data[-5] ^= 0xFF
         bundle_path.write_bytes(bytes(data))
 
-        with pytest.raises(PasskeyError, match="wrong passphrase|corrupted"):
+        with pytest.raises(PasskeyError, match=r"wrong passphrase|corrupted"):
             import_bundle(str(bundle_path), passphrase="a-long-passphrase")

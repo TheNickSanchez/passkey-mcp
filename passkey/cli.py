@@ -8,6 +8,37 @@ from .keychain import PasskeyError
 from .mcp_server import main as mcp_main
 
 
+SUBPARSER_GROUPS = [
+    ("Entry Management", [
+        "new", "list", "get", "edit", "delete", "info", "clone", "set-field", "check", "audit",
+    ]),
+    ("Secrets", [
+        "generate", "rotate",
+    ]),
+    ("Templates", [
+        "template",
+    ]),
+    ("Share & Receive", [
+        "share", "receive",
+    ]),
+    ("Export & Import", [
+        "export", "import",
+    ]),
+    ("Run", [
+        "run",
+    ]),
+    ("MCP Integration", [
+        "init", "status", "doctor", "servers", "add",
+    ]),
+    ("Utilities", [
+        "completion", "mcp-serve",
+    ]),
+    ("Legacy", [
+        "claude",
+    ]),
+]
+
+
 def _entry_completer(**kwargs):
     """Return entry names for shell tab completion. Silent on any error."""
     try:
@@ -22,29 +53,33 @@ def create_parser() -> argparse.ArgumentParser:
     """Create and configure the argument parser."""
     parser = argparse.ArgumentParser(
         prog="passkey",
+        usage="%(prog)s [-h] [--version] <command> [<args>]",
         description="Manage secrets in system keychain with MCP integration",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  passkey new                             Create a new entry interactively
-  passkey list                            List all entry names
-  passkey get slack                       Browse and copy fields from an entry
-  passkey get slack --all                 Copy all fields to clipboard
-  passkey edit jamf                       Edit an existing entry
-  passkey delete cortex_xdr              Delete an entry
-  passkey info slack                      Show entry details and field names
-  passkey set-field cortex_xdr api_key    Upsert a field (prompts for value)
-  passkey clone slack slack_prod          Clone an entry
-  passkey run slack -- python app.py      Run app.py with slack secrets as env vars
-  passkey export backup.json              Export all entries to file
-  passkey import backup.json              Import (auto-detects format)
-  passkey init                            Migrate MCP config secrets to keychain
-  passkey init --tool vscode              Migrate VS Code MCP config specifically
-  passkey status                          Show security status across all tools
-  passkey doctor                          Run diagnostics
-  passkey servers                         List MCP servers across tools
-  passkey completion                      Shell tab completion setup
-  passkey slack                           Fuzzy-match and browse entry 'slack'
+  passkey new                               Create a new entry interactively
+  passkey list                              List all entry names
+  passkey get slack                         Browse and copy fields from an entry
+  passkey get slack --all                   Copy all fields to clipboard
+  passkey edit jamf                         Edit an existing entry
+  passkey delete cortex_xdr                Delete an entry
+  passkey info slack                        Show entry details and field names
+  passkey set-field cortex_xdr api_key      Add or update a field
+  passkey clone slack slack_prod            Clone an entry
+  passkey check github GITHUB_TOKEN         Verify entry has required fields
+  passkey generate --length 64              Generate a random secret
+  passkey run slack -- python app.py        Run app.py with slack secrets as env vars
+  passkey export backup.json                Export all entries to file
+  passkey import backup.json                Import (auto-detects format)
+  passkey share github --output gh.passkey  Share an entry via encrypted bundle
+  passkey init                              Migrate MCP config secrets to keychain
+  passkey init --tool vscode                Migrate VS Code MCP config specifically
+  passkey status                            Show security status across all tools
+  passkey doctor --deep                     Run extended diagnostics
+  passkey servers                           List MCP servers across tools
+  passkey completion --bash                 Print shell completion script
+  passkey slack                             Fuzzy-match and browse entry 'slack'
         """,
     )
 
@@ -107,7 +142,7 @@ Examples:
     )
 
     # set-field
-    set_field_parser = subparsers.add_parser("set-field", help="Upsert a field on an entry")
+    set_field_parser = subparsers.add_parser("set-field", help="Add or update a field on an entry")
     set_field_parser.add_argument("entry", metavar="ENTRY", help="Entry name")
     set_field_parser.add_argument("field", metavar="FIELD", help="Field name")
     set_field_parser.add_argument(
@@ -168,13 +203,44 @@ Examples:
     audit_parser = subparsers.add_parser("audit", help="View or clear audit log")
     audit_parser.add_argument("--limit", type=int, default=20, help="Number of entries to show")
     audit_parser.add_argument("--clear", action="store_true", help="Clear the audit log")
+    audit_parser.add_argument("--summary", action="store_true", help="Show aggregate summary")
+
+    # generate
+    generate_parser = subparsers.add_parser("generate", help="Generate a random secret")
+    generate_parser.add_argument(
+        "--length", "-l", type=int, default=32, help="Password length (default: 32)"
+    )
+    generate_parser.add_argument(
+        "--no-copy", action="store_true", help="Print only, don't copy to clipboard"
+    )
+
+    # template
+    template_parser = subparsers.add_parser("template", help="Manage secret templates")
+    template_subparsers = template_parser.add_subparsers(dest="template_command")
+    template_subparsers.add_parser("list", help="List all templates")
+    template_show = template_subparsers.add_parser("show", help="Show template details")
+    template_show.add_argument("template_name", help="Template name")
+    template_apply = template_subparsers.add_parser("apply", help="Create entry from template")
+    template_apply.add_argument("template_name", help="Template name")
+    template_apply.add_argument("entry_name", nargs="?", help="Entry name (defaults to template name)")
+    template_subparsers.add_parser("add", help="Save current entry as template")
+
+    # share
+    share_parser = subparsers.add_parser("share", help="Share an entry as an encrypted bundle")
+    share_parser.add_argument("entry", nargs="?", default="", metavar="ENTRY", help="Entry to share")
+    share_parser.add_argument("--output", "-o", help="Output file path")
+    share_parser.add_argument("--from", dest="shared_by", help="Sender name")
+
+    # receive
+    receive_parser = subparsers.add_parser("receive", help="Import entries from an encrypted bundle")
+    receive_parser.add_argument("file", help="Bundle file path (.enc)")
 
     # mcp-serve
     subparsers.add_parser("mcp-serve", help="Start MCP server")
 
     # completion
     completion_parser = subparsers.add_parser(
-        "completion", help="Shell tab completion setup"
+        "completion", help="Print shell tab completion scripts"
     )
     completion_parser.add_argument(
         "--bash", action="store_true", help="Print bash completion script"
@@ -208,7 +274,8 @@ Examples:
     )
 
     # doctor
-    subparsers.add_parser("doctor", help="Run diagnostics on passkey and MCP configs")
+    doctor_parser = subparsers.add_parser("doctor", help="Run diagnostics (--deep for entry age analysis)")
+    doctor_parser.add_argument("--deep", action="store_true", help="Extended diagnostics with entry age analysis")
 
     # servers (top-level, tool-agnostic)
     servers_parser = subparsers.add_parser("servers", help="List MCP servers across tools")
@@ -218,6 +285,10 @@ Examples:
     servers_parser.add_argument(
         "--json", dest="json_output", action="store_true", help="Output as JSON"
     )
+
+    # rotate
+    rotate_parser = subparsers.add_parser("rotate", help="Update last-rotated timestamp on an entry")
+    rotate_parser.add_argument("entry", nargs="?", default="", metavar="ENTRY", help="Entry name")
 
     # add (top-level)
     add_parser = subparsers.add_parser("add", help="Add credentials for an MCP server")
@@ -259,6 +330,47 @@ Examples:
     except Exception:
         pass
 
+    def _format_help():
+        """Custom help output with grouped subcommands."""
+        lines = []
+        lines.append(f"usage: {parser.prog} [-h] [--version] <command> [<args>]\n")
+        if parser.description:
+            lines.append(f"{parser.description}\n")
+        option_actions = [a for a in parser._actions if a.option_strings]
+        if option_actions:
+            lines.append("options:\n")
+            for action in option_actions:
+                opts = ", ".join(action.option_strings)
+                h = action.help or ""
+                lines.append(f"  {opts:<22}  {h}\n")
+        subparsers_action = None
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                subparsers_action = action
+                break
+        if subparsers_action:
+            help_map = {}
+            for choice in getattr(subparsers_action, '_choices_actions', ()):
+                help_map[choice.dest] = choice.help or ''
+            if not help_map:
+                for name, sub in subparsers_action._name_parser_map.items():
+                    help_map[name] = getattr(sub, 'help', '') or ''
+            lines.append("\ncommands:\n")
+            for group_name, cmd_names in SUBPARSER_GROUPS:
+                entries = []
+                for name in cmd_names:
+                    if name in subparsers_action._name_parser_map:
+                        entries.append((name, help_map.get(name, "")))
+                if entries:
+                    lines.append(f"\n  {group_name}:\n")
+                    width = max(len(n) for n, _ in entries)
+                    for name, h in entries:
+                        lines.append(f"    {name:<{width}}  {h}\n")
+        if parser.epilog:
+            lines.append(f"\n{parser.epilog.strip()}\n")
+        return "".join(lines)
+
+    parser.format_help = _format_help
     return parser
 
 
@@ -304,6 +416,11 @@ _KNOWN_COMMANDS = frozenset(
         "import",
         "check",
         "audit",
+        "generate",
+        "template",
+        "share",
+        "receive",
+        "rotate",
         "mcp-serve",
         "claude",
         "init",
@@ -425,8 +542,42 @@ def main() -> None:
         elif args.command == "audit":
             if args.clear:
                 commands.cmd_audit(clear=True)
+            elif args.summary:
+                from .health import cmd_audit_summary
+                cmd_audit_summary()
             else:
                 commands.cmd_audit(limit=args.limit)
+        elif args.command == "generate":
+            from .generator import generate_password
+
+            password = generate_password(args.length)
+            if args.no_copy:
+                print(password)
+            else:
+                from .clipboard import copy_with_autoclear
+
+                copy_with_autoclear(password, timeout_seconds=30)
+                print(f"Generated {args.length}-char password (copied to clipboard, auto-clears in 30s)")
+        elif args.command == "template":
+            handle_template_command(args)
+        elif args.command == "share":
+            _require_auth("share secrets")
+            entry = resolve_entry(args.entry, "Select entry to share")
+            from .sharing import cmd_share
+            cmd_share(
+                entry.name,
+                output_path=args.output,
+                shared_by=args.shared_by,
+            )
+        elif args.command == "receive":
+            _require_auth("import secrets")
+            from .sharing import cmd_receive
+            cmd_receive(args.file)
+        elif args.command == "rotate":
+            _require_auth("rotate secrets")
+            entry = resolve_entry(args.entry, "Select entry to rotate")
+            from .health import cmd_rotate
+            cmd_rotate(entry.name)
         elif args.command == "mcp-serve":
             mcp_main()
         elif args.command == "completion":
@@ -453,7 +604,11 @@ def main() -> None:
         elif args.command == "status":
             mcp_commands.cmd_status(tool=args.tool, json_output=args.json_output)
         elif args.command == "doctor":
-            mcp_commands.cmd_doctor()
+            if args.deep:
+                from .health import cmd_doctor_deep
+                cmd_doctor_deep()
+            else:
+                mcp_commands.cmd_doctor()
         elif args.command == "servers":
             mcp_commands.cmd_servers(tool=args.tool, json_output=args.json_output)
         elif args.command == "add":
@@ -517,6 +672,90 @@ def handle_claude_command(parser, args):
     else:
         claude_parser = parser._subparsers._group_actions[0].choices["claude"]
         claude_parser.parse_args(["claude", "--help"])
+
+
+def handle_template_command(args):
+    """Handler for the 'template' subcommands."""
+    from .templates import get_template, list_templates
+
+    if args.template_command == "list":
+        templates = list_templates()
+        if not templates:
+            print("No templates found")
+            return
+        name_w = max(len(t["name"]) for t in templates)
+        for t in templates:
+            field_count = len(t.get("fields", []))
+            print(f"  {t['name']:<{name_w}}  {field_count} field{'s' if field_count != 1 else ''}  {t.get('description', '')}")
+
+    elif args.template_command == "show":
+        template = get_template(args.template_name)
+        if not template:
+            raise PasskeyError(f"Template '{args.template_name}' not found")
+        print(f"Template: {template['name']}")
+        print(f"Description: {template.get('description', '')}")
+        print("\nFields:")
+        for field in template.get("fields", []):
+            secret_marker = " (secret)" if field.get("secret") else ""
+            generate_marker = " [generate]" if field.get("generate") else ""
+            desc = field.get("description", "")
+            print(f"  {field['name']}{secret_marker}{generate_marker}")
+            if desc:
+                print(f"    {desc}")
+
+    elif args.template_command == "apply":
+        _require_auth("create entries from template")
+        template = get_template(args.template_name)
+        if not template:
+            raise PasskeyError(f"Template '{args.template_name}' not found")
+        entry_name = args.entry_name or template["name"]
+        commands.cmd_template_apply(template, entry_name)
+
+    elif args.template_command == "add":
+        _require_auth("save template")
+        _save_entry_as_template()
+
+    else:
+        raise PasskeyError("Usage: passkey template [list|show|apply|add]")
+
+
+def _save_entry_as_template() -> None:
+    """Save an existing entry as a custom template."""
+    from .interactive import is_interactive, select_entry
+    from .templates import save_custom_template
+
+    entry = select_entry("Select entry to save as template")
+    if not entry:
+        return
+
+    if is_interactive():
+        import questionary
+        name = questionary.text("Template name:", default=entry.name).ask()
+    else:
+        name = input(f"Template name [{entry.name}]: ").strip() or entry.name
+
+    if not name:
+        raise PasskeyError("Template name cannot be empty")
+
+    description = input("Description (optional): ").strip() if not is_interactive() else ""
+    if is_interactive():
+        description = questionary.text("Description:", default="").ask() or ""
+
+    template = {
+        "name": name,
+        "description": description,
+        "fields": [
+            {
+                "name": field_name,
+                "description": "",
+                "secret": True,
+            }
+            for field_name in sorted(entry.fields.keys())
+        ],
+    }
+
+    save_custom_template(template)
+    print(f"Saved template '{name}' with {len(template['fields'])} field(s)")
 
 
 def handle_onboarding_or_help(parser):

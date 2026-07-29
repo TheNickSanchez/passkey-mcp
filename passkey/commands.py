@@ -108,6 +108,19 @@ def _entry_edit_loop(
         elif action == "add":
             field_name = questionary.text("Field name:").ask()
             if field_name:
+                from .interactive import is_interactive
+
+                if is_interactive():
+                    generate = questionary.confirm(
+                        "Generate a secure value?", default=False, style=PASSKEY_STYLE
+                    ).ask()
+                    if generate:
+                        from .generator import generate_password
+
+                        value = generate_password()
+                        fields[field_name] = value
+                        print(f"  Generated value for {field_name}")
+                        continue
                 value = getpass.getpass(f"  Value for {field_name}: ")
                 fields[field_name] = value
 
@@ -172,6 +185,33 @@ def cmd_new() -> None:
 
     all_entry_names = list_entries()
 
+    # Template integration: offer template before asking for name
+    if is_interactive():
+        from .templates import get_template, list_templates
+
+        templates = list_templates()
+        if templates:
+            use_template = questionary.confirm(
+                "Start from a template?", default=False
+            ).ask()
+            if use_template:
+                template_names = [t["name"] for t in templates]
+                template_name = questionary.select(
+                    "Select template",
+                    choices=template_names,
+                    instruction="(Type to filter)",
+                    use_jk_keys=False,
+                ).ask()
+                if template_name:
+                    template = get_template(template_name)
+                    if template:
+                        entry_name = questionary.text(
+                            "Entry name:", default=template_name
+                        ).ask()
+                        if entry_name:
+                            cmd_template_apply(template, entry_name)
+                        return
+
     if is_interactive():
         name = questionary.text("Entry name:").ask()
     else:
@@ -218,6 +258,76 @@ def cmd_new() -> None:
     entry = Entry(name=final_name, fields=fields, config=config)
     save_entry(entry, is_update=is_update)
     print(f"Saved '{final_name}' with {len(fields)} field(s)")
+
+
+def cmd_template_apply(template: dict, entry_name: str) -> None:
+    """Create an entry from a template."""
+    from .interactive import is_interactive
+    from .keychain import list_entries
+    from .keychain import save_entry as _save
+    from .models import Entry
+
+    all_names = list_entries()
+
+    # Check for existing entry
+    if entry_name in all_names:
+        if is_interactive():
+            import questionary
+            overwrite = questionary.confirm(
+                f"'{entry_name}' already exists. Overwrite?", default=False
+            ).ask()
+        else:
+            overwrite = input(f"Entry '{entry_name}' exists. Overwrite? [y/N]: ").strip().lower() == "y"
+        if not overwrite:
+            print("Cancelled")
+            return
+
+    fields: dict[str, str] = {}
+
+    if is_interactive():
+        import questionary
+
+        from .interactive import PASSKEY_STYLE
+
+        for field_def in template.get("fields", []):
+            name = field_def["name"]
+            secret = field_def.get("secret", False)
+            generate = field_def.get("generate", False)
+
+            if generate:
+                use_gen = questionary.confirm(
+                    f"Generate value for {name}?", default=True, style=PASSKEY_STYLE
+                ).ask()
+                if use_gen:
+                    from .generator import generate_password
+                    fields[name] = generate_password()
+                    print(f"  Generated value for {name}")
+                    continue
+
+            if secret:
+                value = getpass.getpass(f"  {name}: ")
+            else:
+                value = questionary.text(f"{name}:").ask() or ""
+            if value:
+                fields[name] = value
+    else:
+        print(f"Template '{template['name']}' fields:")
+        for field_def in template.get("fields", []):
+            name = field_def["name"]
+            secret = field_def.get("secret", False)
+            if secret:
+                value = getpass.getpass(f"  {name}: ")
+            else:
+                value = input(f"  {name}: ").strip()
+            if value:
+                fields[name] = value
+
+    if not fields:
+        raise PasskeyError("No fields entered, operation cancelled.")
+
+    entry = Entry(name=entry_name, fields=fields, source=f"template:{template['name']}")
+    _save(entry, is_update=entry_name in all_names)
+    print(f"Created entry '{entry_name}' from template '{template['name']}' with {len(fields)} field(s)")
 
 
 def cmd_list(names_only: bool = False) -> None:
@@ -447,6 +557,8 @@ def cmd_info(entry: Entry) -> None:
     print(f"Created: {entry.created or 'unknown'}")
     print(f"Modified: {entry.modified or 'unknown'}")
     print(f"Source: {entry.source or 'unknown'}")
+    if entry.last_rotated:
+        print(f"Last rotated: {entry.last_rotated}")
     print(f"\nFields ({len(entry.fields)}):")
     for key in sorted(entry.fields.keys()):
         print(f"  {key}")
