@@ -5,11 +5,11 @@ import secrets
 from pathlib import Path
 
 from .audit import log_operation
-from .bundle import import_bundle
+from .bundle import check_file_permissions, import_bundle
 from .keychain import PasskeyError, get_entry
 from .models import Entry
 
-# 256 curated words for passphrase generation (~32 bits of entropy with 4 words)
+# 256 curated words for passphrase generation (~64 bits of entropy with 8 words)
 _PASSPHRASE_WORDS = [
     "alpine", "anchor", "autumn", "bamboo", "basket", "beacon", "bison", "blaze",
     "breeze", "bridge", "bronze", "canyon", "cedar", "charm", "cipher", "cobalt",
@@ -47,11 +47,11 @@ _PASSPHRASE_WORDS = [
 ]
 
 
-def generate_passphrase(num_words: int = 4) -> str:
+def generate_passphrase(num_words: int = 8) -> str:
     """Generate a random passphrase from the wordlist.
 
     Args:
-        num_words: Number of words (default 4 = ~32 bits of entropy)
+        num_words: Number of words (default 8 = ~64 bits of entropy)
 
     Returns:
         Passphrase string with words joined by hyphens
@@ -180,15 +180,20 @@ def _export_filtered_bundle(
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
+    from .bundle import (
+        FORMAT_VERSION,
+        KEY_LEN,
+        MAGIC,
+        NONCE_LEN,
+        SALT_LEN,
+        SCRYPT_N,
+        SCRYPT_P,
+        SCRYPT_R,
+    )
+
     path = Path(output_path).expanduser()
     if path.exists():
         raise PasskeyError(f"File already exists: {path}")
-
-    MAGIC = b"PK01"
-    FORMAT_VERSION = 1
-    SALT_LEN = 32
-    NONCE_LEN = 12
-    KEY_LEN = 32
 
     entries_data = [entry.to_export_dict()]
 
@@ -201,7 +206,7 @@ def _export_filtered_bundle(
     salt = os.urandom(SALT_LEN)
     nonce = os.urandom(NONCE_LEN)
 
-    kdf = Scrypt(salt=salt, length=KEY_LEN, n=2**20, r=8, p=1)
+    kdf = Scrypt(salt=salt, length=KEY_LEN, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P)
     key = kdf.derive(passphrase.encode("utf-8"))
 
     aesgcm = AESGCM(key)
@@ -235,6 +240,9 @@ def cmd_receive(bundle_path: str) -> None:
     path = Path(bundle_path).expanduser()
     if not path.exists():
         raise PasskeyError(f"File not found: {path}")
+
+    # Warn if file has insecure permissions
+    check_file_permissions(path)
 
     # Read and validate bundle header
     with open(path, "rb") as f:

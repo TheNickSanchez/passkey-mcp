@@ -409,6 +409,7 @@ def backup_config(path: Path, backup_path: Path | None = None) -> Path:
     """Create a backup of an MCP config file."""
     target = backup_path or Path(str(path) + BACKUP_SUFFIX)
     shutil.copy2(path, target)
+    target.chmod(0o600)
     return target
 
 

@@ -5,6 +5,7 @@ Importantly, secret VALUES are never exposed through the MCP protocol -
 LLMs can only inject secrets via 'passkey run', never read them.
 """
 
+import re as _re
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -67,7 +68,7 @@ def passkey_fields(entry_name: str) -> list[str]:
     try:
         entry = get_entry(entry_name)
         if entry is None:
-            raise Exception(f"Entry '{entry_name}' not found")
+            raise Exception(f"Entry '{_sanitize(entry_name)}' not found")
         return list(entry.fields.keys())
     except PasskeyError as e:
         raise Exception(f"Failed to access keychain: {e}") from e
@@ -228,6 +229,37 @@ def passkey_doctor() -> dict:
     }
 
 
+def _validate_config_paths(paths: list[str]) -> list[Path]:
+    """Validate and resolve config paths, blocking system-sensitive locations.
+
+    Allows paths ending with .json or .jsonc that are not in
+    system-protected directories. Nonexistent paths are passed through
+    so the caller can produce appropriate error messages.
+    """
+    _FORBIDDEN_PREFIXES = (
+        "/etc/", "/dev/", "/proc/", "/sys/", "/bin/", "/sbin/",
+        "/usr/bin/", "/usr/sbin/", "/usr/lib/", "/lib/", "/boot/",
+        "/var/root/", "/System/",
+    )
+    resolved = []
+    for p in paths:
+        pp = Path(p).expanduser().resolve()
+        if pp.suffix not in (".json", ".jsonc"):
+            continue
+        if str(pp).startswith(_FORBIDDEN_PREFIXES):
+            continue
+        resolved.append(pp)
+    return resolved
+
+
+_SAFE_NAME = _re.compile(r"[^a-zA-Z0-9._\-\s]")
+
+
+def _sanitize(s: str) -> str:
+    """Strip characters unsafe for log/error output."""
+    return _SAFE_NAME.sub("", s)
+
+
 @mcp.tool()
 def passkey_wrap_server(
     server_name: str,
@@ -254,11 +286,11 @@ def passkey_wrap_server(
     if entry is None:
         return {
             "success": False,
-            "message": f"Passkey entry '{server_name}' not found. Use passkey new first.",
+            "message": f"Passkey entry '{_sanitize(server_name)}' not found. Use passkey new first.",
         }
 
     if config_paths:
-        paths = [Path(p).expanduser() for p in config_paths]
+        paths = _validate_config_paths(config_paths)
     else:
         paths = []
         for adapter in ADAPTERS.values():

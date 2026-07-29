@@ -1,9 +1,11 @@
 """Secret templates for common services."""
 
 import json
+import re as _re
 from pathlib import Path
 
 from .dirs import ensure_data_dir
+from .keychain import PasskeyError
 
 
 def _get_templates_dir() -> Path:
@@ -136,9 +138,16 @@ def save_custom_template(template: dict) -> None:
     custom_dir = _get_templates_dir()
     custom_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
 
+    name = template["name"]
+    if not _re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$", name):
+        raise PasskeyError(
+            f"Invalid template name '{name}'. "
+            "Must start with a letter or digit, max 64 chars."
+        )
+
     # Strip any secret values that might have been included
     cleaned = {
-        "name": template["name"],
+        "name": name,
         "description": template.get("description", ""),
         "fields": [
             {k: v for k, v in field.items() if k != "value"}

@@ -653,12 +653,9 @@ def cmd_add(
     new_fields = {}
 
     if fields:
-        for field_spec in fields:
-            if "=" not in field_spec:
-                print(f"Error: Invalid field format '{field_spec}'. Use KEY=VALUE", file=sys.stderr)
-                sys.exit(1)
-            key, value = field_spec.split("=", 1)
-            new_fields[key] = value
+        for field_name in fields:
+            value = getpass.getpass(f"  Value for {field_name}: ")
+            new_fields[field_name] = value
     else:
         print("Enter fields (leave name blank to finish):")
         print()

@@ -3,6 +3,7 @@
 import getpass
 import json
 import os
+import stat
 import struct
 import sys
 from pathlib import Path
@@ -24,6 +25,19 @@ SCRYPT_N = 2**20
 SCRYPT_R = 8
 SCRYPT_P = 1
 KEY_LEN = 32
+
+
+def check_file_permissions(path: Path) -> None:
+    """Warn if file has group/other permissions."""
+    try:
+        mode = path.stat().st_mode
+        if mode & (stat.S_IRWXG | stat.S_IRWXO):
+            print(
+                f"WARNING: '{path}' has insecure permissions ({oct(mode & 0o777)}).",
+                file=sys.stderr,
+            )
+    except Exception:
+        pass
 
 
 def _derive_key(passphrase: str, salt: bytes) -> bytes:
@@ -141,6 +155,8 @@ def import_bundle(
     path = Path(input_path).expanduser()
     if not path.exists():
         raise PasskeyError(f"File not found: {path}")
+
+    check_file_permissions(path)
 
     with open(path, "rb") as f:
         data = f.read()

@@ -58,8 +58,8 @@ def log_operation(
         # Ensure secure permissions on log file
         _ensure_secure_permissions(log_path)
     except Exception:
-        # Silently fail - don't break operations due to logging
-        pass
+        import sys as _sys
+        print(f"WARNING: audit log write failed ({log_path})", file=_sys.stderr)
 
 
 def get_recent_logs(limit: int = 50) -> list[dict]:

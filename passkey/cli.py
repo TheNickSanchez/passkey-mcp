@@ -7,7 +7,6 @@ from . import __version__, commands, importers, mcp_commands, runner
 from .keychain import PasskeyError
 from .mcp_server import main as mcp_main
 
-
 SUBPARSER_GROUPS = [
     ("Entry Management", [
         "new", "list", "get", "edit", "delete", "info", "clone", "set-field", "check", "audit",
@@ -145,9 +144,6 @@ Examples:
     set_field_parser = subparsers.add_parser("set-field", help="Add or update a field on an entry")
     set_field_parser.add_argument("entry", metavar="ENTRY", help="Entry name")
     set_field_parser.add_argument("field", metavar="FIELD", help="Field name")
-    set_field_parser.add_argument(
-        "value", nargs="?", default=None, metavar="VALUE", help="Field value (prompts if omitted)"
-    )
 
     # run
     run_parser = subparsers.add_parser("run", help="Run command with secrets as env vars")
@@ -293,7 +289,7 @@ Examples:
     # add (top-level)
     add_parser = subparsers.add_parser("add", help="Add credentials for an MCP server")
     add_parser.add_argument("server", help="Server name")
-    add_parser.add_argument("fields", nargs="*", help="KEY=VALUE pairs for non-interactive mode")
+    add_parser.add_argument("fields", nargs="*", help="Field names to set (values will be prompted)")
     add_parser.add_argument("--tool", help="Target tool config to update")
 
     # claude (backward-compat alias)
@@ -505,7 +501,7 @@ def main() -> None:
         elif args.command == "set-field":
             _require_auth("modify entries")
             entry = resolve_entry(args.entry, "Select entry to update", fuzzy=False)
-            commands.cmd_set_field(entry, args.field, args.value)
+            commands.cmd_set_field(entry, args.field, None)
         elif args.command == "run":
             _require_auth("run with secrets")
             handle_run_command(parser, args)

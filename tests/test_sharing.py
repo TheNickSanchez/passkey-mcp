@@ -8,7 +8,7 @@ class TestGeneratePassphrase:
     def test_default_length(self):
         phrase = generate_passphrase()
         words = phrase.split("-")
-        assert len(words) == 4
+        assert len(words) == 8  # default is now 8 words (~64 bits entropy)
 
     def test_custom_length(self):
         phrase = generate_passphrase(6)

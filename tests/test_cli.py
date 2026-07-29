@@ -187,14 +187,13 @@ class TestParserSubcommands:
         args = parser.parse_args(["get", "myentry", "--all"])
         assert args.get_all is True
 
-    def test_set_field_parses_three_args(self):
-        """set-field parses entry, field, and value."""
+    def test_set_field_parses_entry_and_field(self):
+        """set-field parses entry and field (value prompted separately)."""
         parser = create_parser()
-        args = parser.parse_args(["set-field", "myentry", "myfield", "myvalue"])
+        args = parser.parse_args(["set-field", "myentry", "myfield"])
         assert args.command == "set-field"
         assert args.entry == "myentry"
         assert args.field == "myfield"
-        assert args.value == "myvalue"
 
     def test_delete_parses_entry(self):
         """delete subcommand parses entry argument."""
