@@ -1,9 +1,17 @@
-"""Keychain CRUD operations for passkey entries."""
+"""Keychain CRUD operations for passkey entries.
+
+Secrets live in the OS keychain (one keychain item per entry). The entry
+*index* — the list of entry names — lives in a plain file
+(``entries.json`` in the data dir) with atomic writes, guarded by a
+PID-aware lock file. Older versions stored the index in the keychain as
+the ``__entries__`` item; it is migrated to the file on first read.
+"""
 
 import contextlib
 import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -15,7 +23,7 @@ from .dirs import ensure_data_dir, get_data_dir
 from .models import Entry
 
 SERVICE = "passkey"
-METADATA_KEY = "__entries__"
+METADATA_KEY = "__entries__"  # legacy keychain-held index (migrated to file)
 
 # --- Concurrency Lock ---
 LOCK_TIMEOUT = 10  # seconds
@@ -23,6 +31,10 @@ LOCK_TIMEOUT = 10  # seconds
 
 def _get_lock_file() -> Path:
     return get_data_dir() / "metadata.lock"
+
+
+def _get_index_path() -> Path:
+    return get_data_dir() / "entries.json"
 
 
 def _is_process_alive(pid: int) -> bool:
@@ -66,7 +78,7 @@ def _is_lock_stale() -> bool:
 
 @contextlib.contextmanager
 def _metadata_lock():
-    """Context manager for a PID-aware file lock to prevent metadata race conditions."""
+    """Context manager for a PID-aware file lock to prevent index race conditions."""
     lock_file = _get_lock_file()
     ensure_data_dir()
     start_time = time.monotonic()
@@ -134,20 +146,61 @@ def _keyring_error_message(e: Exception) -> str:
     )
 
 
-def _list_entries_nolock() -> list[str]:
-    """Get list of all stored entry names without acquiring a lock."""
+# --- Entry index (file-based, atomic writes) ---
+
+
+def _write_index_nolock(names: list[str]) -> None:
+    """Atomically write the entry index (temp file + os.replace, 0o600)."""
+    path = _get_index_path()
+    ensure_data_dir()
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=".entries-", suffix=".tmp")
     try:
-        data = keyring.get_password(SERVICE, METADATA_KEY)
-        if not data:
-            return []
-        return json.loads(data)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(names))
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
+
+
+def _migrate_legacy_index() -> list[str]:
+    """One-time migration: move the keychain-held ``__entries__`` index to a file."""
+    try:
+        legacy = keyring.get_password(SERVICE, METADATA_KEY)
     except KeyringError as e:
         raise KeychainAccessError(_keyring_error_message(e)) from e
+    if not legacy:
+        return []
+    try:
+        names = json.loads(legacy)
     except json.JSONDecodeError as e:
         raise EntryCorruptedError(
             f"Entry metadata is corrupted. Consider deleting '{METADATA_KEY}' "
             f"from Keychain Access app and re-creating entries. Error: {e}"
         ) from e
+    _write_index_nolock(names)
+    with contextlib.suppress(Exception):
+        keyring.delete_password(SERVICE, METADATA_KEY)
+    log_operation("metadata_migration", details={"count": len(names), "format": "file-index"})
+    return names
+
+
+def _read_index_nolock() -> list[str]:
+    """Read the entry index file (migrating the legacy keychain index if needed)."""
+    path = _get_index_path()
+    if not path.exists():
+        return _migrate_legacy_index()
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        raise EntryCorruptedError(
+            f"Entry index is corrupted. Fix or delete '{path}'. Error: {e}"
+        ) from e
+    if not isinstance(data, list):
+        raise EntryCorruptedError(f"Entry index is corrupted (not a list): '{path}'")
+    return data
 
 
 def list_entries() -> list[str]:
@@ -160,16 +213,16 @@ def list_entries() -> list[str]:
 
     Raises:
         KeychainAccessError: If Keychain access fails.
-        EntryCorruptedError: If metadata is corrupted.
+        EntryCorruptedError: If the entry index is corrupted.
     """
     with _metadata_lock():
-        return _list_entries_nolock()
+        return _read_index_nolock()
 
 
 def save_entry(entry: Entry, is_update: bool = False) -> None:
     """Save entry to Keychain.
 
-    Stores the entry's fields as JSON and updates the metadata
+    Stores the entry's fields as JSON and updates the file index
     to track the entry name.
 
     Args:
@@ -186,18 +239,18 @@ def save_entry(entry: Entry, is_update: bool = False) -> None:
         # Set the password for the entry itself (outside the lock)
         keyring.set_password(SERVICE, entry.name, entry.to_json())
 
-        # Now, atomically update the metadata
+        # Now, atomically update the index
         with _metadata_lock():
-            current_entries = _list_entries_nolock()
+            current_entries = _read_index_nolock()
             is_new = entry.name not in current_entries
             if is_new:
                 current_entries.append(entry.name)
                 current_entries.sort()
-                keyring.set_password(SERVICE, METADATA_KEY, json.dumps(current_entries))
+                _write_index_nolock(current_entries)
 
-        # Audit log
+        # Audit log: label by what actually happened, not the caller's hint
         log_operation(
-            operation="create" if is_new and not is_update else "update",
+            operation="create" if is_new else "update",
             entry_name=entry.name,
             details={
                 "field_count": len(entry.fields),
@@ -207,6 +260,39 @@ def save_entry(entry: Entry, is_update: bool = False) -> None:
     except KeyringError as e:
         log_operation("save", entry.name, {"error": str(e)}, success=False)
         raise KeychainAccessError(f"Failed to save '{entry.name}': {e}") from e
+
+
+def _get_entry(name: str, *, log_read: bool) -> Entry | None:
+    """Retrieve entry from Keychain by name (internal; read logging optional)."""
+    try:
+        # This operation is atomic and does not need the metadata lock
+        data = keyring.get_password(SERVICE, name)
+        if not data:
+            # Before returning None, ensure it's not a dangling entry in the index
+            with _metadata_lock():
+                entries = _read_index_nolock()
+                if name in entries:
+                    entries.remove(name)
+                    _write_index_nolock(entries)
+                    log_operation(
+                        "metadata_cleanup", name, details={"reason": "dangling entry found"}
+                    )
+            return None
+
+        entry = Entry.from_json(name, data)
+        if log_read:
+            log_operation("read", name)
+        return entry
+    except KeyringError as e:
+        if log_read:
+            log_operation("read", name, {"error": str(e)}, success=False)
+        raise KeychainAccessError(_keyring_error_message(e)) from e
+    except json.JSONDecodeError as e:
+        if log_read:
+            log_operation("read", name, {"error": "corrupted"}, success=False)
+        raise EntryCorruptedError(
+            f"Entry '{name}' is corrupted. Delete and recreate it. Error: {e}"
+        ) from e
 
 
 def get_entry(name: str) -> Entry | None:
@@ -222,32 +308,7 @@ def get_entry(name: str) -> Entry | None:
         KeychainAccessError: If Keychain access fails.
         EntryCorruptedError: If entry data is corrupted.
     """
-    try:
-        # This operation is atomic and does not need the metadata lock
-        data = keyring.get_password(SERVICE, name)
-        if not data:
-            # Before returning None, ensure it's not a dangling entry in metadata
-            with _metadata_lock():
-                entries = _list_entries_nolock()
-                if name in entries:
-                    entries.remove(name)
-                    keyring.set_password(SERVICE, METADATA_KEY, json.dumps(entries))
-                    log_operation(
-                        "metadata_cleanup", name, details={"reason": "dangling entry found"}
-                    )
-            return None
-
-        entry = Entry.from_json(name, data)
-        log_operation("read", name)
-        return entry
-    except KeyringError as e:
-        log_operation("read", name, {"error": str(e)}, success=False)
-        raise KeychainAccessError(_keyring_error_message(e)) from e
-    except json.JSONDecodeError as e:
-        log_operation("read", name, {"error": "corrupted"}, success=False)
-        raise EntryCorruptedError(
-            f"Entry '{name}' is corrupted. Delete and recreate it. Error: {e}"
-        ) from e
+    return _get_entry(name, log_read=True)
 
 
 def delete_entry(name: str) -> bool:
@@ -269,28 +330,28 @@ def delete_entry(name: str) -> bool:
         deleted = True
     except PasswordDeleteError:
         # The password to delete was not found, so it's already gone.
-        # We should still proceed to ensure metadata is clean.
+        # We should still proceed to ensure the index is clean.
         deleted = False  # It wasn't "deleted" just now
     except KeyringError as e:
         log_operation("delete", name, {"error": str(e)}, success=False)
         raise KeychainAccessError(f"Failed to delete '{name}': {e}") from e
 
-    # Update metadata atomically
+    # Update the index atomically
     try:
         with _metadata_lock():
-            entries = _list_entries_nolock()
+            entries = _read_index_nolock()
             if name in entries:
                 entries.remove(name)
-                keyring.set_password(SERVICE, METADATA_KEY, json.dumps(entries))
-                # If we thought it was deleted, but it wasn't in metadata, it wasn't really
+                _write_index_nolock(entries)
+                # If we thought it was deleted, but it wasn't in the index, it wasn't really
                 deleted = True
             elif deleted:
-                # We deleted a password but it wasn't in our metadata.
+                # We deleted a password but it wasn't in our index.
                 # This implies a dangling password. Log it.
                 log_operation("delete_dangling", name)
     except KeyringError as e:
         log_operation("delete", name, {"error": str(e)}, success=False)
-        raise KeychainAccessError(f"Failed to update metadata after deleting '{name}': {e}") from e
+        raise KeychainAccessError(f"Failed to update index after deleting '{name}': {e}") from e
 
     if deleted:
         log_operation("delete", name)
@@ -309,7 +370,7 @@ def rename_entry(old_name: str, new_entry: Entry) -> None:
         PasskeyError: If new_name already exists.
     """
     with _metadata_lock():
-        existing = _list_entries_nolock()
+        existing = _read_index_nolock()
         if new_entry.name != old_name and new_entry.name in existing:
             raise PasskeyError(f"Entry '{new_entry.name}' already exists.")
 
@@ -325,6 +386,9 @@ def rename_entry(old_name: str, new_entry: Entry) -> None:
 def get_all_entries() -> list[Entry]:
     """Get all entries with full data.
 
+    Reads every entry without logging a per-entry "read" (that made
+    ``passkey list`` spam the audit log); a single bulk read is logged.
+
     Returns:
         List of all Entry objects.
 
@@ -335,8 +399,11 @@ def get_all_entries() -> list[Entry]:
     entries = []
 
     for name in names:
-        entry = get_entry(name)
+        entry = _get_entry(name, log_read=False)
         if entry:
             entries.append(entry)
+
+    if entries:
+        log_operation("read", details={"bulk": True, "count": len(entries)})
 
     return entries

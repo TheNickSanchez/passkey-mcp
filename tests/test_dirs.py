@@ -11,6 +11,7 @@ class TestGetDataDir:
 
     def test_posix_uses_xdg_config(self, monkeypatch):
         """On POSIX, returns $XDG_CONFIG_HOME/passkey when set."""
+        monkeypatch.delenv("PASSKEY_DATA_DIR", raising=False)
         monkeypatch.setenv("XDG_CONFIG_HOME", "/custom/config")
         monkeypatch.setattr(sys, "platform", "linux")
         # Re-import after patching
@@ -23,6 +24,7 @@ class TestGetDataDir:
 
     def test_posix_defaults_to_home_config(self, monkeypatch):
         """On POSIX without XDG set, returns ~/.config/passkey."""
+        monkeypatch.delenv("PASSKEY_DATA_DIR", raising=False)
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
         monkeypatch.setattr(sys, "platform", "linux")
         import importlib
@@ -34,6 +36,7 @@ class TestGetDataDir:
 
     def test_windows_uses_appdata(self, monkeypatch, tmp_path):
         """On Windows, returns %APPDATA%/passkey."""
+        monkeypatch.delenv("PASSKEY_DATA_DIR", raising=False)
         monkeypatch.setenv("APPDATA", str(tmp_path))
         monkeypatch.setattr(sys, "platform", "win32")
         import importlib
@@ -45,6 +48,7 @@ class TestGetDataDir:
 
     def test_macos_returns_library_app_support(self, monkeypatch):
         """On macOS (darwin), returns ~/Library/Application Support/passkey."""
+        monkeypatch.delenv("PASSKEY_DATA_DIR", raising=False)
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
         monkeypatch.setattr(sys, "platform", "darwin")
         import importlib
@@ -55,11 +59,29 @@ class TestGetDataDir:
         assert result == Path.home() / "Library" / "Application Support" / "passkey"
 
 
+class TestDataDirOverride:
+    """Tests for the PASSKEY_DATA_DIR environment override."""
+
+    def test_env_override_wins(self, monkeypatch, tmp_path):
+        """PASSKEY_DATA_DIR takes precedence over platform detection."""
+        monkeypatch.setenv("PASSKEY_DATA_DIR", str(tmp_path / "custom"))
+        import passkey.dirs as dirs
+        assert dirs.get_data_dir() == tmp_path / "custom"
+
+    def test_env_override_expanduser(self, monkeypatch):
+        """Override path expands ~."""
+        monkeypatch.setenv("PASSKEY_DATA_DIR", "~/passkey-test-override")
+        import passkey.dirs as dirs
+        result = dirs.get_data_dir()
+        assert result == Path.home() / "passkey-test-override"
+
+
 class TestGetLegacyDataDir:
     """Tests for get_legacy_data_dir()."""
 
-    def test_returns_home_passkey(self):
+    def test_returns_home_passkey(self, monkeypatch):
         """Returns ~/.passkey regardless of platform."""
+        monkeypatch.undo()  # bypass conftest's get_legacy_data_dir redirect
         from passkey.dirs import get_legacy_data_dir
         result = get_legacy_data_dir()
         assert result == Path.home() / ".passkey"

@@ -8,10 +8,16 @@ from pathlib import Path
 def get_data_dir() -> Path:
     """Return the platform-appropriate data directory for passkey.
 
+    The PASSKEY_DATA_DIR environment variable overrides platform detection
+    (used by the test suite and portable setups).
+
     - macOS:   ~/Library/Application Support/passkey/
     - Linux:   $XDG_CONFIG_HOME/passkey  or  ~/.config/passkey/
     - Windows: %APPDATA%/passkey/
     """
+    override = os.environ.get("PASSKEY_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
         return base / "passkey"

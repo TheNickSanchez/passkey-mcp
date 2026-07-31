@@ -23,12 +23,9 @@ class TestRunWithSecrets:
         mock_get_entry.return_value = mock_entry
         mock_run.return_value = MagicMock(returncode=0)
 
-        with pytest.raises(SystemExit) as exc_info:
-            run_with_secrets(["test"], ["echo", "hello"])
+        rc = run_with_secrets(["test"], ["echo", "hello"])
+        assert rc == 0
 
-        assert exc_info.value.code == 0
-
-        # Verify subprocess was called with env containing both
         call_kwargs = mock_run.call_args.kwargs
         env = call_kwargs.get('env', {})
         assert env.get("TOKEN") == "secret123"
@@ -46,8 +43,8 @@ class TestRunWithSecrets:
         mock_get_entry.return_value = mock_entry
         mock_run.return_value = MagicMock(returncode=0)
 
-        with pytest.raises(SystemExit):
-            run_with_secrets(["test"], ["echo"])
+        rc = run_with_secrets(["test"], ["echo"])
+        assert rc == 0
 
         call_kwargs = mock_run.call_args.kwargs
         env = call_kwargs.get('env', {})
@@ -58,14 +55,11 @@ class TestRunWithSecrets:
     def test_backwards_compat_no_config(self, mock_get_entry, mock_run):
         """Works with entries that have no config (backwards compat)."""
         mock_entry = Entry(name="legacy", fields={"TOKEN": "abc"})
-        # Entry defaults to empty config via default_factory
         mock_get_entry.return_value = mock_entry
         mock_run.return_value = MagicMock(returncode=0)
 
-        with pytest.raises(SystemExit) as exc_info:
-            run_with_secrets(["legacy"], ["cmd"])
-
-        assert exc_info.value.code == 0
+        rc = run_with_secrets(["legacy"], ["cmd"])
+        assert rc == 0
         call_kwargs = mock_run.call_args.kwargs
         env = call_kwargs.get('env', {})
         assert env.get("TOKEN") == "abc"
@@ -87,10 +81,8 @@ class TestRunWithSecrets:
         mock_get_entry.side_effect = [entry1, entry2]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with pytest.raises(SystemExit) as exc_info:
-            run_with_secrets(["entry1", "entry2"], ["cmd"])
-
-        assert exc_info.value.code == 0
+        rc = run_with_secrets(["entry1", "entry2"], ["cmd"])
+        assert rc == 0
         call_kwargs = mock_run.call_args.kwargs
         env = call_kwargs.get('env', {})
         assert env.get("TOKEN1") == "secret1"
@@ -123,8 +115,8 @@ class TestRunWithSecrets:
         mock_get_entry.return_value = mock_entry
         mock_run.return_value = MagicMock(returncode=0)
 
-        with pytest.raises(SystemExit):
-            run_with_secrets(["test"], ["cmd"])
+        rc = run_with_secrets(["test"], ["cmd"])
+        assert rc == 0
 
         call_kwargs = mock_run.call_args.kwargs
         env = call_kwargs.get('env', {})

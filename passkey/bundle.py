@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
 from .audit import log_operation
 from .keychain import PasskeyError, get_entry, list_entries, save_entry
-from .models import Entry
+from .models import Entry, is_valid_name
 
 MAGIC = b"PK01"
 FORMAT_VERSION = 1
@@ -27,17 +27,36 @@ SCRYPT_P = 1
 KEY_LEN = 32
 
 
-def check_file_permissions(path: Path) -> None:
-    """Warn if file has group/other permissions."""
+def check_file_permissions(
+    path: Path, allow_insecure: bool = False, strict: bool = False
+) -> None:
+    """Check that a file has no group/other permissions.
+
+    Default (strict=False): warn only. With strict=True, raise PasskeyError
+    for insecure files unless allow_insecure is set (the --insecure flag).
+
+    This is the single implementation used by bundles, exports, and
+    importers alike.
+    """
     try:
         mode = path.stat().st_mode
-        if mode & (stat.S_IRWXG | stat.S_IRWXO):
-            print(
-                f"WARNING: '{path}' has insecure permissions ({oct(mode & 0o777)}).",
-                file=sys.stderr,
-            )
     except Exception:
-        pass
+        return
+    if not mode & (stat.S_IRWXG | stat.S_IRWXO):
+        return
+    if strict and not allow_insecure:
+        raise PasskeyError(
+            f"'{path}' has insecure permissions ({oct(mode & 0o777)}).\n"
+            "  This file may be readable by other users on this system.\n"
+            f"  Fix with: chmod 600 '{path}'\n"
+            "  Or use --insecure to import anyway."
+        )
+    print(
+        f"WARNING: '{path}' has insecure permissions ({oct(mode & 0o777)}).",
+        file=sys.stderr,
+    )
+    if strict and allow_insecure:
+        print("  Proceeding anyway due to --insecure flag.\n", file=sys.stderr)
 
 
 def _derive_key(passphrase: str, salt: bytes) -> bytes:
@@ -136,7 +155,6 @@ def import_bundle(
     input_path: str,
     passphrase: str | None = None,
     mode: str = "skip",
-    setup_claude: bool = False,
 ) -> dict:
     """Import entries from an encrypted bundle file.
 
@@ -144,7 +162,6 @@ def import_bundle(
         input_path: Path to encrypted bundle
         passphrase: Decryption passphrase (prompted if None)
         mode: How to handle existing entries (skip, overwrite, merge)
-        setup_claude: If True, also rewrite Claude MCP config
 
     Returns:
         Dict with import results: created, updated, skipped counts
@@ -213,6 +230,11 @@ def import_bundle(
             skipped += 1
             continue
 
+        if not is_valid_name(name):
+            print(f"  {name}: skipped (invalid entry name)", file=sys.stderr)
+            skipped += 1
+            continue
+
         existing = get_entry(name)
 
         if existing and mode == "skip":
@@ -247,42 +269,8 @@ def import_bundle(
         else:
             created += 1
 
-    if setup_claude:
-        _setup_claude_config(entries)
-
     log_operation(
         "bundle_import", details={"created": created, "updated": updated, "skipped": skipped}
     )
 
     return {"created": created, "updated": updated, "skipped": skipped}
-
-
-def _setup_claude_config(entries: list[dict]) -> None:
-    """Rewrite Claude MCP config to use passkey wrapper for imported entries."""
-    try:
-        from .claude import (
-            backup_claude_config,
-            get_mcp_servers,
-            is_passkey_wrapped,
-            load_claude_config,
-            rewrite_server_for_passkey,
-            save_claude_config,
-        )
-
-        config = load_claude_config()
-        servers = get_mcp_servers(config)
-        updated = 0
-
-        for entry_data in entries:
-            name = entry_data.get("name")
-            if name and name in servers and not is_passkey_wrapped(servers[name]):
-                config["mcpServers"][name] = rewrite_server_for_passkey(name, servers[name])
-                updated += 1
-
-        if updated:
-            backup_claude_config()
-            save_claude_config(config)
-            print(f"\n  Updated Claude config for {updated} server(s)")
-            print("  Restart Claude Code to apply changes.")
-    except Exception as e:
-        print(f"\n  Warning: Could not update Claude config: {e}", file=sys.stderr)

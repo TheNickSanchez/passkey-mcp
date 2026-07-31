@@ -15,7 +15,6 @@ from .mcp_config import (
     ADAPTERS,
     MCPConfigError,
     find_adapter_for_path,
-    find_passkey_command,
     get_mcp_servers,
     get_server_security_status,
     is_passkey_wrapped,
@@ -44,10 +43,6 @@ def passkey_list() -> list[str]:
         raise Exception(f"Failed to access keychain: {e}") from e
 
 
-# Backward-compat alias
-passkey_list_entries = passkey_list
-
-
 @mcp.tool()
 def passkey_fields(entry_name: str) -> list[str]:
     """List field names in a passkey entry (without revealing values).
@@ -74,10 +69,6 @@ def passkey_fields(entry_name: str) -> list[str]:
         raise Exception(f"Failed to access keychain: {e}") from e
 
 
-# Backward-compat alias
-passkey_get_entry_fields = passkey_fields
-
-
 @mcp.tool()
 def passkey_status() -> dict:
     """Show security status of MCP servers across all detected tools.
@@ -93,6 +84,12 @@ def passkey_status() -> dict:
     results = []
     summary = {"secured": 0, "exposed": 0, "partial": 0, "no_secrets": 0}
 
+    # Fetch entry names once, not per config
+    try:
+        passkey_entries = list_entries()
+    except PasskeyError:
+        passkey_entries = []
+
     for adapter_name, adapter in ADAPTERS.items():
         for config_path in adapter.get_all_existing_paths():
             try:
@@ -103,11 +100,6 @@ def passkey_status() -> dict:
             servers = get_mcp_servers(config, adapter)
             if not servers:
                 continue
-
-            try:
-                passkey_entries = list_entries()
-            except PasskeyError:
-                passkey_entries = []
 
             for name, server_config in servers.items():
                 status = get_server_security_status(name, server_config, passkey_entries, adapter)
@@ -124,7 +116,7 @@ def passkey_status() -> dict:
 
 
 @mcp.tool()
-def passkey_doctor() -> dict:
+def passkey_doctor(deep: bool = False) -> dict:
     """Run diagnostics on passkey and MCP configurations.
 
     Checks for common issues including:
@@ -133,100 +125,17 @@ def passkey_doctor() -> dict:
     - Keychain access permissions
     - MCP servers with missing passkey entries
     - MCP servers with exposed secrets
+    - (deep=True) entry age analysis and bundle file permissions
+
+    Args:
+        deep: Include extended checks (entry age, bundle permissions)
 
     Returns:
         Dictionary with diagnostic results
     """
-    checks = []
-    issues = []
-    recommendations = []
+    from .doctor import run_diagnostics
 
-    # Check 1: Passkey in PATH
-    passkey_path = find_passkey_command()
-    if passkey_path:
-        checks.append(
-            {
-                "name": "passkey_in_path",
-                "status": "pass",
-                "message": f"Passkey found at {passkey_path}",
-            }
-        )
-    else:
-        checks.append(
-            {"name": "passkey_in_path", "status": "fail", "message": "Passkey not found in PATH"}
-        )
-        issues.append("Passkey command not in PATH")
-        recommendations.append("Install passkey: pip install passkey-mcp")
-
-    # Check 2: Keychain access
-    try:
-        pk_entries = list_entries()
-        checks.append(
-            {
-                "name": "keychain_access",
-                "status": "pass",
-                "message": f"Keychain accessible ({len(pk_entries)} entries)",
-            }
-        )
-    except PasskeyError as e:
-        checks.append(
-            {"name": "keychain_access", "status": "fail", "message": f"Keychain access failed: {e}"}
-        )
-        issues.append("Cannot access system keychain")
-
-    # Check 3: Each tool's config
-    for adapter_name, adapter in ADAPTERS.items():
-        for config_path in adapter.get_all_existing_paths():
-            try:
-                config = load_config(config_path)
-                servers = get_mcp_servers(config, adapter)
-                checks.append(
-                    {
-                        "name": f"{adapter_name}_config",
-                        "status": "pass",
-                        "message": f"{adapter.display_name} config found ({len(servers)} servers)",
-                    }
-                )
-
-                for name, server_config in servers.items():
-                    status = get_server_security_status(name, server_config, pk_entries, adapter)
-                    if status["status"] == "broken":
-                        issues.append(
-                            f"Missing passkey entry for server '{name}' in {adapter.display_name}"
-                        )
-                        recommendations.append(
-                            f"Run 'passkey init --tool {adapter_name}' to secure"
-                        )
-                    elif status["status"] == "exposed":
-                        issues.append(
-                            f"Server '{name}' has exposed secrets in {adapter.display_name}: "
-                            f"{', '.join(status['exposed_secrets'])}"
-                        )
-                        recommendations.append(
-                            f"Run 'passkey init --tool {adapter_name}' to secure"
-                        )
-
-            except (FileNotFoundError, MCPConfigError) as e:
-                checks.append(
-                    {
-                        "name": f"{adapter_name}_config",
-                        "status": "fail",
-                        "message": f"{adapter.display_name} config invalid: {e}",
-                    }
-                )
-                issues.append(f"{adapter.display_name} config is invalid")
-
-    summary = {
-        "passed": sum(1 for c in checks if c["status"] == "pass"),
-        "failed": sum(1 for c in checks if c["status"] == "fail"),
-    }
-
-    return {
-        "checks": checks,
-        "issues": issues,
-        "recommendations": recommendations,
-        "summary": summary,
-    }
+    return run_diagnostics(deep=deep)
 
 
 def _validate_config_paths(paths: list[str]) -> list[Path]:
@@ -339,10 +248,6 @@ def passkey_wrap_server(
         "configs_skipped": configs_skipped,
         "errors": errors,
     }
-
-
-# Backward-compat alias
-passkey_setup_server = passkey_wrap_server
 
 
 def main():

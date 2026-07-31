@@ -33,7 +33,7 @@ _passkey_completions() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    commands="new list get edit delete info clone set-field run export import check audit mcp-serve init status doctor servers add claude completion generate template share receive rotate"
+    commands="new list get edit delete info clone set-field run export import check audit mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate"
 
     # First argument: complete subcommands or entry names
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -99,7 +99,7 @@ _ZSH_SCRIPT = '''\
 
 _passkey() {
     local commands entries
-    commands=(new list get edit delete info clone set-field run export import check audit mcp-serve init status doctor servers add claude completion generate template share receive rotate)
+    commands=(new list get edit delete info clone set-field run export import check audit mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate)
 
     if (( CURRENT == 2 )); then
         entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
@@ -162,6 +162,8 @@ complete -c passkey -n '__fish_use_subcommand' -a import -d 'Import entries'
 complete -c passkey -n '__fish_use_subcommand' -a check -d 'Verify entry fields'
 complete -c passkey -n '__fish_use_subcommand' -a audit -d 'View audit log'
 complete -c passkey -n '__fish_use_subcommand' -a init -d 'Migrate MCP config'
+complete -c passkey -n '__fish_use_subcommand' -a unwrap -d 'Restore inline MCP configs'
+complete -c passkey -n '__fish_use_subcommand' -a config -d 'Show or update settings'
 complete -c passkey -n '__fish_use_subcommand' -a status -d 'Show security status'
 complete -c passkey -n '__fish_use_subcommand' -a doctor -d 'Run diagnostics'
 complete -c passkey -n '__fish_use_subcommand' -a servers -d 'List MCP servers'
@@ -172,7 +174,6 @@ complete -c passkey -n '__fish_use_subcommand' -a share -d 'Share an entry with 
 complete -c passkey -n '__fish_use_subcommand' -a receive -d 'Receive a shared entry'
 complete -c passkey -n '__fish_use_subcommand' -a rotate -d 'Rotate an entry value'
 complete -c passkey -n '__fish_use_subcommand' -a completion -d 'Shell completion setup'
-complete -c passkey -n '__fish_use_subcommand' -a claude -d 'Claude integration (compat)'
 
 # Entry completions for subcommands that take entry names
 complete -c passkey -n '__fish_seen_subcommand_from get edit delete info set-field check' -a '(__passkey_entries)' -d 'Entry'
@@ -200,9 +201,10 @@ def print_completion(shell: str) -> None:
         "fish": _FISH_SCRIPT,
     }
     if shell not in scripts:
-        print(f"Unknown shell: {shell}", file=sys.stderr)
-        print(f"Supported: {', '.join(scripts.keys())}", file=sys.stderr)
-        sys.exit(1)
+        from .keychain import PasskeyError
+        raise PasskeyError(
+            f"Unknown shell: '{shell}'. Supported: {', '.join(sorted(scripts.keys()))}"
+        )
     print(scripts[shell], end="")
 
 

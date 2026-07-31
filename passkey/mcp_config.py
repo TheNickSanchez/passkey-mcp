@@ -333,18 +333,53 @@ ADAPTERS: dict[str, ToolAdapter] = {
     ),
 }
 
-# Backward compat aliases
-DEFAULT_CONFIG_PATHS = {
-    name: adapter.get_global_path()
-    for name, adapter in ADAPTERS.items()
-    if adapter.get_global_path()
-}
-CLAUDE_CONFIG_PATH = ADAPTERS["claude"].get_global_path()
-
-
 # ---------------------------------------------------------------------------
 # Config file I/O
 # ---------------------------------------------------------------------------
+
+
+def _strip_jsonc_comments(content: str) -> str:
+    """Remove // and /* */ comments without touching string literals.
+
+    A regex cannot tell `// comment` apart from `"https://…"`; this small
+    state machine tracks whether we are inside a JSON string.
+    """
+    out = []
+    i = 0
+    n = len(content)
+    in_string = False
+    while i < n:
+        ch = content[i]
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:  # keep escape sequences intact
+                out.append(content[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n:
+            nxt = content[i + 1]
+            if nxt == "/":
+                while i < n and content[i] != "\n":
+                    i += 1
+                continue
+            if nxt == "*":
+                i += 2
+                while i + 1 < n and not (content[i] == "*" and content[i + 1] == "/"):
+                    i += 1
+                i += 2
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def load_config(path: Path) -> dict:
@@ -371,16 +406,10 @@ def load_config(path: Path) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # Try stripping comments (JSONC support for OpenCode, etc.)
+    # Try stripping comments (JSONC support for OpenCode, Zed, etc.)
     try:
-        import re
-
-        # Remove single-line // comments (but not inside strings)
-        cleaned = re.sub(r'(?<!["\w])//.*$', "", content, flags=re.MULTILINE)
-        # Remove multi-line /* */ comments
-        cleaned = re.sub(r"/\*.*?\*/", "", cleaned, flags=re.DOTALL)
-        return json.loads(cleaned)
-    except (json.JSONDecodeError, ImportError) as e:
+        return json.loads(_strip_jsonc_comments(content))
+    except json.JSONDecodeError as e:
         raise MCPConfigError(f"Invalid JSON in {path}: {e}") from e
 
 
@@ -495,16 +524,78 @@ def rewrite_server_for_passkey(
 
 
 def get_original_command(server_config: dict) -> tuple[str, list[str]]:
-    """Extract the original command from a passkey-wrapped config."""
-    args = server_config.get("args", [])
+    """Extract the original command from a passkey-wrapped config.
 
+    Handles standard form (command="passkey", args=["run", NAME, "--", cmd,
+    ...]) and array form (command=["passkey", "run", NAME, "--", cmd, ...]
+    with original args preserved in "args").
+    """
+    args = list(server_config.get("args", []))
+
+    # Standard form: original command + args live after "--" in args.
     if "--" in args:
         sep_idx = args.index("--")
         original_cmd = args[sep_idx + 1] if len(args) > sep_idx + 1 else ""
         original_args = args[sep_idx + 2 :] if len(args) > sep_idx + 2 else []
         return original_cmd, original_args
 
+    # Array form (OpenCode style): original command lives after "--" in the
+    # command array; original "args" were preserved separately and are NOT
+    # part of the returned tuple.
+    command = server_config.get("command", "")
+    if isinstance(command, list) and "--" in command:
+        sep_idx = command.index("--")
+        tail = command[sep_idx + 1 :]
+        original_cmd = tail[0] if tail else ""
+        return original_cmd, tail[1:]
+
     return "", []
+
+
+def restore_server_from_passkey(
+    server_config: dict,
+    adapter: ToolAdapter,
+    secrets: dict | None = None,
+) -> dict:
+    """Rebuild an inline server config from its passkey-wrapped form.
+
+    The inverse of rewrite_server_for_passkey: restores the original
+    command/args and carries over env vars. Secret values are only written
+    back when explicitly passed via the secrets argument.
+
+    Args:
+        server_config: The passkey-wrapped server config
+        adapter: Tool adapter (controls command shape and env key)
+        secrets: Optional secret fields to restore into env
+
+    Returns:
+        Restored inline server config
+    """
+    new_config = {}
+
+    if "type" in server_config:
+        new_config["type"] = server_config["type"]
+
+    original_cmd, original_args = get_original_command(server_config)
+
+    if adapter.command_is_array:
+        # Rebuild the original command array; original "args" were kept
+        # separate by the wrap and are carried over unchanged.
+        new_config["command"] = [original_cmd, *original_args] if original_cmd else []
+        preserved_args = server_config.get("args", [])
+        if preserved_args:
+            new_config["args"] = list(preserved_args)
+    else:
+        new_config["command"] = original_cmd
+        if original_args:
+            new_config["args"] = original_args
+
+    env = dict(get_env_from_server(server_config, adapter))
+    if secrets:
+        env.update(secrets)
+    set_env_on_server(new_config, adapter, env)
+
+    return new_config
 
 
 def get_server_security_status(

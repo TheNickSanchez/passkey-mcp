@@ -18,7 +18,6 @@ from .mcp_config import (
     ToolAdapter,
     backup_config,
     extract_secrets,
-    find_passkey_command,
     get_env_from_server,
     get_mcp_servers,
     get_server_security_status,
@@ -41,15 +40,15 @@ def _resolve_adapter(tool: str | None = None) -> ToolAdapter:
         The matching ToolAdapter
 
     Raises:
-        SystemExit: If tool name is invalid
+        PasskeyError: If tool name is invalid or no configs found
     """
     if tool and tool in ADAPTERS:
         return ADAPTERS[tool]
 
     if tool and tool not in ADAPTERS:
-        print(f"Error: Unknown tool '{tool}'", file=sys.stderr)
-        print(f"Supported tools: {', '.join(sorted(ADAPTERS.keys()))}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(
+            f"Unknown tool '{tool}'. Supported tools: {', '.join(sorted(ADAPTERS.keys()))}"
+        )
 
     # No tool specified — find existing configs and prompt
     from .mcp_config import get_all_config_paths
@@ -57,8 +56,7 @@ def _resolve_adapter(tool: str | None = None) -> ToolAdapter:
     existing = get_all_config_paths()
 
     if not existing:
-        print("No MCP config files found.", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError("No MCP config files found.")
 
     if len(existing) == 1:
         tool_name, _ = existing[0]
@@ -81,11 +79,10 @@ def _resolve_adapter(tool: str | None = None) -> ToolAdapter:
         idx = int(choice) - 1
         if 0 <= idx < len(choices):
             return choices[idx][1]
-    except (ValueError, IndexError):
+    except (ValueError, IndexError, KeyboardInterrupt, EOFError):
         pass
 
-    print("Invalid selection.", file=sys.stderr)
-    sys.exit(1)
+    raise PasskeyError("Invalid selection.")
 
 
 # ---------------------------------------------------------------------------
@@ -114,20 +111,16 @@ def cmd_init(
     else:
         path = adapter.get_global_path()
         if not path:
-            print(
-                f"Error: No config path for {adapter.display_name} on this platform.",
-                file=sys.stderr,
+            raise PasskeyError(
+                f"No config path for {adapter.display_name} on this platform."
             )
-            sys.exit(1)
 
     try:
         config = load_config(path)
     except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(str(e)) from e
     except MCPConfigError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(str(e)) from e
 
     servers = get_mcp_servers(config, adapter)
     if not servers:
@@ -207,8 +200,7 @@ def cmd_init(
         actual_backup = backup_config(path, backup_target)
         print(f"Backup created: {actual_backup}")
     except Exception as e:
-        print(f"Error creating backup: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"Error creating backup: {e}") from e
 
     # Migrate each server
     print()
@@ -250,8 +242,7 @@ def cmd_init(
         set_mcp_servers(config, adapter, servers)
         save_config(config, path)
     except Exception as e:
-        print(f"Error saving config: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"Error saving config: {e}") from e
 
     print()
     print(f"Done! {created} created, {updated} updated, {skipped} skipped")
@@ -261,6 +252,7 @@ def cmd_init(
     print()
     print(f"Restart {adapter.display_name} to apply changes.")
     print(f"Run 'passkey status --tool {adapter.name}' to verify.")
+    print(f"Changed your mind? 'passkey unwrap --tool {adapter.name}' restores the backup-era config.")
 
     log_operation(
         f"{adapter.name}-init",
@@ -289,8 +281,9 @@ def cmd_status(
 
     if tool:
         if tool not in ADAPTERS:
-            print(f"Error: Unknown tool '{tool}'", file=sys.stderr)
-            sys.exit(1)
+            raise PasskeyError(
+                f"Unknown tool '{tool}'. Supported tools: {', '.join(sorted(ADAPTERS.keys()))}"
+            )
         adapters_to_check = [ADAPTERS[tool]]
     else:
         # Check all tools that have configs
@@ -305,8 +298,7 @@ def cmd_status(
     try:
         passkey_entries = list_entries()
     except PasskeyError as e:
-        print(f"Error accessing keychain: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(str(e)) from e
 
     # Get entry field counts
     entry_field_counts = {}
@@ -347,7 +339,6 @@ def cmd_status(
                 secured = sum(1 for r in tool_results if r["status"] == "secured")
                 partial = sum(1 for r in tool_results if r["status"] == "partial")
                 exposed = sum(1 for r in tool_results if r["status"] == "exposed")
-                len(tool_results)
 
                 print(f"\n{adapter.display_name} — {config_path}")
                 print("-" * 50)
@@ -407,84 +398,27 @@ def cmd_status(
 # ---------------------------------------------------------------------------
 
 
-def cmd_doctor() -> None:
-    """Run diagnostics across all detected MCP tool configs."""
-    print("Passkey Doctor")
+def cmd_doctor(deep: bool = False) -> None:
+    """Run diagnostics across all detected MCP tool configs.
+
+    Thin CLI printer over doctor.run_diagnostics — the single
+    implementation shared with the passkey_doctor MCP tool.
+    """
+    from .doctor import run_diagnostics
+
+    print("Passkey Doctor" + (" (deep)" if deep else ""))
     print("=" * 35)
     print()
 
-    checks = []
-    issues = []
-    recommendations = []
+    result = run_diagnostics(deep=deep)
+    checks = result["checks"]
+    issues = result["issues"]
+    recommendations = result["recommendations"]
 
-    # Check 1: Passkey in PATH
-    passkey_path = find_passkey_command()
-    if passkey_path:
-        checks.append(("passkey_in_path", "pass", f"Passkey found at {passkey_path}"))
-    else:
-        checks.append(("passkey_in_path", "fail", "Passkey not found in PATH"))
-        issues.append("Passkey command not in PATH")
-        recommendations.append("Install passkey: pip install passkey-mcp")
-
-    # Check 2: Keychain access
-    try:
-        entries = list_entries()
-        checks.append(("keychain_access", "pass", f"Keychain accessible ({len(entries)} entries)"))
-    except PasskeyError as e:
-        checks.append(("keychain_access", "fail", f"Keychain access failed: {e}"))
-        issues.append("Cannot access system keychain")
-        recommendations.append("Check system keychain access permissions")
-
-    # Check 3: Each tool's config
-    for adapter in ADAPTERS.values():
-        config_paths = adapter.get_all_existing_paths()
-        if not config_paths:
-            continue
-
-        for config_path in config_paths:
-            try:
-                config = load_config(config_path)
-                servers = get_mcp_servers(config, adapter)
-                checks.append(
-                    (
-                        f"{adapter.name}_config",
-                        "pass",
-                        f"{adapter.display_name} config found ({len(servers)} servers)",
-                    )
-                )
-
-                for name, server_config in servers.items():
-                    status = get_server_security_status(name, server_config, entries, adapter)
-                    if status["status"] == "broken":
-                        issues.append(
-                            f"Missing passkey entry for server '{name}' in {adapter.display_name}"
-                        )
-                        recommendations.append(
-                            f"Run 'passkey init --tool {adapter.name}' to secure"
-                        )
-                    elif status["status"] == "exposed":
-                        issues.append(
-                            f"Server '{name}' has exposed secrets in {adapter.display_name}: "
-                            f"{', '.join(status['exposed_secrets'])}"
-                        )
-                        recommendations.append(
-                            f"Run 'passkey init --tool {adapter.name}' to secure"
-                        )
-
-            except MCPConfigError as e:
-                checks.append(
-                    (
-                        f"{adapter.name}_config",
-                        "fail",
-                        f"{adapter.display_name} config invalid: {e}",
-                    )
-                )
-                issues.append(f"{adapter.display_name} config is invalid")
-
-    # Print results
-    for _name, status, message in checks:
-        symbol = "\u2713" if status == "pass" else "\u2717"
-        print(f"  [{symbol}] {message}")
+    symbols = {"pass": "\u2713", "warn": "\u26a0", "fail": "\u2717"}
+    for check in checks:
+        symbol = symbols.get(check["status"], "?")
+        print(f"  [{symbol}] {check['message']}")
 
     if issues:
         print()
@@ -499,7 +433,9 @@ def cmd_doctor() -> None:
         print()
         print("All checks passed!")
 
-    log_operation("doctor", details={"checks": len(checks), "issues": len(issues)})
+    log_operation(
+        "doctor", details={"checks": len(checks), "issues": len(issues), "deep": deep}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -516,8 +452,9 @@ def cmd_servers(
 
     if tool:
         if tool not in ADAPTERS:
-            print(f"Error: Unknown tool '{tool}'", file=sys.stderr)
-            sys.exit(1)
+            raise PasskeyError(
+                f"Unknown tool '{tool}'. Supported tools: {', '.join(sorted(ADAPTERS.keys()))}"
+            )
         adapters_to_check = [ADAPTERS[tool]]
     else:
         for adapter in ADAPTERS.values():
@@ -595,6 +532,147 @@ def cmd_servers(
 
 
 # ---------------------------------------------------------------------------
+# unwrap — restore passkey-wrapped configs to inline commands
+# ---------------------------------------------------------------------------
+
+
+def cmd_unwrap(
+    tool: str | None = None,
+    server: str | None = None,
+    config_path: str | None = None,
+    restore_secrets: bool = False,
+    dry_run: bool = False,
+) -> None:
+    """Restore passkey-wrapped MCP server configs back to inline commands.
+
+    This is the way out of the one-way door: it reverses what
+    ``passkey init`` (and passkey_wrap_server) did. By default only the
+    command structure is restored — secret values stay in the keychain and
+    are NOT written back unless --restore-secrets is given.
+    """
+    from .mcp_config import restore_server_from_passkey
+
+    # Resolve which (adapter, path) pairs to operate on
+    targets: list[tuple[ToolAdapter, Path]] = []
+    if config_path:
+        path = Path(config_path).expanduser()
+        adapter = None
+        if tool:
+            if tool not in ADAPTERS:
+                raise PasskeyError(
+                    f"Unknown tool '{tool}'. Supported tools: {', '.join(sorted(ADAPTERS.keys()))}"
+                )
+            adapter = ADAPTERS[tool]
+        else:
+            from .mcp_config import find_adapter_for_path
+
+            adapter = find_adapter_for_path(path)
+            if not adapter:
+                raise PasskeyError(
+                    f"'{path}' is not a known MCP config location. "
+                    "Use --tool to specify the tool (e.g. --tool claude)."
+                )
+        targets.append((adapter, path))
+    elif tool:
+        if tool not in ADAPTERS:
+            raise PasskeyError(
+                f"Unknown tool '{tool}'. Supported tools: {', '.join(sorted(ADAPTERS.keys()))}"
+            )
+        adapter = ADAPTERS[tool]
+        for path in adapter.get_all_existing_paths():
+            targets.append((adapter, path))
+        if not targets:
+            print(f"No config files found for {adapter.display_name}.")
+            return
+    else:
+        for adapter in ADAPTERS.values():
+            for path in adapter.get_all_existing_paths():
+                targets.append((adapter, path))
+        if not targets:
+            print("No MCP config files found.")
+            return
+
+    if restore_secrets:
+        print("WARNING: --restore-secrets writes secret values back into")
+        print("plaintext config files. This reverses passkey's protection.")
+        print()
+
+    unwrapped_total = 0
+
+    for adapter, path in targets:
+        try:
+            config = load_config(path)
+        except (FileNotFoundError, MCPConfigError) as e:
+            print(f"Error loading {path}: {e}", file=sys.stderr)
+            continue
+
+        servers = get_mcp_servers(config, adapter)
+        to_restore = {}
+        for name, server_config in servers.items():
+            if server and name != server:
+                continue
+            if is_passkey_wrapped(server_config):
+                to_restore[name] = server_config
+
+        if not to_restore:
+            if server:
+                print(f"{adapter.display_name}: server '{server}' is not passkey-wrapped here.")
+            continue
+
+        print(f"{adapter.display_name} — {path}")
+
+        secrets_by_name: dict[str, dict] = {}
+        if restore_secrets:
+            for name in to_restore:
+                entry = get_entry(name)
+                if entry:
+                    secrets_by_name[name] = dict(entry.fields)
+                else:
+                    print(
+                        f"  Warning: no passkey entry '{name}' found; "
+                        "secrets cannot be restored for it.",
+                        file=sys.stderr,
+                    )
+
+        for name, server_config in to_restore.items():
+            restored = restore_server_from_passkey(
+                server_config, adapter, secrets=secrets_by_name.get(name)
+            )
+            secret_note = ""
+            if restore_secrets:
+                count = len(secrets_by_name.get(name, {}))
+                secret_note = f" (+{count} secret(s) restored to config)"
+            print(f"  {name}: unwrapped{secret_note}")
+            servers[name] = restored
+
+        if dry_run:
+            print("  [dry run — config not written]")
+            print()
+            unwrapped_total += len(to_restore)
+            continue
+
+        try:
+            backup = backup_config(path)
+            set_mcp_servers(config, adapter, servers)
+            save_config(config, path)
+            print(f"  Backup: {backup}")
+            print()
+            unwrapped_total += len(to_restore)
+        except Exception as e:
+            print(f"  Error saving config: {e}", file=sys.stderr)
+
+    if unwrapped_total and not dry_run:
+        print(f"Unwrapped {unwrapped_total} server(s).")
+        print("Passkey entries were left in the keychain.")
+        print("Delete them with 'passkey delete <name>' if no longer needed.")
+        log_operation("unwrap", details={"count": unwrapped_total})
+    elif unwrapped_total:
+        print(f"[dry run] {unwrapped_total} server(s) would be unwrapped.")
+    else:
+        print("Nothing to unwrap.")
+
+
+# ---------------------------------------------------------------------------
 # add — add credentials for a server
 # ---------------------------------------------------------------------------
 
@@ -626,8 +704,7 @@ def cmd_add(
     try:
         existing_entry = get_entry(server)
     except PasskeyError as e:
-        print(f"Error accessing keychain: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(str(e)) from e
 
     print(f"Adding credentials for: {server}")
     if adapter:
@@ -683,8 +760,7 @@ def cmd_add(
         save_entry(entry)
         print(f"Saved {len(new_fields)} new field(s) to passkey entry '{server}'")
     except PasskeyError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(str(e)) from e
 
     # Update config if server exists and not already using passkey
     if server_config and not is_passkey_wrapped(server_config) and config and config_path:
@@ -718,20 +794,3 @@ def cmd_add(
     print(f"Restart {adapter.display_name} to apply changes.")
 
     log_operation(f"{adapter.name}-add", server, {"field_count": len(new_fields)})
-
-
-# ---------------------------------------------------------------------------
-# Backward-compat aliases for "passkey claude ..." subcommands
-# ---------------------------------------------------------------------------
-
-
-def cmd_claude_init(**kwargs) -> None:
-    """Alias for cmd_init with tool='claude'."""
-    kwargs.setdefault("tool", "claude")
-    cmd_init(**kwargs)
-
-
-def cmd_claude_status(**kwargs) -> None:
-    """Alias for cmd_status with tool='claude'."""
-    kwargs.setdefault("tool", "claude")
-    cmd_status(**kwargs)

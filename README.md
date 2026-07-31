@@ -2,7 +2,7 @@
 
 A cross-platform secrets manager for AI coding assistants and CLI tools — stores named credential sets in your system keychain and injects them as environment variables at runtime.
 
-No plaintext secrets in config files. No cloud sync. Touch ID / system auth protected.
+No plaintext secrets in config files. No cloud sync. Protected by your OS keychain's access controls (optional Touch ID / sudo prompt for terminal use).
 
 ## Features
 
@@ -18,7 +18,7 @@ No plaintext secrets in config files. No cloud sync. Touch ID / system auth prot
 - Import from Chrome password exports, existing MCP configs, or passkey backups
 - Encrypted bundle export/import for safe machine-to-machine transfer
 - Full audit logging with `passkey audit --summary`
-- **Touch ID** / system auth protection (honors your sudo PAM config)
+- **OS keychain ACL** protection, with optional **Touch ID** / sudo prompt for terminal commands (opt-in via `passkey config require-auth on`)
 - Cross-platform: macOS, Linux, Windows
 
 ## Installation
@@ -163,6 +163,10 @@ passkey init                    # Auto-detect all tools
 passkey init --tool claude      # Specific tool
 passkey init --tool vscode
 
+# Restore wrapped configs back to inline commands (the way out)
+passkey unwrap                  # Auto-detect all tools
+passkey unwrap --dry-run        # Preview first
+
 # Add or update credentials for an MCP server
 passkey add my-server                            # Interactive field entry
 passkey add my-server --tool claude              # Target a specific tool config
@@ -285,14 +289,47 @@ passkey doctor --deep
 
 ## Authentication
 
-Passkey requires OS-level authentication before any secret access. This uses your system's PAM configuration:
+The primary protection for your secrets is the **OS keychain's own access
+control** — macOS Keychain, Windows Credential Manager, and Linux Secret
+Service all gate access per application and may show their own unlock
+prompts. Passkey relies on that by default, so wrapped MCP servers can
+start headless (no terminal, no password prompt).
 
-- **macOS with Touch ID**: Touch ID prompt (if configured in `/etc/pam.d/sudo`)
-- **macOS without Touch ID**: Admin password dialog
-- **Linux**: PolicyKit dialog (GNOME/KDE) or password prompt
-- **Windows**: UAC elevation dialog
+If you want an **additional** OS-auth prompt for interactive terminal
+commands (`get`, `new`, `edit`, `export`, ...), opt in:
 
-Credentials are cached for 5 minutes (same as `sudo`).
+```bash
+passkey config require-auth on
+```
+
+The tradeoff, explicitly:
+
+- **Off (default)**: Anyone with an unlocked session as your user can read
+  secrets via `passkey` — same as any other tool reading your keychain
+  (e.g. `security find-generic-password`). MCP servers work everywhere,
+  including stock macOS with no tty.
+- **On**: Interactive commands first run `sudo -v` (macOS, Touch ID if
+  `pam_tid` is configured) or `pkexec` (Linux). This breaks any
+  non-interactive use of those commands — `passkey run` is **never**
+  gated either way, because MCP servers invoke it headless.
+- **Windows**: the setting is a no-op — UAC cannot authenticate the
+  current process, so protection comes from Credential Manager ACLs alone.
+
+## Unwrapping (leaving passkey)
+
+`passkey init` rewrites your MCP configs to the wrapped form — but it is
+not a one-way door. Restore the original inline commands with:
+
+```bash
+passkey unwrap                      # all detected tools
+passkey unwrap --tool claude        # one tool
+passkey unwrap --server github      # one server
+passkey unwrap --restore-secrets    # also write secret values back into the config
+passkey unwrap --dry-run            # preview only
+```
+
+A `.backup` of each config is written before changes (init does this too),
+so you can also restore by hand.
 
 ## MCP Config Example
 

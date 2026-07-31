@@ -7,12 +7,18 @@ import sys
 from .keychain import PasskeyError, get_entry
 
 
-def run_with_secrets(entries: list[str], command: list[str]) -> None:
+def run_with_secrets(entries: list[str], command: list[str]) -> int:
     """Run command with secrets and config from entries as environment variables.
 
     Args:
         entries: List of entry names to load
         command: Command and arguments to execute
+
+    Returns:
+        The command's exit code (the CLI layer owns sys.exit).
+
+    Raises:
+        PasskeyError: If entries cannot be loaded or the command fails to start.
 
     Note:
         If multiple entries contain the same field name,
@@ -53,7 +59,7 @@ def run_with_secrets(entries: list[str], command: list[str]) -> None:
 
     try:
         result = subprocess.run(command, env=env)
-        sys.exit(result.returncode)
+        return result.returncode
     except FileNotFoundError:
         raise PasskeyError(f"Command not found: '{command[0]}'") from None
     except OSError as e:

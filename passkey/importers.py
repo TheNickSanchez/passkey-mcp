@@ -2,39 +2,20 @@
 
 import csv
 import json
-import stat
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .audit import log_operation
 from .keychain import PasskeyError, get_entry, save_entry
-from .models import Entry
+from .models import Entry, is_valid_name
 
 
 def _check_file_permissions(path: Path, allow_insecure: bool = False) -> None:
-    """Check file permissions and refuse insecure files unless overridden."""
-    try:
-        mode = path.stat().st_mode
-        if mode & (stat.S_IRWXG | stat.S_IRWXO):
-            if allow_insecure:
-                print(
-                    f"WARNING: '{path}' has insecure permissions ({oct(mode & 0o777)}).",
-                    file=sys.stderr,
-                )
-                print("  Proceeding anyway due to --insecure flag.", file=sys.stderr)
-                print()
-            else:
-                print(
-                    f"ERROR: '{path}' has insecure permissions ({oct(mode & 0o777)}).",
-                    file=sys.stderr,
-                )
-                print("  This file may be readable by other users on this system.", file=sys.stderr)
-                print(f"  Fix with: chmod 600 '{path}'", file=sys.stderr)
-                print("  Or use --insecure to import anyway.", file=sys.stderr)
-                sys.exit(1)
-    except Exception:
-        pass
+    """Refuse insecure files unless overridden (shared impl: bundle.check_file_permissions)."""
+    from .bundle import check_file_permissions
+
+    check_file_permissions(path, allow_insecure=allow_insecure, strict=True)
 
 
 def _handle_existing(
@@ -52,6 +33,9 @@ def _handle_existing(
     Returns:
         Tuple of (was_processed, status_message)
     """
+    if not is_valid_name(name):
+        return False, "skipped (invalid entry name)"
+
     existing = get_entry(name)
 
     if not existing:
@@ -70,6 +54,7 @@ def _handle_existing(
             entry = Entry(
                 name=name,
                 fields=new_fields,
+                config=dict(existing.config),  # Preserve config
                 created=existing.created,  # Preserve original created
                 source=source,
             )
@@ -109,8 +94,7 @@ def import_passkey(
     path = Path(file_path).expanduser()
 
     if not path.exists():
-        print(f"Error: File not found: {path}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"File not found: {path}")
 
     _check_file_permissions(path, allow_insecure=allow_insecure)
 
@@ -118,12 +102,10 @@ def import_passkey(
         with open(path) as f:
             data = json.load(f)
     except json.JSONDecodeError as e:
-        print(f"Error: Invalid JSON: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"Invalid JSON: {e}") from e
 
     if "entries" not in data:
-        print("Error: Invalid passkey export file (missing 'entries')", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError("Invalid passkey export file (missing 'entries')")
 
     entries = data["entries"]
     if not entries:
@@ -183,15 +165,13 @@ def import_mcp(file_path: str, mode: str = "skip", dry_run: bool = False) -> Non
     path = Path(file_path).expanduser()
 
     if not path.exists():
-        print(f"Error: File not found: {path}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"File not found: {path}")
 
     try:
         with open(path) as f:
             config = json.load(f)
     except json.JSONDecodeError as e:
-        print(f"Error: Invalid JSON: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"Invalid JSON: {e}") from e
 
     # Find servers with env vars
     servers = config.get("mcpServers", config.get("servers", {}))
@@ -288,8 +268,7 @@ def import_chrome(
     path = Path(file_path).expanduser()
 
     if not path.exists():
-        print(f"Error: File not found: {path}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"File not found: {path}")
 
     _check_file_permissions(path, allow_insecure=allow_insecure)
 
@@ -298,8 +277,7 @@ def import_chrome(
             reader = csv.DictReader(f)
             rows = list(reader)
     except Exception as e:
-        print(f"Error reading CSV: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"Error reading CSV: {e}") from e
 
     if not rows:
         print("No entries found in CSV file.")
@@ -308,9 +286,10 @@ def import_chrome(
     # Check for expected columns
     expected = {"name", "url", "username", "password"}
     if rows and not expected.issubset(set(rows[0].keys())):
-        print(f"Error: CSV must have columns: {', '.join(expected)}", file=sys.stderr)
-        print(f"Found columns: {', '.join(rows[0].keys())}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(
+            f"CSV must have columns: {', '.join(expected)}. "
+            f"Found columns: {', '.join(rows[0].keys())}"
+        )
 
     # Group by domain/name
     to_import: dict[str, dict[str, str]] = {}
@@ -495,14 +474,12 @@ def import_auto(
     path = Path(file_path).expanduser()
 
     if not path.exists():
-        print(f"Error: File not found: {path}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"File not found: {path}")
 
     try:
         format_type = detect_format(path)
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(str(e)) from e
 
     print(f"Detected format: {format_type}\n")
 

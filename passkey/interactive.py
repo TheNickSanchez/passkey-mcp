@@ -111,40 +111,30 @@ def select_entry(
     try:
         entries = list_entries()
     except PasskeyError as e:
-        print(f"Error accessing keychain: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(str(e)) from e
 
     if not entries:
-        print("No entries found. Create one with: passkey new", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError("No entries found. Create one with: passkey new")
 
     # Pre-filter if prefix provided
     if filter_prefix:
         filtered = fuzzy_match(filter_prefix, entries)
         if len(filtered) == 1:
-            # Exact single match - return it directly
             return filtered[0]
         elif len(filtered) == 0:
-            print(f"No entries matching '{filter_prefix}'", file=sys.stderr)
-            print(f"Available entries: {', '.join(entries)}", file=sys.stderr)
-            sys.exit(1)
+            raise PasskeyError(
+                f"No entries matching '{filter_prefix}'. Available entries: {', '.join(entries)}"
+            )
         entries = filtered
 
-    # Check if we can run interactively
     if not is_interactive():
         if filter_prefix:
-            print(
-                f"Multiple entries match '{filter_prefix}': {', '.join(entries)}", file=sys.stderr
-            )
-            print(
-                "Run in a terminal for interactive selection, or specify exact name.",
-                file=sys.stderr,
+            raise PasskeyError(
+                f"Multiple entries match '{filter_prefix}': {', '.join(entries)}. "
+                "Run in a terminal for interactive selection, or specify exact name."
             )
         else:
-            print("No entry specified. Available entries:", file=sys.stderr)
-            for entry in entries:
-                print(f"  {entry}", file=sys.stderr)
-        sys.exit(1)
+            raise PasskeyError(f"No entry specified. Available entries: {', '.join(entries)}")
 
     # Build choices
     choices = entries.copy()
@@ -161,9 +151,7 @@ def select_entry(
     ).ask()
 
     if result is None and not allow_empty:
-        # User pressed Ctrl+C
-        print("\nCancelled.", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError("Cancelled.")
 
     return result
 
@@ -186,27 +174,24 @@ def select_field(
     try:
         entry = get_entry(entry_name)
     except PasskeyError as e:
-        print(f"Error accessing keychain: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(str(e)) from e
 
     if entry is None:
-        print(f"Entry '{entry_name}' not found", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"Entry '{entry_name}' not found")
 
     fields = list(entry.fields.keys())
 
     if not fields:
-        print(f"Entry '{entry_name}' has no fields", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"Entry '{entry_name}' has no fields")
 
     if len(fields) == 1:
-        # Single field - return it directly
         return fields[0]
 
     if not is_interactive():
-        print(f"Multiple fields in '{entry_name}': {', '.join(fields)}", file=sys.stderr)
-        print("Run in a terminal for interactive selection.", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(
+            f"Multiple fields in '{entry_name}': {', '.join(fields)}. "
+            "Run in a terminal for interactive selection."
+        )
 
     choices = fields.copy()
     if allow_empty:
@@ -220,8 +205,7 @@ def select_field(
     ).ask()
 
     if result is None and not allow_empty:
-        print("\nCancelled.", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError("Cancelled.")
 
     return result
 
@@ -242,18 +226,13 @@ def select_multiple_entries(
     try:
         entries = list_entries()
     except PasskeyError as e:
-        print(f"Error accessing keychain: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(str(e)) from e
 
     if not entries:
-        print("No entries found. Create one with: passkey new", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError("No entries found. Create one with: passkey new")
 
     if not is_interactive():
-        print("No entries specified. Available entries:", file=sys.stderr)
-        for entry in entries:
-            print(f"  {entry}", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"No entries specified. Available entries: {', '.join(entries)}")
 
     result = questionary.checkbox(
         prompt,
@@ -263,12 +242,10 @@ def select_multiple_entries(
     ).ask()
 
     if result is None:
-        print("\nCancelled.", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError("Cancelled.")
 
     if len(result) < min_count:
-        print(f"Please select at least {min_count} entry(ies)", file=sys.stderr)
-        sys.exit(1)
+        raise PasskeyError(f"Please select at least {min_count} entry(ies)")
 
     return result
 

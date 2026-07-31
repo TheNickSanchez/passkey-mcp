@@ -10,6 +10,7 @@ from passkey.interactive import (
     select_entry,
     select_field,
 )
+from passkey.keychain import PasskeyError
 from passkey.models import Entry
 
 
@@ -86,7 +87,7 @@ class TestSelectEntry:
     @patch('passkey.interactive.list_entries')
     def test_exits_when_no_entries(self, mock_list):
         mock_list.return_value = []
-        with pytest.raises(SystemExit):
+        with pytest.raises(PasskeyError):
             select_entry()
 
     @patch('passkey.interactive.list_entries')
@@ -98,7 +99,7 @@ class TestSelectEntry:
     @patch('passkey.interactive.list_entries')
     def test_no_fuzzy_match_exits(self, mock_list):
         mock_list.return_value = ["slack", "github"]
-        with pytest.raises(SystemExit):
+        with pytest.raises(PasskeyError):
             select_entry(filter_prefix="nonexistent")
 
     @patch('passkey.interactive.is_interactive')
@@ -106,7 +107,7 @@ class TestSelectEntry:
     def test_multiple_matches_exits_when_not_interactive(self, mock_list, mock_interactive):
         mock_list.return_value = ["jamf_api_read", "jamf_api_write", "slack"]
         mock_interactive.return_value = False
-        with pytest.raises(SystemExit):
+        with pytest.raises(PasskeyError):
             select_entry(filter_prefix="jamf")
 
 
@@ -116,7 +117,7 @@ class TestSelectField:
     @patch('passkey.interactive.get_entry')
     def test_exits_when_entry_not_found(self, mock_get):
         mock_get.return_value = None
-        with pytest.raises(SystemExit):
+        with pytest.raises(PasskeyError):
             select_field("nonexistent")
 
     @patch('passkey.interactive.get_entry')
@@ -130,5 +131,5 @@ class TestSelectField:
     def test_empty_fields_exits(self, mock_get):
         mock_entry = Entry(name="test", fields={})
         mock_get.return_value = mock_entry
-        with pytest.raises(SystemExit):
+        with pytest.raises(PasskeyError):
             select_field("test")

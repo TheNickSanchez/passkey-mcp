@@ -88,3 +88,36 @@ class TestClearLogs:
     def test_returns_true_for_missing_file(self, tmp_path):
         with patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": str(tmp_path / "missing.log")}):
             assert clear_logs() is True
+
+
+class TestRotation:
+    """P3-6: audit log is size-capped by dropping oldest lines."""
+
+    def test_oversized_log_drops_oldest_half(self, tmp_path, monkeypatch):
+        import passkey.audit as audit_mod
+
+        log_file = tmp_path / "audit.log"
+        # 10 existing records, then force the cap below their total size
+        log_file.write_text(
+            "".join(json.dumps({"operation": f"op{i}", "timestamp": "2026-01-01"}) + "\n"
+                    for i in range(10))
+        )
+        monkeypatch.setattr(audit_mod, "MAX_LOG_BYTES", 100)
+
+        with patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": str(log_file)}):
+            log_operation("new-op", "entry")
+
+        lines = log_file.read_text().strip().split("\n")
+        ops = [json.loads(line)["operation"] for line in lines]
+        # Oldest half dropped, newest kept, plus the appended record
+        assert "op0" not in ops
+        assert "op4" not in ops
+        assert "op9" in ops
+        assert "new-op" in ops
+
+    def test_small_log_untouched(self, tmp_path):
+        log_file = tmp_path / "audit.log"
+        with patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": str(log_file)}):
+            log_operation("a", "e")
+            log_operation("b", "e")
+        assert len(log_file.read_text().strip().split("\n")) == 2

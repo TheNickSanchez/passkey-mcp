@@ -9,6 +9,19 @@ ENTRY_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 RESERVED_NAMES = frozenset({"__entries__"})
 
 
+def is_valid_name(name) -> bool:
+    """Return True if name is a valid, non-reserved entry name.
+
+    Use this to validate untrusted names (imports, bundles) before
+    constructing an Entry, which raises ValueError on bad names.
+    """
+    return (
+        isinstance(name, str)
+        and name not in RESERVED_NAMES
+        and bool(ENTRY_NAME_PATTERN.match(name))
+    )
+
+
 @dataclass
 class Entry:
     """A named entry containing secret fields and config fields.

@@ -1,7 +1,8 @@
 """Tests for passkey.completion module."""
 
-import contextlib
 from unittest.mock import patch
+
+import pytest
 
 from passkey.completion import print_completion, print_setup_instructions
 
@@ -25,14 +26,11 @@ class TestPrintCompletion:
         assert "__passkey_entries" in captured.out
         assert "complete -c passkey" in captured.out
 
-    def test_unknown_shell(self, capsys):
-        import sys
-        with patch.object(sys, "exit") as mock_exit:
-            mock_exit.side_effect = SystemExit(1)
-            with contextlib.suppress(SystemExit):
-                print_completion("powershell")
-        captured = capsys.readouterr()
-        assert "Unknown shell" in captured.err
+    def test_unknown_shell(self):
+        from passkey.keychain import PasskeyError
+        with pytest.raises(PasskeyError) as exc_info:
+            print_completion("powershell")
+        assert "Unknown shell" in str(exc_info.value)
 
     def test_all_scripts_contain_new_commands(self):
         from passkey.completion import _BASH_SCRIPT, _FISH_SCRIPT, _ZSH_SCRIPT

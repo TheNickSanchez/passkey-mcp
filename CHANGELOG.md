@@ -1,6 +1,24 @@
 # Changelog
 
-## 1.2.0 (2026-07-26)
+> **Version scheme reset (2026-07-28):** a senior code review found the 1.x
+> labels were not earned (test suite cannot run to completion, auth layer
+> breaks headless MCP flows on stock macOS, no CI). Versions were re-baselined:
+> `1.0.0 → 0.0.1`, `1.1.0 → 0.1.0`, `1.2.0 → 0.2.0`. See `PLAN.md` for the
+> roadmap to a real 1.0.
+
+## 0.3.0 (2026-07-28)
+
+### Changed
+- Re-versioned to 0.x; project is pre-1.0 (see note above)
+- Deleted stale plans (`PHASE2.md`, `docs/SECURITY_AUDIT_2026.md`); superseded by `PLAN.md`
+- Rewrote `AGENTS.md` with verified, accurate workflow instructions
+
+### Known issues (documented in `PLAN.md`)
+- Test suite hangs on real `sudo` prompts and writes to the real data dir — do not trust a green run from a warm-cache machine
+- `passkey run` requires OS auth that fails headless on stock macOS, breaking passkey-wrapped MCP servers
+- JSONC config parsing corrupts URLs (`https://…`)
+
+## 0.2.0 (2026-07-26, previously "1.2.0")
 
 ### Added
 - **`passkey generate`** — cryptographically secure random secret generation
@@ -36,7 +54,7 @@
 - `passkey new` now offers generate and template options during creation
 - `passkey info` displays `Last Rotated` timestamp when available
 
-## 1.1.0 (2026-07-26)
+## 0.1.0 (2026-07-26, previously "1.1.0")
 
 ### Added
 - **Tool-agnostic MCP support** — works with Claude, Gemini, VS Code, Cursor, OpenCode, Windsurf, Cline, and Zed
@@ -78,7 +96,7 @@
 - `passkey list --names-only` outputs names only (no accidental value exposure)
 - MCP server tools never expose values through the protocol
 
-## 1.0.0 (2026-05-08)
+## 0.0.1 (2026-05-08, previously "1.0.0")
 
 ### Added
 - Encrypted bundle export/import (`passkey export --encrypt`, `passkey import --decrypt`)

@@ -1,9 +1,20 @@
 """OS-level authentication for sensitive passkey operations.
 
-Triggers native system authentication dialogs before allowing
-secret read/write operations. This ensures that even if someone
-has terminal access, they must authenticate as the system user
-before accessing secrets.
+This module is only reached when the user has explicitly opted in via
+``passkey config require-auth on``. The primary protection for secrets is
+always the OS keychain's own ACL; this is an optional extra prompt for
+interactive terminal sessions. Headless code paths (``passkey run`` from
+an MCP server) never call into this module.
+
+Platform notes:
+
+- macOS: ``sudo -v`` via the system PAM stack (Touch ID if pam_tid is
+  configured). Requires a tty; without one it simply fails closed.
+- Linux: ``pkexec`` polkit dialog, with a getpass+sudo fallback.
+- Windows: deliberately a no-op. The previous implementation used
+  ShellExecuteW "runas", which elevates a *separate* process and proves
+  nothing about the current one — security theater, dropped. Windows
+  protection comes from Credential Manager ACLs alone.
 """
 
 import subprocess
@@ -57,29 +68,19 @@ def _authenticate_linux() -> bool:
 
 
 def _authenticate_windows() -> bool:
-    """Trigger Windows UAC elevation dialog.
+    """Honest no-op on Windows.
 
-    Uses ShellExecuteW with the 'runas' verb to show the native
-    Windows User Account Control dialog.
+    There is no meaningful per-process auth oracle available to us on
+    Windows (UAC elevates a separate process, which proves nothing about
+    this one). Rather than pretend, we rely on Windows Credential Manager
+    ACLs and tell the user so.
     """
-    if sys.platform != "win32":
-        return False
-
-    try:
-        import ctypes
-
-        # Just trigger a quick UAC check by running cmd /c echo
-        ret = ctypes.windll.shell32.ShellExecuteW(
-            None,
-            "runas",
-            "cmd.exe",
-            "/c echo ok",
-            None,
-            1,  # SW_SHOWNORMAL
-        )
-        return ret > 32
-    except Exception:
-        return False
+    print(
+        "Note: OS-auth prompts are not supported on Windows; "
+        "relying on Credential Manager access controls.",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _authenticate_sudo_fallback() -> bool:

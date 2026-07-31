@@ -7,6 +7,9 @@ from pathlib import Path
 
 from .dirs import get_data_dir
 
+# When the log exceeds this size, the oldest half of the lines is dropped.
+MAX_LOG_BYTES = 1_000_000  # ~1 MB
+
 
 def get_log_path() -> Path:
     """Get the audit log path, creating directory if needed."""
@@ -14,6 +17,18 @@ def get_log_path() -> Path:
     log_path = Path(os.environ.get("PASSKEY_AUDIT_LOG", default))
     log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     return log_path
+
+
+def _rotate_if_needed(log_path: Path) -> None:
+    """Cap the log size by dropping the oldest half of the lines."""
+    try:
+        if not log_path.exists() or log_path.stat().st_size <= MAX_LOG_BYTES:
+            return
+        lines = log_path.read_text().splitlines(keepends=True)
+        keep = lines[len(lines) // 2 :]
+        log_path.write_text("".join(keep))
+    except OSError:
+        pass
 
 
 def _ensure_secure_permissions(path: Path) -> None:
@@ -39,6 +54,7 @@ def log_operation(
         success: Whether the operation succeeded
     """
     log_path = get_log_path()
+    _rotate_if_needed(log_path)
 
     record = {
         "timestamp": datetime.now().isoformat(),

@@ -51,11 +51,13 @@ class TestCheckFilePermissions:
         f.chmod(0o600)
         _check_file_permissions(f, allow_insecure=False)
 
-    def test_exits_for_insecure_file(self, tmp_path):
+    def test_raises_for_insecure_file(self, tmp_path):
+        from passkey.keychain import PasskeyError
+
         f = tmp_path / "insecure.json"
         f.write_text("{}")
         f.chmod(0o644)
-        with pytest.raises(SystemExit):
+        with pytest.raises(PasskeyError, match="insecure permissions"):
             _check_file_permissions(f, allow_insecure=False)
 
     def test_allows_insecure_with_flag(self, tmp_path, capsys):
@@ -65,6 +67,54 @@ class TestCheckFilePermissions:
         _check_file_permissions(f, allow_insecure=True)
         captured = capsys.readouterr()
         assert "insecure" in captured.err.lower()
+
+
+class TestHandleExistingModes:
+    """Direct tests for _handle_existing behavior."""
+
+    def test_overwrite_preserves_config_and_created(self):
+        """Regression: overwrite mode used to drop config."""
+        from passkey.importers import _handle_existing
+        from passkey.models import Entry
+
+        existing = Entry(
+            name="svc",
+            fields={"A": "1"},
+            config={"HOST": "example.com"},
+            created="2024-01-01T00:00:00",
+        )
+        with patch("passkey.importers.get_entry", return_value=existing), \
+             patch("passkey.importers.save_entry") as mock_save:
+            processed, status = _handle_existing("svc", {"B": "2"}, "overwrite", "import")
+
+        assert processed and status == "overwritten"
+        saved = mock_save.call_args[0][0]
+        assert saved.fields == {"B": "2"}
+        assert saved.config == {"HOST": "example.com"}
+        assert saved.created == "2024-01-01T00:00:00"
+
+    def test_invalid_name_skipped_not_raised(self):
+        """Regression: invalid names crashed the import mid-loop."""
+        from passkey.importers import _handle_existing
+
+        with patch("passkey.importers.get_entry") as mock_get, \
+             patch("passkey.importers.save_entry") as mock_save:
+            processed, status = _handle_existing("bad name!", {"A": "1"}, "skip", "import")
+
+        assert processed is False
+        assert "invalid" in status
+        mock_get.assert_not_called()
+        mock_save.assert_not_called()
+
+    def test_reserved_name_skipped(self):
+        from passkey.importers import _handle_existing
+
+        with patch("passkey.importers.save_entry") as mock_save:
+            processed, status = _handle_existing("__entries__", {"A": "1"}, "overwrite", "import")
+
+        assert processed is False
+        assert "invalid" in status
+        mock_save.assert_not_called()
 
 
 class TestImportPasskey:
@@ -116,20 +166,28 @@ class TestImportPasskey:
         import_passkey(str(f), mode="skip", allow_insecure=True)
         mock_save.assert_not_called()
 
-    def test_exits_for_missing_file(self):
-        with pytest.raises(SystemExit):
+    def test_raises_for_missing_file(self):
+        from passkey.keychain import PasskeyError
+
+        with pytest.raises(PasskeyError, match="not found"):
             import_passkey("/nonexistent/file.json")
 
-    def test_exits_for_invalid_json(self, tmp_path):
+    def test_raises_for_invalid_json(self, tmp_path):
+        from passkey.keychain import PasskeyError
+
         f = tmp_path / "bad.json"
         f.write_text("not json")
-        with pytest.raises(SystemExit):
+        f.chmod(0o600)
+        with pytest.raises(PasskeyError, match="Invalid JSON"):
             import_passkey(str(f))
 
-    def test_exits_for_missing_entries_key(self, tmp_path):
+    def test_raises_for_missing_entries_key(self, tmp_path):
+        from passkey.keychain import PasskeyError
+
         f = tmp_path / "noentries.json"
         f.write_text(json.dumps({"other": "data"}))
-        with pytest.raises(SystemExit):
+        f.chmod(0o600)
+        with pytest.raises(PasskeyError, match="missing 'entries'"):
             import_passkey(str(f))
 
     def test_empty_entries(self, tmp_path, capsys):
@@ -186,14 +244,18 @@ class TestImportMcp:
         import_mcp(str(f), mode="skip", dry_run=True)
         mock_save.assert_not_called()
 
-    def test_exits_for_missing_file(self):
-        with pytest.raises(SystemExit):
+    def test_raises_for_missing_file(self):
+        from passkey.keychain import PasskeyError
+
+        with pytest.raises(PasskeyError, match="not found"):
             import_mcp("/nonexistent/mcp.json")
 
-    def test_exits_for_invalid_json(self, tmp_path):
+    def test_raises_for_invalid_json(self, tmp_path):
+        from passkey.keychain import PasskeyError
+
         f = tmp_path / "bad.json"
         f.write_text("not json")
-        with pytest.raises(SystemExit):
+        with pytest.raises(PasskeyError, match="Invalid JSON"):
             import_mcp(str(f))
 
     def test_no_servers_found(self, tmp_path, capsys):
@@ -243,17 +305,22 @@ class TestImportChrome:
         captured = capsys.readouterr()
         assert "1 unique site" in captured.out
 
-    def test_exits_for_missing_file(self):
-        with pytest.raises(SystemExit):
+    def test_raises_for_missing_file(self):
+        from passkey.keychain import PasskeyError
+
+        with pytest.raises(PasskeyError, match="not found"):
             import_chrome("/nonexistent/chrome.csv")
 
-    def test_exits_for_bad_columns(self, tmp_path):
+    def test_raises_for_bad_columns(self, tmp_path):
+        from passkey.keychain import PasskeyError
+
         f = tmp_path / "bad.csv"
         with open(f, "w", newline="") as fh:
             writer = csv.writer(fh)
             writer.writerow(["col1", "col2", "col3"])
             writer.writerow(["a", "b", "c"])
-        with pytest.raises(SystemExit):
+        f.chmod(0o600)
+        with pytest.raises(PasskeyError, match="CSV must have columns"):
             import_chrome(str(f))
 
     def test_empty_csv(self, tmp_path, capsys):

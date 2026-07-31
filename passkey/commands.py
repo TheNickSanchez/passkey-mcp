@@ -315,10 +315,7 @@ def cmd_template_apply(template: dict, entry_name: str) -> None:
         for field_def in template.get("fields", []):
             name = field_def["name"]
             secret = field_def.get("secret", False)
-            if secret:
-                value = getpass.getpass(f"  {name}: ")
-            else:
-                value = input(f"  {name}: ").strip()
+            value = getpass.getpass(f"  {name}: ") if secret else input(f"  {name}: ").strip()
             if value:
                 fields[name] = value
 
@@ -409,8 +406,9 @@ def cmd_set_field(entry: Entry, field_name: str, value: str | None) -> None:
         value = getpass.getpass(f"  Value for {field_name}: ")
 
     action = "Updated" if field_name in entry.fields else "Added"
-    fields = {**entry.fields, field_name: value}
-    save_entry(Entry(name=entry.name, fields=fields), is_update=True)
+    # Mutate the existing entry so config/created/source are preserved
+    entry.fields[field_name] = value
+    save_entry(entry, is_update=True)
     print(f"{action} field '{field_name}' on '{entry.name}'")
 
 
@@ -520,8 +518,13 @@ def cmd_clone(source: Entry, dest_name: str | None = None) -> None:
     print(f"Cloned '{source.name}' → '{final_name}' with {len(fields)} field(s)")
 
 
-def cmd_check(entry_name: str, required_fields: list[str], quiet: bool = False) -> None:
-    """Verify an entry has all required fields. Exits non-zero if any are missing."""
+def cmd_check(entry_name: str, required_fields: list[str], quiet: bool = False) -> int:
+    """Verify an entry has all required fields.
+
+    Returns:
+        0 if all required fields are present, 1 otherwise
+        (the CLI layer owns sys.exit).
+    """
     import sys
 
     entry = get_entry(entry_name)
@@ -529,7 +532,7 @@ def cmd_check(entry_name: str, required_fields: list[str], quiet: bool = False) 
     if entry is None:
         if not quiet:
             print(f"MISSING  entry '{entry_name}' not found", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     all_fields = set(entry.fields) | set(entry.config)
     missing = [f for f in required_fields if f not in all_fields]
@@ -542,10 +545,11 @@ def cmd_check(entry_name: str, required_fields: list[str], quiet: bool = False) 
     if missing:
         if not quiet:
             print(f"\n{len(missing)} missing field(s) in '{entry_name}'", file=sys.stderr)
-        sys.exit(1)
-    else:
-        if not quiet:
-            print(f"\nAll {len(required_fields)} field(s) present in '{entry_name}'")
+        return 1
+
+    if not quiet:
+        print(f"\nAll {len(required_fields)} field(s) present in '{entry_name}'")
+    return 0
 
 
 def cmd_info(entry: Entry) -> None:

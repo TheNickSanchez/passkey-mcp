@@ -256,22 +256,11 @@ def cmd_receive(bundle_path: str) -> None:
     # Get passphrase
     passphrase = getpass.getpass("Passphrase: ")
 
-    # Decrypt and preview (without saving)
+    # Decrypt and import (import_bundle logs the bundle_import operation)
     try:
         result = import_bundle(str(path), passphrase=passphrase, mode="skip")
     except PasskeyError as e:
         raise PasskeyError(f"Import failed: {e}") from e
 
     # Summary
-    result["created"] + result["updated"] + result["skipped"]
     print(f"\nImport complete: {result['created']} created, {result['updated']} updated, {result['skipped']} skipped")
-
-    log_operation(
-        "bundle_import",
-        details={
-            "created": result["created"],
-            "updated": result["updated"],
-            "skipped": result["skipped"],
-            "source_file": str(path),
-        },
-    )

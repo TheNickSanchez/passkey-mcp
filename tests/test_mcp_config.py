@@ -203,6 +203,44 @@ class TestLoadConfig:
         with pytest.raises(Exception):
             load_config(f)
 
+    def test_jsonc_preserves_urls_in_strings(self, tmp_path):
+        """Regression: // inside string literals (URLs) must survive."""
+        f = tmp_path / "opencode.json"
+        f.write_text("""{
+  // Remote MCP server
+  "mcp": {
+    "remote": {
+      "type": "remote",
+      "url": "https://mcp.example.com/sse", // trailing comment
+      "enabled": true
+    }
+  }
+}""")
+        result = load_config(f)
+        assert result["mcp"]["remote"]["url"] == "https://mcp.example.com/sse"
+        assert result["mcp"]["remote"]["enabled"] is True
+
+    def test_jsonc_block_comment_with_url_inside_string(self, tmp_path):
+        """Block comments stripped, strings with // and /* kept verbatim."""
+        f = tmp_path / "settings.json"
+        f.write_text('''{
+  /* multi
+     line */
+  "callback": "https://example.com/a/*wild*/path",
+  "note": "say // hi"
+}''')
+        result = load_config(f)
+        assert result["callback"] == "https://example.com/a/*wild*/path"
+        assert result["note"] == "say // hi"
+
+    def test_jsonc_escaped_quotes_in_strings(self, tmp_path):
+        """Escaped quotes must not confuse the string state machine."""
+        f = tmp_path / "config.json"
+        f.write_text('{"a": "quote \\" here", "b": 1} // done')
+        result = load_config(f)
+        assert result["a"] == 'quote " here'
+        assert result["b"] == 1
+
     def test_raises_for_missing_file(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             load_config(tmp_path / "nonexistent.json")

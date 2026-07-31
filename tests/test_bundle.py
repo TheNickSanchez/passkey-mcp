@@ -211,3 +211,85 @@ class TestImportBundle:
 
         with pytest.raises(PasskeyError, match=r"wrong passphrase|corrupted"):
             import_bundle(str(bundle_path), passphrase="a-long-passphrase")
+
+
+class TestImportInvalidNames:
+    """Regression: invalid entry names in bundles crashed with ValueError."""
+
+    def _make_raw_bundle(self, tmp_path, entries_payload, passphrase="a-long-passphrase"):
+        """Build a bundle by hand (bypasses Entry validation on export)."""
+        import json
+        import os
+        import struct
+
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        payload = json.dumps({
+            "version": "1.0",
+            "entry_count": len(entries_payload),
+            "entries": entries_payload,
+        }).encode()
+        salt = os.urandom(SALT_LEN)
+        nonce = os.urandom(NONCE_LEN)
+        key = _derive_key(passphrase, salt)
+        ciphertext = AESGCM(key).encrypt(nonce, payload, None)
+        path = tmp_path / "raw.enc"
+        path.write_bytes(MAGIC + struct.pack(">I", FORMAT_VERSION) + salt + nonce + ciphertext)
+        return path
+
+    def test_invalid_name_skipped_with_warning(self, tmp_path, capsys):
+        path = self._make_raw_bundle(tmp_path, [
+            {"name": "bad name!", "fields": {"K": "V"}},
+            {"name": "good-name", "fields": {"K": "V"}},
+        ])
+        with patch("passkey.bundle.save_entry") as mock_save, \
+             patch("passkey.bundle.get_entry", return_value=None), \
+             patch("passkey.bundle.log_operation"):
+            result = import_bundle(str(path), passphrase="a-long-passphrase")
+
+        assert result["skipped"] == 1
+        assert result["created"] == 1
+        assert mock_save.call_count == 1
+        assert mock_save.call_args[0][0].name == "good-name"
+        assert "invalid entry name" in capsys.readouterr().err
+
+    def test_reserved_name_skipped(self, tmp_path):
+        path = self._make_raw_bundle(tmp_path, [
+            {"name": "__entries__", "fields": {"K": "V"}},
+        ])
+        with patch("passkey.bundle.save_entry") as mock_save, \
+             patch("passkey.bundle.get_entry", return_value=None), \
+             patch("passkey.bundle.log_operation"):
+            result = import_bundle(str(path), passphrase="a-long-passphrase")
+
+        assert result["skipped"] == 1
+        mock_save.assert_not_called()
+
+
+@pytest.mark.slow
+class TestProductionCryptoParams:
+    """Roundtrip with the real production scrypt params (N=2^20).
+
+    Deselected by default; run with: uv run pytest -m slow
+    """
+
+    @patch("passkey.bundle.log_operation")
+    @patch("passkey.bundle.save_entry")
+    @patch("passkey.bundle.get_entry")
+    def test_roundtrip_production_scrypt(self, mock_get_import, mock_save, mock_log, tmp_path, monkeypatch):
+        # Undo the conftest defang — exercise the real N=2^20 derivation
+        monkeypatch.setattr("passkey.bundle.SCRYPT_N", 2**20)
+        entries = [Entry(name="prod", fields={"SECRET": "value123"})]
+        output = tmp_path / "prod.enc"
+        with patch("passkey.bundle.list_entries") as mock_list, \
+             patch("passkey.bundle.get_entry") as mock_get, \
+             patch("passkey.bundle.log_operation"):
+            mock_list.return_value = ["prod"]
+            mock_get.return_value = entries[0]
+            export_bundle(str(output), passphrase="a-long-passphrase")
+
+        mock_get_import.return_value = None
+        result = import_bundle(str(output), passphrase="a-long-passphrase")
+        assert result["created"] == 1
+        saved_entry = mock_save.call_args[0][0]
+        assert saved_entry.fields == {"SECRET": "value123"}

@@ -46,6 +46,12 @@ class TestListEntries:
 class TestSaveEntry:
     """Tests for save_entry()."""
 
+    def _read_index(self) -> list:
+        from passkey.keychain import _get_index_path
+
+        path = _get_index_path()
+        return json.loads(path.read_text()) if path.exists() else []
+
     def test_saves_entry_fields(self, mock_keyring):
         """Saves entry fields as JSON with metadata."""
         mock_keyring.get_password.return_value = None
@@ -60,31 +66,109 @@ class TestSaveEntry:
         assert saved_json["fields"] == {"KEY": "value"}
         assert "_meta" in saved_json
 
-    def test_updates_metadata_for_new_entry(self, mock_keyring):
-        """Adds new entry name to metadata."""
-        mock_keyring.get_password.return_value = "[]"
+    def test_updates_index_for_new_entry(self, mock_keyring):
+        """Adds new entry name to the file index."""
+        mock_keyring.get_password.return_value = None
         entry = Entry(name="new", fields={"K": "V"})
 
         save_entry(entry)
 
-        # Should save metadata with new entry name
-        calls = mock_keyring.set_password.call_args_list
-        metadata_call = [c for c in calls if c[0][1] == METADATA_KEY]
-        assert len(metadata_call) == 1
-        saved_metadata = json.loads(metadata_call[0][0][2])
-        assert "new" in saved_metadata
+        assert "new" in self._read_index()
 
     def test_does_not_duplicate_existing_entry(self, mock_keyring):
-        """Does not add duplicate entry to metadata."""
+        """Does not add duplicate entry to the index."""
         mock_keyring.get_password.return_value = '["existing"]'
         entry = Entry(name="existing", fields={"K": "V"})
 
         save_entry(entry)
 
-        # Should save entry but not update metadata
-        calls = mock_keyring.set_password.call_args_list
-        metadata_calls = [c for c in calls if c[0][1] == METADATA_KEY]
-        assert len(metadata_calls) == 0
+        assert self._read_index() == ["existing"]
+
+
+class TestFileIndex:
+    """Tests for the file-based entry index (P3-5)."""
+
+    def test_migrates_legacy_keychain_index(self, mock_keyring, isolated_data_dir):
+        """First read moves the keychain-held __entries__ index into entries.json."""
+        mock_keyring.get_password.return_value = '["alpha", "beta"]'
+
+        assert list_entries() == ["alpha", "beta"]
+
+        from passkey.keychain import _get_index_path
+
+        path = _get_index_path()
+        assert path.exists()
+        assert json.loads(path.read_text()) == ["alpha", "beta"]
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
+        # Legacy keychain item removed
+        mock_keyring.delete_password.assert_called_with(SERVICE, METADATA_KEY)
+
+    def test_index_file_wins_over_keychain(self, mock_keyring, isolated_data_dir):
+        """Once the file exists, the keychain is not consulted for the index."""
+        from passkey.keychain import _get_index_path
+
+        _get_index_path().parent.mkdir(parents=True, exist_ok=True)
+        _get_index_path().write_text('["file-wins"]')
+        mock_keyring.get_password.return_value = '["keychain-loses"]'
+
+        assert list_entries() == ["file-wins"]
+
+    def test_corrupted_index_raises(self, mock_keyring, isolated_data_dir):
+        from passkey.keychain import EntryCorruptedError, _get_index_path
+
+        _get_index_path().parent.mkdir(parents=True, exist_ok=True)
+        _get_index_path().write_text("{corrupted")
+
+        with pytest.raises(EntryCorruptedError, match="corrupted"):
+            list_entries()
+
+
+class TestGetAllEntries:
+    """P3-6: bulk reads must not spam one 'read' op per entry."""
+
+    def test_single_bulk_read_logged(self, mock_keyring, isolated_data_dir):
+        from passkey.keychain import _get_index_path, get_all_entries
+
+        _get_index_path().parent.mkdir(parents=True, exist_ok=True)
+        _get_index_path().write_text('["a", "b", "c"]')
+        mock_keyring.get_password.return_value = '{"K": "V"}'
+
+        with patch("passkey.keychain.log_operation") as mock_log:
+            entries = get_all_entries()
+
+        assert len(entries) == 3
+        read_ops = [c for c in mock_log.call_args_list if c[0][0] == "read"]
+        assert len(read_ops) == 1
+        assert read_ops[0].kwargs["details"]["bulk"] is True
+        assert read_ops[0].kwargs["details"]["count"] == 3
+
+
+class TestAuditLabels:
+    """Regression: creates saved with is_update=True were logged as updates."""
+
+    def test_new_entry_logged_as_create_even_with_is_update_true(self, mock_keyring):
+        mock_keyring.get_password.return_value = None  # entry is new
+        entry = Entry(name="fresh", fields={"K": "V"})
+
+        with patch("passkey.keychain.log_operation") as mock_log:
+            save_entry(entry, is_update=True)
+
+        ops = [c.kwargs.get("operation", c[0][0] if c[0] else None)
+               for c in mock_log.call_args_list]
+        assert "create" in ops
+        assert "update" not in ops
+
+    def test_existing_entry_logged_as_update(self, mock_keyring):
+        mock_keyring.get_password.return_value = '["existing"]'
+        entry = Entry(name="existing", fields={"K": "V"})
+
+        with patch("passkey.keychain.log_operation") as mock_log:
+            save_entry(entry)
+
+        ops = [c.kwargs.get("operation", c[0][0] if c[0] else None)
+               for c in mock_log.call_args_list]
+        assert "update" in ops
+        assert "create" not in ops
 
 
 class TestGetEntry:
@@ -116,21 +200,20 @@ class TestDeleteEntry:
         """Calls keyring.delete_password."""
         mock_keyring.get_password.return_value = '["test"]'
         delete_entry("test")
-        mock_keyring.delete_password.assert_called_with(SERVICE, "test")
+        # (migration may also delete the legacy __entries__ item; use any_call)
+        mock_keyring.delete_password.assert_any_call(SERVICE, "test")
 
-    def test_updates_metadata_after_delete(self, mock_keyring):
-        """Removes entry from metadata list."""
+    def test_updates_index_after_delete(self, mock_keyring):
+        """Removes entry from the file index."""
         mock_keyring.get_password.return_value = '["test", "other"]'
 
         delete_entry("test")
 
-        # Check metadata was updated without the deleted entry
-        calls = mock_keyring.set_password.call_args_list
-        metadata_call = [c for c in calls if c[0][1] == METADATA_KEY]
-        assert len(metadata_call) == 1
-        saved_metadata = json.loads(metadata_call[0][0][2])
-        assert "test" not in saved_metadata
-        assert "other" in saved_metadata
+        from passkey.keychain import _get_index_path
+
+        saved_index = json.loads(_get_index_path().read_text())
+        assert "test" not in saved_index
+        assert "other" in saved_index
 
     def test_returns_false_when_not_found(self, mock_keyring):
         """Returns False when entry doesn't exist."""

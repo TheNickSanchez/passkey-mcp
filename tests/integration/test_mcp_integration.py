@@ -11,8 +11,8 @@ def test_tools_directly():
     """Test tool functions directly without MCP protocol."""
     from passkey.mcp_server import (
         passkey_doctor,
-        passkey_get_entry_fields,
-        passkey_list_entries,
+        passkey_fields,
+        passkey_list,
         passkey_status,
     )
 
@@ -20,16 +20,16 @@ def test_tools_directly():
     print()
 
     # Test 1: List entries
-    print("1. Testing passkey_list_entries...")
-    entries = passkey_list_entries()
+    print("1. Testing passkey_list...")
+    entries = passkey_list()
     print(f"   Found {len(entries)} entries: {entries}")
     print("   PASS")
     print()
 
     # Test 2: Get entry fields (use an existing entry if available)
     if entries:
-        print("2. Testing passkey_get_entry_fields...")
-        fields = passkey_get_entry_fields(entries[0])
+        print("2. Testing passkey_fields...")
+        fields = passkey_fields(entries[0])
         print(f"   Fields for '{entries[0]}': {fields}")
         print("   PASS")
         print()
@@ -59,16 +59,16 @@ def test_tools_directly():
 
 def test_error_handling():
     """Test error handling for edge cases."""
-    from passkey.mcp_server import passkey_get_entry_fields
+    from passkey.mcp_server import passkey_fields
 
     print()
     print("Testing error handling...")
     print()
 
     # Test missing entry
-    print("1. Testing passkey_get_entry_fields with missing entry...")
+    print("1. Testing passkey_fields with missing entry...")
     try:
-        passkey_get_entry_fields("nonexistent-entry-12345")
+        passkey_fields("nonexistent-entry-12345")
         print("   FAIL: Should have raised an exception")
         return False
     except Exception as e:

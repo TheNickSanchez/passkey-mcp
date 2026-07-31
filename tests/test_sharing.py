@@ -1,7 +1,8 @@
 """Tests for the sharing module."""
 
+from unittest.mock import patch
 
-from passkey.sharing import generate_passphrase
+from passkey.sharing import cmd_receive, generate_passphrase
 
 
 class TestGeneratePassphrase:
@@ -45,3 +46,19 @@ class TestWordlist:
     def test_no_duplicates(self):
         from passkey.sharing import _PASSPHRASE_WORDS
         assert len(_PASSPHRASE_WORDS) == len(set(_PASSPHRASE_WORDS))
+
+
+class TestReceive:
+    def test_no_double_bundle_import_log(self, tmp_path):
+        """Regression: receive logged bundle_import twice (inner + outer)."""
+        bundle = tmp_path / "shared.enc"
+        bundle.write_bytes(b"PK01" + b"\x00" * 40)
+
+        with patch("passkey.sharing.import_bundle",
+                   return_value={"created": 1, "updated": 0, "skipped": 0}), \
+             patch("passkey.sharing.log_operation") as mock_log, \
+             patch("getpass.getpass", return_value="x" * 12):
+            cmd_receive(str(bundle))
+
+        # import_bundle logs bundle_import itself; cmd_receive must not add another
+        mock_log.assert_not_called()
