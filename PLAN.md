@@ -1,75 +1,161 @@
-# passkey-mcp — Roadmap to 1.0
+# passkey-mcp — Plan to make it deployable
 
-Supersedes `PHASE2.md` and `docs/SECURITY_AUDIT_2026.md` (deleted; recoverable from git history).
+**Target:** first installable release **v0.4.0**.
+**Current tree:** 0.3.0 (P0–P3 rewrite is in `main`, never published).
 
-## Why we re-versioned to 0.x
+Deployable means a teammate can install a **pinned version** with pipx, MCP
+configs can exec `passkey` from PATH, and a company security review can point
+at CI + a PyPI artifact with provenance. It does **not** mean becoming a team
+password manager.
 
-A senior-level code review (2026-07-28) found the v1.2.0 label was not earned:
+Positioning for every doc and review ticket:
 
-- The test suite **cannot run to completion** (hangs on real `sudo`, ~2 min of scrypt, pollutes the real audit log). The previous audit's claim "all existing tests pass" was only true on one machine with a warm sudo cache.
-- The auth layer **breaks the core MCP flow** on stock macOS (see P1).
-- No CI exists to catch any of this.
-
-Version mapping: `1.0.0 → 0.0.1`, `1.1.0 → 0.1.0`, `1.2.0 → 0.2.0`.
-Current release: **0.3.0** (this re-planning). The milestones below target 1.0.
+> Local-only helper that moves MCP/CLI secrets out of config files into the
+> OS keychain. Not a shared vault. Not a 1Password replacement. Alpha, 0.x.
 
 ---
 
-## P0 — Test integrity (target: v0.4.0)
+## Current state (verified 2026-09-12)
 
-*Nothing else matters until the safety net actually works.*
+| Signal | Reality |
+|--------|---------|
+| Code on GitHub | Public, MIT, `TheNickSanchez/passkey-mcp` |
+| PyPI `passkey-mcp` | **404** — README install commands do not work |
+| GitHub Releases / tags | **None** |
+| CI | Workflow exists; only run on `main` is **red** (326 passed, 1 failed) |
+| Version on PyPI | Never shipped. Do not tag 0.3.0 as the first release — its CHANGELOG still claims tests hang and `run` is auth-gated, which is no longer true |
 
-| # | Item | Where | Acceptance criteria |
-|---|------|-------|---------------------|
-| 1 | Fix dev-deps split-brain: move `ruff`, `pytest-cov`, `pytest-timeout` into `[dependency-groups] dev`; delete duplicate `[project.optional-dependencies] dev` | `pyproject.toml` | `uv run ruff check` and `uv run pytest --timeout=60` work |
-| 2 | Make tests hermetic: autouse fixture redirecting data dir (`PASSKEY_DATA_DIR` env override, add to `dirs.py`) and mocking `passkey.cli._require_auth` | `tests/conftest.py`, `passkey/dirs.py` | Full suite runs with zero writes to `~/Library/Application Support/passkey/` and zero `sudo` invocations |
-| 3 | Defang scrypt in tests: monkeypatch `SCRYPT_N` to 2^14 via fixture; keep one production-parameter vector marked `@pytest.mark.slow` (deselected by default) | `tests/test_bundle.py`, `pyproject.toml` markers | `test_bundle.py` < 5s; suite < 30s total |
-| 4 | Add CI: GitHub Actions running ruff + pytest on macOS and Ubuntu per push | `.github/workflows/ci.yml` | Green badge on a clean machine (proves 1–3) |
-| 5 | Add `test_auth.py` with fully mocked subprocess | `tests/test_auth.py` | `auth.py` covered without touching real sudo/pkexec |
+P0–P3 from the 2026-07-28 roadmap **landed in code** (hermetic tests, opt-in
+auth, `unwrap`, JSONC URL fix, CLI package, unified doctor, file-based index,
+audit cap). They did **not** land as a release. Leftover from that work:
 
-## P1 — Auth redesign (target: v0.5.0)
+- CI failure: `tests/test_mcp_server.py::TestPasskeyDoctor::test_detects_missing_config`
+  (`assert result["summary"]["failed"] > 0` → 0). Root cause: doctor only
+  iterates `get_all_existing_paths()`, so on a clean runner the
+  `FileNotFoundError` path never runs. The test is environment-dependent.
+- `AGENTS.md`, this file’s old P0–P3 text, and CHANGELOG “known issues”
+  describe the pre-rewrite world.
+- `docs/SECURITY.md` claims **APPROVED FOR CORPORATE USE** (wrong deps,
+  wrong version, SOC 2 theater). A reviewer will treat that as a credibility
+  problem, not evidence.
+- README still shows `pipx install passkey-mcp` and
+  `passkey add … API_KEY=abc` (code prompts via `getpass`; values are not
+  taken from argv).
+- `doctor.py` recommends `pip install passkey-mcp` when the binary is missing.
 
-*The current design fails the exact scenario the tool exists for.*
+Historical P0–P3 tables are in git history (`0a9a46e` and parents). Do not
+re-open them unless a regression shows up.
 
-**Problem.** `_require_auth` gates `passkey run` (`cli.py:506`) — the command every passkey-wrapped MCP server executes headless. On stock macOS (no `pam_tid` in `/etc/pam.d/sudo` — that's opt-in), `sudo -v` fails without a tty → every wrapped MCP server fails to start. It only works on the dev machine because of a custom PAM config, and even there it rides the 5-minute sudo timestamp cache. The Windows implementation (`ShellExecuteW runas` → separate elevated `cmd /c echo`) proves nothing about the current process. Threat model is also inconsistent: `list`/`info`/`status` and all MCP read tools skip auth entirely.
+---
 
-| # | Item | Acceptance criteria |
-|---|------|---------------------|
-| 1 | Remove `_require_auth` from `run` and every other code path MCP servers invoke headless | Wrapped MCP server starts on stock macOS with no tty |
-| 2 | Replace sudo-as-oracle with: (a) rely on the OS keychain's own ACL prompts (macOS already gates per-binary), plus (b) opt-in `require_auth = true` config flag, documented as terminal-only | Auth is off by default for headless paths; docs explain the tradeoff |
-| 3 | Ship `passkey unwrap` (restore a server config from passkey-wrapped form back to inline command) or prominently document `.backup` restore in `init` output | Users can leave the one-way door |
-| 4 | Decide the fate of `auth.py` Windows path (theater) — fix or drop with a note | No pretend-security |
+## D0 — Green `main` (v0.4.0-dev)
 
-## P2 — Correctness (target: v0.6.0)
+*Nothing gets published while CI is red.*
 
-| # | Bug | Where | Fix |
-|---|-----|-------|-----|
-| 1 | JSONC comment-stripper destroys URLs (`https://…` → parse error) — breaks any OpenCode/Zed config with a remote MCP server | `mcp_config.py:379` | Strip comments only outside string literals (small state machine) or use `jsonc-parser`; add regression test with URLs |
-| 2 | Audit log mislabels creates as updates | `keychain.py:200` | `"create" if is_new else "update"` (drop the `is_update` condition); regression test |
-| 3 | `cmd_set_field` rebuilds `Entry` and silently drops `config`, `created`, `source` | `commands.py:413` | Mutate the existing entry and save; test config preservation |
-| 4 | Importer `overwrite` mode drops `config` | `importers.py:70-76` | Preserve `config` like `created` |
-| 5 | Invalid entry names in bundles/imports raise uncaught `ValueError` → partial import + traceback | `bundle.py:236`, `importers._handle_existing` | Validate name, skip-with-warning, continue import |
-| 6 | `receive` double-logs `bundle_import` | `sharing.py:269` | Remove the outer `log_operation` (inner one in `import_bundle` suffices) |
-| 7 | Dead code: discarded expressions | `sharing.py:266`, `health.py:88,186`, `mcp_commands.py:350` | Delete (ruff B018 catches once ruff runs) |
-| 8 | `audit --summary` claims "last 30 days" but never filters by date | `health.py:174` | Filter by timestamp or fix the label |
+| # | Item | Acceptance |
+|---|------|------------|
+| 1 | Fix the doctor test (mock an existing config path, or teach doctor to report missing configs as skip/info and assert that). Do not “fix” it by requiring real Claude/Cursor configs on the runner. | `uv run pytest -q` green on a clean machine |
+| 2 | `uv sync --locked` in CI (today it is `uv sync`, so lockfile drift is silent) | CI fails if `uv.lock` is stale |
+| 3 | Rewrite `AGENTS.md` to match the tree: suite is hermetic, ruff/pytest-timeout are in the dev group, auth is opt-in and never on `run` | An agent (or teammate) following AGENTS.md does not hang on sudo |
 
-## P3 — Structure & polish (target: v0.7.x → 1.0)
+**Exit:** GitHub Actions green on `main` for macOS + Ubuntu, Python 3.10 and 3.14.
 
-| # | Item | Notes |
-|---|------|-------|
-| 1 | Split `cli.py` (829 lines, 26-branch dispatch, argparse-private help formatter) into a `cli/` package | Move all `sys.exit` to the outermost layer; library code (`runner`, `interactive`) must raise, not exit |
-| 2 | Collapse three doctor implementations into one (`mcp_commands.cmd_doctor`, `health.cmd_doctor_deep`, `mcp_server.passkey_doctor`) | Depth as a flag, not a fork |
-| 3 | Delete or date-bound the legacy shims: `claude.py`, `claude_commands.py`, `Legacy` command group, MCP tool aliases | One downstream user; don't carry 1.x baggage into a real 1.0 |
-| 4 | Merge the two file-permission checkers (`bundle.check_file_permissions` vs `importers._check_file_permissions`) | Same behavior, one implementation |
-| 5 | Reconsider metadata-in-keychain (`__entries__` index + lock file + dangling cleanup) | File-based index with atomic writes removes ~⅓ of `keychain.py` |
-| 6 | Audit log: rotation or size cap; stop per-entry `read` spam from `passkey list` | Log is currently unbounded |
-| 7 | Fix `authors = nick@example.com` placeholder in `pyproject.toml` | Release metadata hygiene |
-| 8 | `passkey_status` MCP tool calls `list_entries()` inside the per-config loop | Hoist out of loop |
+---
 
-## Definition of done for 1.0
+## D1 — Honest docs (same milestone, no version bump)
 
-- Full suite green in CI on a clean macOS + Ubuntu runner, < 60s.
-- Zero writes outside the configured data dir during tests.
-- Wrapped MCP servers start on stock macOS (no custom PAM) with no tty.
-- JSONC configs with URLs parse correctly.
-- No dead code, no duplicate doctor, no legacy shims.
+Reviewers read README and `docs/SECURITY.md` before they read `bundle.py`.
+
+| # | Item | Acceptance |
+|---|------|------------|
+| 1 | Replace `docs/SECURITY.md` with a GitHub-standard disclosure policy (how to report, what is in/out of scope, threat model in one page). **No “approved”, no SOC 2/OWASP scorecards.** Put a copy or link at repo root so GitHub’s Security tab picks it up. | File matches the code; InfoSec can attach it to a ticket |
+| 2 | README: state the product is a local injector, not a password manager. Document `require-auth` as optional/off. Linux/Windows = best-effort vs macOS Keychain ACLs. | A security engineer cannot quote the README against the threat model |
+| 3 | README install: **do not** advertise `pipx install passkey-mcp` until D2 lands. Until then, one labeled preview (`pipx install git+https://github.com/TheNickSanchez/passkey-mcp.git`) or “not published yet.” Drop `pip install` as a recommended path. | Following README cannot 404 |
+| 4 | Delete the `API_KEY=abc` argv example. `passkey add --fields` prompts. | No documented secret-in-argv path |
+| 5 | CHANGELOG: strike 0.3.0 “known issues” that were fixed in the rewrite; note share passphrases are 8 words / ~64 bits (not 4 / ~32). Add a 0.4.0 section when D2 ships. | Changelog matches code |
+| 6 | Doctor copy: recommend `pipx install passkey-mcp` (after D2) not `pip install` | `passkey doctor` does not push people into system Python |
+
+**Exit:** A cold reader of README + SECURITY.md would describe the same threat
+model as `passkey/auth.py` and `passkey/mcp_server.py`.
+
+---
+
+## D2 — First installable artifact (v0.4.0)
+
+This is the actual deploy.
+
+| # | Item | Acceptance |
+|---|------|------------|
+| 1 | PyPI project `passkey-mcp`, published via **Trusted Publishing** (OIDC from GitHub Actions). No long-lived API token on a laptop. | `pip index versions passkey-mcp` shows 0.4.0 |
+| 2 | Release workflow: tag `v0.4.0` → `uv build` → publish wheel + sdist → GitHub Release with those assets and CHANGELOG excerpt | `pipx install passkey-mcp==0.4.0` works on a clean Mac and Ubuntu |
+| 3 | Confirm console scripts: `passkey` and `passkey-mcp-server` land on PATH via pipx | `which passkey`; Cursor can spawn `passkey run …` |
+| 4 | pyproject hygiene: add 3.13/3.14 classifiers if we keep testing 3.14; keep `Development Status :: 3 - Alpha`; add PyPI URL alongside Homepage | `twine check dist/*` clean (or `uv build` equivalent) |
+| 5 | README install block becomes the pipx command **pinned in the release notes** (`pipx install passkey-mcp==0.4.0`). Offer `uv tool install passkey-mcp` as the uv-native twin. | Glama / scrapers that copy the README stop advertising a 404 |
+| 6 | Smoke the MCP path once after install: `passkey doctor`, wrap a dummy server, start it with no tty and no sudo | Wrapped server starts on stock macOS |
+
+Trusted Publishing setup (manual, once): PyPI account 2FA → pending publisher
+for `TheNickSanchez/passkey-mcp` → workflow
+`.github/workflows/release.yml` using `pypa/gh-action-pypi-publish` on
+`release: published` (or `workflow_dispatch` + tag). Do not `twine upload`
+from a developer machine.
+
+**Exit:** The team install command is `pipx install passkey-mcp==0.4.0`.
+Git clone is no longer the distribution channel.
+
+---
+
+## D3 — Reviewer / supply-chain extras (v0.4.x)
+
+Needed for a company security ticket; not needed for three teammates who trust
+you. Do it immediately after D2 if a review is inbound.
+
+| # | Item | Acceptance |
+|---|------|------------|
+| 1 | CI job: `uv run pip-audit` or `osv-scanner` on the lockfile | Known CVEs in deps fail the build |
+| 2 | Enable GitHub private vulnerability reporting on the repo | Matches SECURITY.md |
+| 3 | Dependabot or `uv` dependabot-equivalent for `pyproject.toml` / Actions | `mcp` cannot silently float to 2.x (pin `>=1,<2` is load-bearing — FastMCP removed in v2) |
+| 4 | Optional: setting to disable MCP write tools (`passkey_wrap_server`) for corporate installs | InfoSec can say “the assistant cannot rewrite configs” |
+| 5 | Release attestations come for free with Trusted Publishing — link them from SECURITY.md | Reviewer can verify the wheel |
+
+**Not in 0.4.x (do not block deploy on these):**
+
+- Homebrew tap
+- Windows CI (claim Windows as best-effort until a runner exists)
+- npm / Docker / GUI
+- Central vault, SSO, recovery, org admin
+- 1.0 version label
+
+---
+
+## Definition of done for “deployable”
+
+A person who has never seen this repo can:
+
+1. `pipx install passkey-mcp==0.4.0`
+2. Run `passkey` → onboarding, create an entry, `passkey doctor` green enough to use
+3. `passkey init --tool cursor` (or their tool) and start a wrapped MCP server with **no** sudo prompt
+4. `passkey unwrap` to leave
+5. Point InfoSec at: MIT license, threat model in SECURITY.md, green CI, PyPI 0.4.0, GitHub Release
+
+Until that list is true, do not call it deployed, and do not send the current
+README to the team.
+
+---
+
+## Sequence
+
+```
+D0 (CI + AGENTS.md)  →  D1 (docs)  →  D2 (PyPI + tag 0.4.0)  →  D3 (audit/review)
+     days                  same PR as D0 or next          after green main
+```
+
+D0 and D1 can ship as one PR to `main` with no tag. D2 is the first tag.
+Do not tag until GitHub Actions is green on the commit you tag.
+
+---
+
+## 1.0 (later, not this plan)
+
+Keep 1.0 for product completeness (Windows CI, Homebrew optional, wrap-disable
+default documented, no stale docs). Deployability is 0.4.0. Re-labeling to
+1.0 without a published 0.4.x would repeat the 1.2.0 mistake.
