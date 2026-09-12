@@ -1,0 +1,25 @@
+---
+description: Route work to sys-arch, sys-engineer, sys-release, sys-review. Every PR needs a SemVer bump and changelog.
+alwaysApply: true
+---
+
+# Agent routing
+
+Custom agents live in `.cursor/agents/`. Use them instead of one giant chat doing research, implementation, and release notes at once.
+
+| Agent | Job |
+|-------|-----|
+| `sys-arch` | Research, threat model, `PLAN.md`. No `passkey/` or `tests/` edits. |
+| `sys-engineer` | Implement and test. `uv` only. Mock auth. Execute `PLAN.md`. |
+| `sys-release` | **Every branch/PR:** classify patch/minor/major, update `CHANGELOG.md` `[Unreleased]`, bump version. |
+| `sys-review` | Read-only pre-PR review. Block if changelog or version missing. |
+
+## Required PR loop
+
+1. `sys-arch` (if design is open) → 2. `sys-engineer` → 3. `sys-release` → 4. `sys-review` → 5. then `gh pr create`.
+
+A project hook denies `gh pr create` and `git push` when `CHANGELOG.md` is unchanged vs `main`.
+
+Until 1.0: patch = fix/docs/tests/CI; minor = feature or 0.x breaking change; major = 1.0.0 only. First tag is 0.4.0; before that bump 0.3.x.
+
+Do not invent CI green, PyPI, or 1.0. `PLAN.md` is the roadmap.
