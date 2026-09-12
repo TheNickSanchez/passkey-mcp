@@ -1,153 +1,86 @@
 # passkey-mcp — Agent Notes
 
-Read this before touching anything. It documents **verified reality**, not
-aspirations. The roadmap is `PLAN.md`; current version is **0.3.0** (pre-1.0 —
-the old 1.x labels were re-baselined, see `CHANGELOG.md`).
+Verified 2026-09-12. Roadmap is `PLAN.md` (first installable release **0.4.0**).
+Package version lives in `pyproject.toml` (also duplicated in
+`passkey/__init__.py` until D2-5). This tree is **0.3.x**, Alpha, unpublished.
+
+Positioning: local OS-keychain injector for MCP/CLI secrets. Not a team vault.
+
+## Agents
+
+Custom profiles in `.cursor/agents/`. Pick one per chat (see
+`.cursor/rules/agent-routing.mdc`).
+
+| Profile | Job |
+|---------|-----|
+| `sys-arch` | Research, `PLAN.md`. No `passkey/` or `tests/` edits. |
+| `sys-engineer` | Implement and test. |
+| `sys-release` | Every PR: SemVer + `CHANGELOG.md` `[Unreleased]` + version bump. |
+| `sys-review` | Read-only pre-PR review. |
+
+Loop: arch (if design is open) → engineer → release → review → PR.
+A hook denies `git push` / `gh pr create` if `CHANGELOG.md` is unchanged vs
+`main`. Until 1.0: **patch** = fix/docs/tests/CI; **minor** = feature or 0.x
+breaking; **major** = 1.0.0 only. First tag is 0.4.0; before that bump 0.3.x.
 
 ## Environment
 
-- **Python**: 3.10+ floor; dev machine runs 3.14 (`uv` manages it)
-- **Package manager**: `uv` — never `pip`. `uv sync` creates `.venv/`
-- **CLI install**: `pipx install --force -e .` — required after any change you
-  want to exercise through the real `passkey` command
-- **One-off validation without reinstall**: `uv run passkey <args>` or
-  `uv run python -c "from passkey.cli import main; ..."`
-
-## Testing — the truth (verified 2026-07-28)
-
-**The suite does NOT pass as-committed. Do not trust any doc that says it
-does.** There is no CI. Three independent problems:
-
-1. **`tests/test_cli.py` hangs forever.** Tests call real `main()` →
-   `_require_auth()` → real `sudo -v`. Without a cached sudo timestamp it
-   blocks on an interactive prompt. Nothing mocks the auth layer.
-   (It "passes" on the maintainer's Mac only because `pam_tid.so` was
-   hand-added to `/etc/pam.d/sudo` and Touch ID silently approves.)
-2. **`tests/test_bundle.py` takes ~2 minutes.** Production scrypt is
-   N=2^20 ≈ 5s/derivation on this machine, and the file does 20+ derivations.
-3. **Tests pollute real user state.** Keyring is mocked but `audit.py` and the
-   metadata lock are not — test runs write fake rows into the real
-   `~/Library/Application Support/passkey/audit.log` (entries named `test`,
-   `found`, `existing` are test fixtures, not your activity).
-
-Also: `pytest-timeout` is NOT installed — `uv run pytest --timeout=120`
-errors out, despite what old docs say. `ruff` is NOT in the synced venv
-(declared under `[project.optional-dependencies] dev`, which `uv sync`
-ignores in favor of `[dependency-groups] dev`). Use `uvx ruff check` instead.
-
-### How to actually validate changes today
+- Python 3.10+; this machine is 3.14. **`uv` only — never pip.**
+- `uv sync` creates `.venv/`. Lint config is **`ruff.toml` only**.
+- Exercise the CLI with `uv run passkey …` (pipx is stale until D2 / PyPI).
 
 ```bash
-# Fast subset — everything EXCEPT cli/bundle hangs-and-slowdowns (~0.5s, 250 tests)
-uv run pytest --ignore=tests/test_cli.py --ignore=tests/test_bundle.py -q
-
-# CLI tests: only with auth mocked or sudo cached; run per-file with care
-uv run pytest tests/test_cli.py -q        # HANGS without Touch ID/sudo cache
-
-# Bundle tests: green but ~2 min
-uv run pytest tests/test_bundle.py -q
-
-# Lint (ruff is not in the venv)
-uvx ruff check passkey/ tests/
+uv sync
+uv run pytest -q
+uv run ruff check passkey/ tests/
+uv run passkey --help
 ```
 
-Fixing all of this is **PLAN.md P0** — until it lands, validate with the
-fast subset plus targeted runs, and never present a partial run as "all
-tests pass".
+CI exists (`.github/workflows/ci.yml`: macOS + Ubuntu, 3.10 and 3.14). The
+only known red test on a clean runner is
+`tests/test_mcp_server.py::TestPasskeyDoctor::test_detects_missing_config`
+(doctor only iterates configs that already exist). Do not present a partial
+run as “all tests pass.” Do not ignore `test_cli.py` / `test_bundle.py` —
+those hangs are gone.
 
-## The auth landmine (most important design fact)
+## Auth
 
-`passkey/auth.py` gates sensitive commands behind OS auth: `sudo -v` (macOS),
-`pkexec` (Linux), `ShellExecuteW runas` (Windows). Consequences:
+Primary protection is the OS keychain ACL. Extra sudo/pkexec is **opt-in**
+(`passkey config require-auth on`) and **never** applies to `passkey run`
+(headless MCP). Windows extra-auth is a documented no-op.
 
-- **`passkey run` is auth-gated, and `run` is exactly what passkey-wrapped
-  MCP servers execute headless.** On stock macOS (no custom PAM), `sudo -v`
-  fails without a tty → every wrapped MCP server fails to start. The dev
-  machine only works because of hand-configured Touch ID sudo.
-- Even where it works, auth rides the 5-minute sudo timestamp cache —
-  MCP servers randomly start failing mid-session.
-- Windows `ShellExecuteW runas` elevates a *separate* `cmd /c echo` — it
-  proves nothing about the current process. Treat it as placeholder.
-- `auth.py` has **zero tests**. The redesign is **PLAN.md P1**; don't build
-  new features on the current design, and never call auth from tests
-  (mock `passkey.cli._require_auth`).
+Tests: `tests/conftest.py` sets `PASSKEY_DATA_DIR`, defangs scrypt to 2^14,
+and mocks `passkey.cli._require_auth`. Never call real sudo/pkexec. Cover
+`auth.py` only via `tests/test_auth.py` (subprocess mocked).
 
-## Common pitfalls
+## Landmines
 
-1. **Test in `.venv`, not pipx.** Change code → `uv sync` → run fast subset.
-   Only `pipx install --force -e .` after validation.
-2. **`ModuleNotFoundError: No module named 'mcp.server.fastmcp'`** — `mcp>=2.0.0`
-   got installed. The pin `mcp>=1.0.0,<2.0.0` in `pyproject.toml` is
-   load-bearing (`FastMCP` was removed in v2).
-3. **After checking out a branch**, the pipx-installed CLI is stale. Either
-   `pipx install --force -e .` or use `uv run passkey`.
-4. **Two dev-dep declarations exist** with different pins
-   (`[project.optional-dependencies] dev` vs `[dependency-groups] dev`).
-   Only the latter is synced. Until P0-1 merges them, assume only
-   `pytest` + `pytest-mock` are available in the venv.
-5. **JSONC configs with URLs break parsing** — the regex comment-stripper in
-   `mcp_config.load_config` eats `//` inside strings
-   (`"url": "https://…"` → `JSONDecodeError`). Known bug, PLAN.md P2-1.
-6. **`cmd_set_field` silently wipes entry `config`/`created`/`source`**
-   (rebuilds `Entry` from scratch). Known bug, PLAN.md P2-3. Same class of
-   bug in importer overwrite mode (P2-4). Preserve the whole `Entry` when
-   touching save paths.
-7. **Audit log lies in two ways right now**: creates saved with
-   `is_update=True` are logged as "update" (`keychain.save_entry`), and
-   `receive` double-logs imports. PLAN.md P2-2/P2-6.
-8. **Don't add a third copy** of anything that already exists twice: doctor
-   diagnostics live in `mcp_commands.py`, `health.py`, AND `mcp_server.py`;
-   permission checks live in `bundle.py` AND `importers.py`. Consolidation
-   is PLAN.md P3.
-
-## Security patterns (established, keep them)
-
-- **Secrets never in argv** — prompt via `getpass.getpass()`.
-- **Path validation** — block system prefixes for config writes
-  (`mcp_server._validate_config_paths`).
-- **Error messages** — sanitize user-controlled strings before interpolating
-  (`re.sub(r"[^a-zA-Z0-9._\-\s]", "", s)`).
-- **Permissions** — 0o600 files / 0o700 dirs; exports use `O_EXCL`.
-- **Crypto** — AES-256-GCM, scrypt(N=2^20, r=8, p=1), fresh `os.urandom`
-  salt+nonce per operation. Constants live in `bundle.py` — import them,
-  never redefine.
-- **MCP boundary** — tools expose names/fields/status only, never values.
-- **Config writes** — atomic temp-file + `os.replace` (`mcp_config.save_config`).
-
-## Branch workflow
-
-```bash
-git checkout -b feature-branch
-# ... make changes ...
-uv run pytest --ignore=tests/test_cli.py --ignore=tests/test_bundle.py -q
-uvx ruff check passkey/ tests/
-uv sync                            # if deps changed
-git add -A && git commit -m "msg"  # only with explicit user approval
-git push -u origin feature-branch
-# PR → merge to main → delete branch locally and remotely
-```
+1. `mcp>=1.0.0,<2.0.0` is load-bearing (`FastMCP` removed in v2).
+2. Secrets never in argv — `getpass`. Do not add `KEY=VALUE` examples.
+3. Preserve the whole `Entry` on save (`config`, `created`, `source`).
+4. MCP tools: names/fields/status only — never values.
+5. Config writes: atomic temp + `os.replace`. Exports: `O_EXCL`, `0o600`.
+6. Crypto constants: import from `bundle.py`, never redefine.
+7. Do not add a third doctor or a second permission checker (`doctor.py` and
+   `bundle.check_file_permissions` are the singles).
+8. `docs/SECURITY.md` currently overclaims (“approved for corporate use”).
+   Do not copy that language. README install (`pipx install passkey-mcp`)
+   404s until D2. PyPI is unpublished; no tags.
+9. After a branch checkout, `uv run passkey` — not a stale global install.
 
 ## Key files
 
-| File | Purpose | Watch out for |
-|------|---------|---------------|
-| `passkey/cli.py` | CLI entry, argparse, command grouping | 829-line god-file; auth gates; argparse-private help hack |
-| `passkey/auth.py` | OS auth gate | Landmine (see above); no tests |
-| `passkey/keychain.py` | OS keychain via `keyring`, PID lock | Audit create/update mislabel; lock needs data dir |
-| `passkey/models.py` | `Entry` dataclass, name validation | Clean — `__post_init__` raises `ValueError` (importers must catch) |
-| `passkey/bundle.py` | Encrypted export/import, crypto constants | Solid; scrypt params make tests slow |
-| `passkey/sharing.py` | Share/receive UX, passphrase gen | Double-log bug; dead expression at ~line 266 |
-| `passkey/mcp_config.py` | 9-tool config adapters, atomic save | JSONC URL bug; three doctor forks |
-| `passkey/mcp_commands.py` | init/status/doctor/servers/add handlers | `sys.exit` deep in handlers |
-| `passkey/mcp_server.py` | MCP server (FastMCP) | Never expose values; `passkey_status` perf loop |
-| `passkey/commands.py` | Entry CRUD handlers | `cmd_set_field` data loss |
-| `passkey/importers.py` | passkey/MCP/Chrome CSV import | Overwrite drops config |
-| `passkey/runner.py` | Env injection for `passkey run` | `sys.exit` in library code |
-| `passkey/interactive.py` | questionary selectors | `sys.exit` in library code |
-| `passkey/health.py` | rotate, doctor --deep, audit summary | Dead code; "30 days" label doesn't filter |
-| `passkey/audit.py` | Audit log | Unbounded; polluted by tests |
-| `passkey/clipboard.py` | Auto-clearing clipboard | Clean |
-| `passkey/templates.py` | Built-in + custom templates | Clean |
-| `passkey/dirs.py` | Data dir resolution, legacy migration | Needs `PASSKEY_DATA_DIR` override (P0-2) |
-| `PLAN.md` | Roadmap to 1.0 (P0–P3) | Source of truth for what to work on |
-| `tests/` | 282 tests (pytest) | Does not pass as-committed — see Testing |
+| File | Purpose |
+|------|---------|
+| `PLAN.md` | What to work on (D0–D3 → 0.4.0) |
+| `passkey/cli/` | CLI entry (`cli.py` is a shim) |
+| `passkey/auth.py` | Opt-in OS prompt only |
+| `passkey/keychain.py` | OS keychain + file index `entries.json` |
+| `passkey/bundle.py` | AES-256-GCM + scrypt export/import |
+| `passkey/mcp_config.py` | Tool adapters, JSONC, atomic save |
+| `passkey/mcp_server.py` | FastMCP tools (no secret values) |
+| `passkey/doctor.py` | Unified diagnostics |
+| `passkey/runner.py` | Env injection for `passkey run` |
+| `passkey/dirs.py` | Data dir; honors `PASSKEY_DATA_DIR` |
+| `tests/conftest.py` | Hermetic suite |
+| `.cursor/agents/` | sys-arch / engineer / release / review |

@@ -35,8 +35,6 @@ audit cap). They did **not** land as a release. Leftover from that work:
   (`assert result["summary"]["failed"] > 0` → 0). Root cause: doctor only
   iterates `get_all_existing_paths()`, so on a clean runner the
   `FileNotFoundError` path never runs. The test is environment-dependent.
-- `AGENTS.md`, this file’s old P0–P3 text, and CHANGELOG “known issues”
-  describe the pre-rewrite world.
 - `docs/SECURITY.md` claims **APPROVED FOR CORPORATE USE** (wrong deps,
   wrong version, SOC 2 theater). A reviewer will treat that as a credibility
   problem, not evidence.
@@ -45,10 +43,7 @@ audit cap). They did **not** land as a release. Leftover from that work:
   taken from argv). Development section still says `pip install -e ".[dev]"`
   — `[project.optional-dependencies] dev` was deleted; truth is `uv sync`.
 - `doctor.py` recommends `pip install passkey-mcp` when the binary is missing.
-- Two ruff configs (`pyproject.toml` `[tool.ruff.lint]` vs `ruff.toml`; the
-  latter still names deleted `claude.py` shims).
-- No `CONTRIBUTING.md`, no repo-root `SECURITY.md` policy, no Dependabot,
-  no `[Unreleased]` changelog section.
+- No `CONTRIBUTING.md`, no repo-root `SECURITY.md` policy, no Dependabot.
 
 Historical P0–P3 tables are in git history (`0a9a46e` and parents). Do not
 re-open them unless a regression shows up.
@@ -63,8 +58,8 @@ re-open them unless a regression shows up.
 |---|------|------------|
 | 1 | Fix the doctor test (mock an existing config path, or teach doctor to report missing configs as skip/info and assert that). Do not “fix” it by requiring real Claude/Cursor configs on the runner. | `uv run pytest -q` green on a clean machine |
 | 2 | `uv sync --locked` in CI (today it is `uv sync`, so lockfile drift is silent) | CI fails if `uv.lock` is stale |
-| 3 | Rewrite `AGENTS.md` to match the tree: suite is hermetic, ruff/pytest-timeout are in the dev group, auth is opt-in and never on `run` | An agent (or teammate) following AGENTS.md does not hang on sudo |
-| 4 | One ruff config. Keep `ruff.toml` *or* `[tool.ruff]` in `pyproject.toml`, not both. Drop ignores for deleted `claude.py` / `claude_commands.py`. | `uv run ruff check passkey/ tests/` uses a single source of rules |
+| 3 | ~~Rewrite `AGENTS.md`.~~ **Done (this branch):** matches the tree (hermetic suite, opt-in auth, never on `run`, `uv` + `ruff.toml`, sys-* agents). | An agent (or teammate) following AGENTS.md does not hang on sudo |
+| 4 | ~~One ruff config.~~ **Done (this branch):** `ruff.toml` is the only config; dropped `[tool.ruff]` from `pyproject.toml` and ignores for deleted `claude.py` / `claude_commands.py`. | `uv run ruff check passkey/ tests/` uses a single source of rules |
 | 5 | Protect `main` (GitHub settings, not a file): require a PR, require the CI check, no force-push, no deletions. “Require approvals” can stay off while you are the only maintainer. Turn on auto-delete head branches. | A red CI cannot merge. Settings → Branches → `main` is protected |
 
 **Exit:** GitHub Actions green on `main` for macOS + Ubuntu, Python 3.10 and 3.14, and that check is required to merge.
@@ -175,6 +170,24 @@ D0 (CI + protect main)  →  D1 (docs + CONTRIBUTING)  →  D2 (tag + PyPI)  →
 D0 and D1 can ship as one PR to `main` with no tag. Protect `main` as soon as
 that PR is merged (otherwise the next push can skip CI). D2 is the first tag.
 Do not tag until GitHub Actions is green on the commit you tag.
+
+---
+
+## How we implement this plan
+
+Cursor custom agents in `.cursor/agents/` (also the agent-profile picker):
+
+| Agent | Role |
+|-------|------|
+| `sys-arch` | Research and `PLAN.md`. No production code. |
+| `sys-engineer` | Implement and test with `uv`. |
+| `sys-release` | Every PR: SemVer bump + `CHANGELOG.md` `[Unreleased]`. |
+| `sys-review` | Read-only pre-PR review. |
+
+Loop: arch (if needed) → engineer → release → review → PR. A hook denies
+`git push` / `gh pr create` if `CHANGELOG.md` did not change vs `main`.
+Until the 0.4.0 tag, PRs bump **0.3.x** (patch/minor). Do not use major
+until 1.0.
 
 ---
 

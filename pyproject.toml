@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "passkey-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "Cross-platform secrets manager for MCP servers and CLI tools"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -54,10 +54,6 @@ markers = [
     "integration: tests that require real Keychain access",
     "slow: tests using production crypto parameters (deselected by default; run with -m slow)",
 ]
-
-[tool.ruff.lint]
-# Defaults (E4/E7/E9/F) plus bugbear (catches dead expressions, B018) and SIM.
-select = ["E4", "E7", "E9", "F", "W", "B", "SIM"]
 
 [dependency-groups]
 dev = [

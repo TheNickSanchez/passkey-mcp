@@ -4,7 +4,18 @@
 > labels were not earned (test suite cannot run to completion, auth layer
 > breaks headless MCP flows on stock macOS, no CI). Versions were re-baselined:
 > `1.0.0 → 0.0.1`, `1.1.0 → 0.1.0`, `1.2.0 → 0.2.0`. See `PLAN.md` for the
-> roadmap to a real 1.0.
+> roadmap to a real 1.0. First installable tag will be **0.4.0**.
+
+## [Unreleased]
+
+### Changed
+
+- **0.3.1** — Cursor agent profiles (`sys-arch`, `sys-engineer`, `sys-release`,
+  `sys-review`), release-hygiene skill, changelog gate on `git push` / `gh pr create`,
+  and a PR template that requires SemVer + `[Unreleased]` notes on every branch.
+  Dropped leftover Claude Code dir, duplicate ruff config, and stale
+  `claude.py` lint ignores. Editor folders (`.vscode/`, `.idea/`) are gitignored.
+  Rewrote `AGENTS.md` to match the tree (P0–P3 claims removed).
 
 ## 0.3.0 (2026-07-28)
 
@@ -12,11 +23,6 @@
 - Re-versioned to 0.x; project is pre-1.0 (see note above)
 - Deleted stale plans (`PHASE2.md`, `docs/SECURITY_AUDIT_2026.md`); superseded by `PLAN.md`
 - Rewrote `AGENTS.md` with verified, accurate workflow instructions
-
-### Known issues (documented in `PLAN.md`)
-- Test suite hangs on real `sudo` prompts and writes to the real data dir — do not trust a green run from a warm-cache machine
-- `passkey run` requires OS auth that fails headless on stock macOS, breaking passkey-wrapped MCP servers
-- JSONC config parsing corrupts URLs (`https://…`)
 
 ## 0.2.0 (2026-07-26, previously "1.2.0")
 
