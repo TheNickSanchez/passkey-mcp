@@ -14,6 +14,8 @@
   exist on the machine. Doctor already stays silent on missing MCP clients;
   the suite now locks that first-run contract so a clean runner is not a
   failed install.
+- **0.3.2** — MCP integration smoke tests mock the OS keyring so Ubuntu CI
+  (no keyring daemon) is not a failed install.
 
 ### Changed
 

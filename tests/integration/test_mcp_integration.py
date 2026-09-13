@@ -5,6 +5,17 @@ Run manually with: python -m tests.integration.test_mcp_integration
 """
 
 import sys
+from unittest.mock import patch
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _null_keyring():
+    """Do not require an OS keyring daemon (Ubuntu CI has none)."""
+    with patch("passkey.keychain.keyring") as mock:
+        mock.get_password.return_value = None
+        yield mock
 
 
 def test_tools_directly():
@@ -22,6 +33,7 @@ def test_tools_directly():
     # Test 1: List entries
     print("1. Testing passkey_list...")
     entries = passkey_list()
+    assert isinstance(entries, list)
     print(f"   Found {len(entries)} entries: {entries}")
     print("   PASS")
     print()
@@ -54,7 +66,6 @@ def test_tools_directly():
 
     print("=" * 40)
     print("All integration tests passed!")
-    return True
 
 
 def test_error_handling():
@@ -67,25 +78,19 @@ def test_error_handling():
 
     # Test missing entry
     print("1. Testing passkey_fields with missing entry...")
-    try:
+    with pytest.raises(Exception, match="not found"):
         passkey_fields("nonexistent-entry-12345")
-        print("   FAIL: Should have raised an exception")
-        return False
-    except Exception as e:
-        print(f"   Got expected error: {e}")
-        print("   PASS")
+    print("   PASS")
     print()
 
     print("Error handling tests passed!")
-    return True
 
 
 if __name__ == "__main__":
     try:
-        success = test_tools_directly()
-        if success:
-            success = test_error_handling()
-        sys.exit(0 if success else 1)
+        test_tools_directly()
+        test_error_handling()
+        sys.exit(0)
     except Exception as e:
         print(f"FAIL: {e}")
         import traceback
