@@ -5,21 +5,38 @@ alwaysApply: true
 
 # Agent routing
 
-Custom agents live in `.cursor/agents/`. Use them instead of one giant chat doing research, implementation, and release notes at once.
+Same four specialists in `.cursor/agents/`. Do not add a fifth. Do not
+rebuild. Invocation is the constraint.
 
-| Agent | Job |
-|-------|-----|
-| `sys-arch` | Research, threat model, `PLAN.md`. No `passkey/` or `tests/` edits. |
-| `sys-engineer` | Implement and test. `uv` only. Mock auth. Execute `PLAN.md`. |
-| `sys-release` | **Every branch/PR:** classify patch/minor/major, update `CHANGELOG.md` `[Unreleased]`, bump version. |
-| `sys-review` | Read-only pre-PR review. Block if changelog or version missing. |
+| Agent | When |
+|-------|------|
+| `sys-arch` | `PLAN.md` names a **design fork** (two valid product/security/deploy choices). `PLAN.md` only. Skip table refreshes and mechanical docs/CI/tests. |
+| `sys-engineer` | Implement and test. `uv` only. Mock auth. Read `PLAN.md`; do not invent architecture. |
+| `sys-release` | Every PR: classify patch/minor/major, **promote the previous Unreleased heading**, bump version files + `uv.lock`. |
+| `sys-review` | Read-only merge lint. Block if changelog/version missing or claimed files are untracked. Nits do not restart the loop. |
 
-## Required PR loop
+## Parent Auto is the PM (not a fifth specialist)
 
-1. `sys-arch` (if design is open) → 2. `sys-engineer` → 3. `sys-release` → 4. `sys-review` → 5. then `gh pr create`.
+This chat discusses results with Nick. Do not Task a `sys-pm`. See
+`.cursor/rules/parent-pm.mdc`.
 
-A project hook denies `gh pr create` and `git push` when `CHANGELOG.md` is unchanged vs `main`.
+Task prompt: branch, PLAN section id (e.g. `D2-1`), stop-before-commit yes/no.
+Do **not** paste locked copy, file-by-file edits, or a second PLAN.md.
+Do not implement in this chat when the loop is running, except the nit path.
 
-Until 1.0: patch = fix/docs/tests/CI; minor = feature or 0.x breaking change; major = 1.0.0 only. First tag is 0.4.0; before that bump 0.3.x.
+## PR loop
 
-Do not invent CI green, PyPI, or 1.0. `PLAN.md` is the roadmap.
+1. `sys-arch` **only if** a design fork exists → 2. `sys-engineer` →
+3. `sys-release` → 4. `sys-review` → 5. commit / `gh pr create` only if Nick asks.
+
+**Nits** (prose, PLAN current-state, optional tests): engineer patches (parent
+may, if Nick asked). Re-run pytest only if `passkey/` or `tests/` changed.
+Do not re-invoke arch/release/review unless Critical (changelog/version,
+security boundary, claimed-but-untracked files).
+
+A hook denies `git push` / `gh pr create` when `CHANGELOG.md` is unchanged vs
+`main`. Until 1.0: **patch** = fix/docs/tests/CI; **minor** = feature or 0.x
+breaking; **major** = 1.0.0 only. First tag is 0.4.0; before that bump 0.3.x.
+
+`PLAN.md` current-state describes **main**, not a dirty branch. Do not invent
+CI green, PyPI, or 1.0. Nick is the merge reviewer; sys-review is lint.

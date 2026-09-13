@@ -1,9 +1,12 @@
 ---
 name: release-hygiene
 description: >-
-  Classify SemVer (major/minor/patch), update CHANGELOG.md [Unreleased], and bump
-  pyproject.toml plus passkey/__init__.py on every passkey-mcp branch and PR.
-  Use when finishing a feature, committing for a PR, pushing, or opening a pull request.
+  Classify SemVer (major/minor/patch), promote the previous Unreleased heading
+  into a dated ## 0.3.N, update CHANGELOG.md [Unreleased], and bump
+  pyproject.toml, passkey/__init__.py, and uv.lock on every passkey-mcp branch
+  and PR.
+  Use when finishing a feature, committing for a PR, pushing, or opening a pull
+  request.
 ---
 
 # Release hygiene
@@ -20,9 +23,10 @@ First published tag is **0.4.0** (`PLAN.md` D2). Until that PR, bump **0.3.x**.
 
 ## Edit
 
-1. Ensure `## [Unreleased]` exists at the top of `CHANGELOG.md`. Add one sentence under Added / Changed / Fixed / Security.
-2. Bump `[project] version` in `pyproject.toml` **and** `__version__` in `passkey/__init__.py` to the same value (until D2-5 single-sources metadata).
-3. If CHANGELOG still lists 0.3.0 known issues that the rewrite fixed, delete those lines when you touch the file.
+1. Ensure `## [Unreleased]` exists at the top of `CHANGELOG.md`. Put **this PR’s** one-sentence bullets there (Added / Changed / Fixed / Security).
+2. **Promote the previous version.** If `[Unreleased]` still holds notes for the version now on `main`, move them to `## 0.3.N (YYYY-MM-DD)` below `[Unreleased]`. Do not leave two versions mixed under `[Unreleased]`. This is not the same as creating `## 0.4.0`.
+3. Bump `[project] version` in `pyproject.toml` **and** `__version__` in `passkey/__init__.py` to the same value (until D2-5 single-sources metadata). Bump `uv.lock`’s `passkey-mcp` version to match (`uv lock` or the smallest edit; do not bump dependencies unless this PR is about them).
+4. If CHANGELOG still lists 0.3.0 known issues that the rewrite fixed, delete those lines when you touch the file.
 
 ## Do not
 

@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Agent loop: skip sys-arch unless PLAN.md names a design fork; parent chat
+  is the PM (no fifth specialist); sys-release promotes the previous
+  Unreleased heading on every 0.3.x bump; nits do not restart the four-agent
+  cycle.
+
+## 0.3.3 (2026-09-13)
+
 ### Added
 
 - CONTRIBUTING.md so contributors have a single entry for setup, tests, and
