@@ -1,8 +1,18 @@
 # Passkey
 
-A cross-platform secrets manager for AI coding assistants and CLI tools — stores named credential sets in your system keychain and injects them as environment variables at runtime.
+A local OS-keychain injector for MCP and CLI secrets. It stores named
+credential sets in your system keychain (`keyring`, service name `passkey`)
+and injects them as environment variables at runtime.
 
-No plaintext secrets in config files. No cloud sync. Protected by your OS keychain's access controls (optional Touch ID / sudo prompt for terminal use).
+This is **not** a team password manager, a shared vault, or a 1Password
+replacement. Alpha, 0.x.
+
+No plaintext secrets in config files. No cloud sync. No network. Primary
+protection is the OS keychain ACL. Extra sudo/pkexec is **optional and off
+by default** (`passkey config require-auth on`) and **never** applies to
+`passkey run` (headless MCP). macOS Keychain ACLs are the strong case;
+Linux Secret Service and Windows Credential Manager are best-effort by
+comparison (Linux also needs a running, unlocked keyring daemon).
 
 ## Features
 
@@ -18,20 +28,24 @@ No plaintext secrets in config files. No cloud sync. Protected by your OS keycha
 - Import from Chrome password exports, existing MCP configs, or passkey backups
 - Encrypted bundle export/import for safe machine-to-machine transfer
 - Full audit logging with `passkey audit --summary`
-- **OS keychain ACL** protection, with optional **Touch ID** / sudo prompt for terminal commands (opt-in via `passkey config require-auth on`)
-- Cross-platform: macOS, Linux, Windows
+- **OS keychain ACL** protection, with optional **Touch ID** / sudo prompt for interactive terminal commands (opt-in, off by default; never on `passkey run`)
+- Cross-platform: macOS (strong Keychain ACLs); Linux and Windows are best-effort vs that
 
 ## Installation
 
+PyPI `passkey-mcp` is **unpublished**. Do not run `pipx install passkey-mcp`
+or `pip install passkey-mcp` — those 404 until the 0.4.0 release.
+
+**Preview (git, until PyPI):**
+
 ```bash
-# Recommended: install globally with pipx
-pipx install passkey-mcp
+pipx install git+https://github.com/TheNickSanchez/passkey-mcp.git
+```
 
-# Or with pip
-pip install passkey-mcp
+**This repo / clone:**
 
-# Development mode (from source)
-pip install -e .
+```bash
+uv run passkey
 ```
 
 ### Requirements
@@ -170,7 +184,7 @@ passkey unwrap --dry-run        # Preview first
 # Add or update credentials for an MCP server
 passkey add my-server                            # Interactive field entry
 passkey add my-server --tool claude              # Target a specific tool config
-passkey add my-server API_KEY=abc TOKEN=xyz      # Non-interactive (KEY=VALUE)
+passkey add my-server --fields API_KEY TOKEN     # Field names only; values via getpass
 
 # Show security status across all tools
 passkey status
@@ -398,7 +412,7 @@ Secrets themselves are stored in the **system keychain**, not on disk. The data 
 - **Encrypted bundles**: AES-256-GCM + scrypt (N=2^20) for portable transfer
 - **LLM-safe**: AI assistants can list entries but never read values
 
-See [docs/SECURITY.md](docs/SECURITY.md) for full details.
+See [SECURITY.md](SECURITY.md) for the disclosure policy and threat model.
 
 ## Troubleshooting
 
@@ -434,9 +448,9 @@ passkey import backup.json --mode merge
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest tests/ -v
-ruff check passkey/
+uv sync
+uv run pytest -q
+uv run ruff check passkey/ tests/
 ```
 
 ## License

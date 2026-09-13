@@ -8,18 +8,44 @@
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- **0.3.2** — Doctor tests no longer depend on whether Claude/Cursor configs
-  exist on the machine. Doctor already stays silent on missing MCP clients;
-  the suite now locks that first-run contract so a clean runner is not a
-  failed install.
-- **0.3.2** — MCP integration smoke tests mock the OS keyring so Ubuntu CI
-  (no keyring daemon) is not a failed install.
+- CONTRIBUTING.md so contributors have a single entry for setup, tests, and
+  the PR loop.
 
 ### Changed
 
-- **0.3.2** — CI syncs with `--locked` so a stale lockfile fails the build.
+- README positions the product as a local OS-keychain injector; install is a
+  labeled git preview (PyPI unpublished), Development is `uv` only, and
+  `passkey add --fields` is documented as getpass prompts.
+- `passkey doctor` recommends the git preview or `uv run passkey` instead of
+  `pip install` / PyPI pipx.
+
+### Fixed
+
+- Documented share passphrase entropy as 8 words / ~64 bits (the 0.2.0 notes
+  had said 4 words / ~32 bits).
+
+### Security
+
+- Replaced the fake “approved / SOC 2” assessment with a disclosure policy
+  and a one-page threat model that matches the code; GitHub Security tab
+  file lives at the repo root.
+
+## 0.3.2 (2026-09-13)
+
+### Fixed
+
+- Doctor tests no longer depend on whether Claude/Cursor configs exist on
+  the machine. Doctor already stays silent on missing MCP clients; the
+  suite now locks that first-run contract so a clean runner is not a
+  failed install.
+- MCP integration smoke tests mock the OS keyring so Ubuntu CI (no keyring
+  daemon) is not a failed install.
+
+### Changed
+
+- CI syncs with `--locked` so a stale lockfile fails the build.
 
 ## 0.3.1 (2026-09-12)
 
@@ -54,7 +80,7 @@
   - Secret values stripped when saving custom templates
   - Integrated into `passkey new` flow ("Start from a template?")
 - **`passkey share`** — share entries via encrypted file + passphrase
-  - 256-word built-in passphrase wordlist (~32 bits entropy, 4 words)
+  - 256-word built-in passphrase wordlist (~64 bits entropy, 8 words)
   - Displays passphrase for human relay (no key exchange needed)
   - `shared_by` and `shared_at` metadata tracked in encrypted payload
 - **`passkey receive`** — import shared entries by passphrase
