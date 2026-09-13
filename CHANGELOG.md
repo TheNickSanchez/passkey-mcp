@@ -8,9 +8,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **0.3.2** — Doctor tests no longer depend on whether Claude/Cursor configs
+  exist on the machine. Doctor already stays silent on missing MCP clients;
+  the suite now locks that first-run contract so a clean runner is not a
+  failed install.
+- **0.3.2** — MCP integration smoke tests mock the OS keyring so Ubuntu CI
+  (no keyring daemon) is not a failed install.
+
 ### Changed
 
-- **0.3.1** — Cursor agent profiles (`sys-arch`, `sys-engineer`, `sys-release`,
+- **0.3.2** — CI syncs with `--locked` so a stale lockfile fails the build.
+
+## 0.3.1 (2026-09-12)
+
+### Changed
+
+- Cursor agent profiles (`sys-arch`, `sys-engineer`, `sys-release`,
   `sys-review`), release-hygiene skill, changelog gate on `git push` / `gh pr create`,
   and a PR template that requires SemVer + `[Unreleased]` notes on every branch.
   Dropped leftover Claude Code dir, duplicate ruff config, and stale

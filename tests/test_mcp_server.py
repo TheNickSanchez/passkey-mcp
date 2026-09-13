@@ -422,22 +422,30 @@ class TestPasskeyWrapServer:
 class TestPasskeyDoctor:
     """Tests for passkey_doctor tool."""
 
-    def _make_adapter(self, tmp_path, root_key="mcpServers"):
+    def _make_adapter(self, tmp_path, root_key="mcpServers", *, exist=True):
         import sys
 
         from passkey.mcp_config import ToolAdapter
         cfg = tmp_path / "config.json"
-        cfg.touch()
+        if exist:
+            cfg.touch()
         return ToolAdapter(
             name="test", display_name="Test", root_key=root_key,
             global_paths={sys.platform: cfg}, project_paths={},
         )
 
+    @patch('passkey.doctor.list_entries')
+    @patch('passkey.doctor.find_passkey_command')
     @patch('passkey.doctor.load_config')
-    def test_detects_missing_config(self, mock_load):
+    def test_detects_missing_config(self, mock_load, mock_find, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path)
         mock_load.side_effect = FileNotFoundError()
-        result = passkey_doctor()
+        mock_find.return_value = "/usr/local/bin/passkey"
+        mock_list.return_value = []
+        with patch('passkey.doctor.ADAPTERS', {"test": adapter}):
+            result = passkey_doctor()
         assert result["summary"]["failed"] > 0
+        assert any(c["status"] == "fail" and "config" in c["name"] for c in result["checks"])
 
     @patch('passkey.doctor.list_entries')
     @patch('passkey.doctor.find_passkey_command')
@@ -452,11 +460,13 @@ class TestPasskeyDoctor:
     @patch('passkey.doctor.list_entries')
     @patch('passkey.doctor.find_passkey_command')
     @patch('passkey.doctor.load_config')
-    def test_all_checks_pass(self, mock_load, mock_find, mock_list):
+    def test_all_checks_pass(self, mock_load, mock_find, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path)
         mock_load.return_value = {"mcpServers": {}}
         mock_find.return_value = "/usr/local/bin/passkey"
         mock_list.return_value = []
-        result = passkey_doctor()
+        with patch('passkey.doctor.ADAPTERS', {"test": adapter}):
+            result = passkey_doctor()
         assert result["summary"]["failed"] == 0
 
     @patch('passkey.doctor.list_entries')
@@ -523,3 +533,14 @@ class TestPasskeyDoctor:
         with patch('passkey.doctor.ADAPTERS', {"test": adapter}):
             result = passkey_doctor()
         assert any(c["status"] == "fail" and "config" in c["name"] for c in result["checks"])
+
+    @patch('passkey.doctor.list_entries')
+    @patch('passkey.doctor.find_passkey_command')
+    def test_missing_clients_are_not_failures(self, mock_find, mock_list, tmp_path):
+        adapter = self._make_adapter(tmp_path, exist=False)
+        mock_find.return_value = "/usr/local/bin/passkey"
+        mock_list.return_value = []
+        with patch('passkey.doctor.ADAPTERS', {"test": adapter}):
+            result = passkey_doctor()
+        assert result["summary"]["failed"] == 0
+        assert not any("config" in c["name"] and c["status"] == "fail" for c in result["checks"])
