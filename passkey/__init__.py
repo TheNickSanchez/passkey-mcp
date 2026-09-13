@@ -1,6 +1,6 @@
 """Passkey - cross-platform system keychain secrets manager with MCP integration."""
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 from .keychain import delete_entry, get_entry, list_entries, save_entry
 from .models import Entry

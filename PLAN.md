@@ -1,7 +1,7 @@
 # passkey-mcp — Plan to make it deployable
 
 **Target:** first installable release **v0.4.0**.
-**Current tree:** 0.3.0 (P0–P3 rewrite is in `main`, never published).
+**Current tree:** 0.3.1 (P0–P3 rewrite is in `main`, never published).
 
 Deployable means a teammate can install a **pinned version** with pipx, MCP
 configs can exec `passkey` from PATH, and a company security review can point
@@ -24,7 +24,7 @@ Positioning for every doc and review ticket:
 | GitHub Releases / tags | **None** |
 | CI | Workflow exists; only run on `main` is **red** (326 passed, 1 failed) |
 | Branch protection | **Off** — `main` has no required checks; force-push is allowed |
-| Version | Duplicated: `pyproject.toml` and `passkey/__init__.py` both hardcode `0.3.0` |
+| Version | Duplicated: `pyproject.toml` and `passkey/__init__.py` both hardcode `0.3.1` |
 | Version on PyPI | Never shipped. Do not tag 0.3.0 as the first release — its CHANGELOG still claims tests hang and `run` is auth-gated, which is no longer true |
 
 P0–P3 from the 2026-07-28 roadmap **landed in code** (hermetic tests, opt-in
@@ -35,6 +35,8 @@ audit cap). They did **not** land as a release. Leftover from that work:
   (`assert result["summary"]["failed"] > 0` → 0). Root cause: doctor only
   iterates `get_all_existing_paths()`, so on a clean runner the
   `FileNotFoundError` path never runs. The test is environment-dependent.
+  **D0-1 decision: Option A** (hermetic tests; doctor stays silent on missing
+  clients). See D0 below.
 - `docs/SECURITY.md` claims **APPROVED FOR CORPORATE USE** (wrong deps,
   wrong version, SOC 2 theater). A reviewer will treat that as a credibility
   problem, not evidence.
@@ -56,13 +58,113 @@ re-open them unless a regression shows up.
 
 | # | Item | Acceptance |
 |---|------|------------|
-| 1 | Fix the doctor test (mock an existing config path, or teach doctor to report missing configs as skip/info and assert that). Do not “fix” it by requiring real Claude/Cursor configs on the runner. | `uv run pytest -q` green on a clean machine |
-| 2 | `uv sync --locked` in CI (today it is `uv sync`, so lockfile drift is silent) | CI fails if `uv.lock` is stale |
+| 1 | **Decided — Option A** (see implementation below). Keep doctor iterating only existing paths. Make `TestPasskeyDoctor` hermetic. Do not treat a machine with no Claude/Cursor configs as a failed install. Do not require those configs on the runner. | `uv run pytest -q` green on a clean machine |
+| 2 | **Mechanical (no design fork).** In `.github/workflows/ci.yml`, add `--locked` to both `uv sync` invocations: lint job `uv sync` → `uv sync --locked`; test job `uv sync --python ${{ matrix.python }}` → `uv sync --locked --python ${{ matrix.python }}`. | CI fails if `uv.lock` is stale |
 | 3 | ~~Rewrite `AGENTS.md`.~~ **Done (this branch):** matches the tree (hermetic suite, opt-in auth, never on `run`, `uv` + `ruff.toml`, sys-* agents). | An agent (or teammate) following AGENTS.md does not hang on sudo |
 | 4 | ~~One ruff config.~~ **Done (this branch):** `ruff.toml` is the only config; dropped `[tool.ruff]` from `pyproject.toml` and ignores for deleted `claude.py` / `claude_commands.py`. | `uv run ruff check passkey/ tests/` uses a single source of rules |
-| 5 | Protect `main` (GitHub settings, not a file): require a PR, require the CI check, no force-push, no deletions. “Require approvals” can stay off while you are the only maintainer. Turn on auto-delete head branches. | A red CI cannot merge. Settings → Branches → `main` is protected |
+| 5 | Protect `main` — **maintainer-manual after this PR merges.** GitHub Settings clicks only. No workflow file, no Ruleset YAML in-repo, no `gh api` script. Click path below. | A red CI cannot merge. Direct push, force-push, and deletion of `main` are blocked. |
 
-**Exit:** GitHub Actions green on `main` for macOS + Ubuntu, Python 3.10 and 3.14, and that check is required to merge.
+**Exit:** GitHub Actions green on `main` for macOS + Ubuntu, Python 3.10 and 3.14, and those checks are required to merge.
+
+### D0-1 — Option A (decided)
+
+**Why this, not B.** A clean machine with no Claude/Cursor configs is a normal
+first-run, not a broken install. Doctor already iterates only
+`adapter.get_all_existing_paths()` (`passkey/doctor.py` `run_diagnostics`,
+Check 3). That is the honest product: diagnose configs that exist; stay silent
+on clients the user never installed. Option B (emit skip/info for every
+expected-but-absent adapter path) would add noise and a new summary status
+without helping a first-run user. The CI red is a **test hermeticity** bug:
+`test_detects_missing_config` patches `passkey.doctor.load_config` with
+`FileNotFoundError` but never injects a path, so on a runner with an empty
+`get_all_existing_paths()` the mock never fires and `failed` stays 0.
+`test_all_checks_pass` has the same hole (green by accident when the loop is
+empty). Do not “fix” CI by requiring real client configs on the runner, and
+do not change doctor to fail (or skip/info) on missing clients.
+
+**Do not edit `passkey/doctor.py`.** Behavior stays:
+
+- Iterate `ADAPTERS` → `adapter.get_all_existing_paths()` only.
+- Missing MCP clients: no check row (not `fail`, not `skip`, not `info`).
+- `FileNotFoundError` or `MCPConfigError` from `load_config` on a path that
+  *was* existing (TOCTOU / vanished file, or invalid JSON) stays `status: fail`
+  and increments `summary.failed`. `test_handles_invalid_adapter_config`
+  already covers `MCPConfigError`.
+
+**Edit `tests/test_mcp_server.py` `TestPasskeyDoctor` only.** Reuse the
+existing `_make_adapter(tmp_path)` helper (it `touch()`es a temp `config.json`
+so `get_all_existing_paths()` returns that path) and
+`patch('passkey.doctor.ADAPTERS', {"test": adapter})` — same pattern as
+`test_reports_broken_server`, `test_reports_exposed_server`,
+`test_handles_keychain_failure`, and `test_handles_invalid_adapter_config`.
+Do not mock `get_all_existing_paths` on the real Claude/Cursor adapters; inject
+a temp adapter instead.
+
+Engineer checklist:
+
+1. `test_detects_missing_config`: add `tmp_path`, build `_make_adapter(tmp_path)`,
+   keep `load_config` → `FileNotFoundError`, wrap the `passkey_doctor()` call
+   in `patch('passkey.doctor.ADAPTERS', {"test": adapter})`. Assertion stays
+   `result["summary"]["failed"] > 0` (optionally also: a check whose `name`
+   contains `config` and `status == "fail"`). This exercises the existing
+   exception handler, not “user has no Claude.”
+2. `test_all_checks_pass`: same adapter injection so the config loop actually
+   runs. Keep `load_config` returning `{"mcpServers": {}}`, PATH and keychain
+   mocks as today. Assert `result["summary"]["failed"] == 0`.
+3. Add `test_missing_clients_are_not_failures`: PATH and keychain mocked to
+   pass; `ADAPTERS` patched to `{}` **or** to one `_make_adapter`-style
+   adapter whose `global_paths` point at a non-existent file (do **not**
+   `touch()` it). Do not require `load_config` to fire. Assert
+   `result["summary"]["failed"] == 0` and that no check with `config` in
+   `name` has `status == "fail"`. This locks the first-run product rule.
+4. Leave `test_detects_missing_passkey_in_path` as-is (its assertion does not
+   depend on the config loop). Leave the four tests that already patch
+   `ADAPTERS` as-is.
+5. Do not add a third doctor. Do not require real `~/.claude.json` /
+   Cursor configs. Acceptance: `uv run pytest -q` green on a clean machine
+   (no MCP client configs on disk).
+
+### D0-2 — `--locked` (mechanical)
+
+File: `.github/workflows/ci.yml` only. Two lines, no other CI design:
+
+- Job `lint`, step `run: uv sync` → `run: uv sync --locked`
+- Job `test`, step `Sync dependencies` / `run: uv sync --python ${{ matrix.python }}`
+  → `run: uv sync --locked --python ${{ matrix.python }}`
+
+No new job, no cache change, no Python-version fork. If `uv.lock` is stale
+relative to `pyproject.toml`, both jobs fail. That is the acceptance.
+
+### D0-5 — Protect `main` (clicks only, after merge)
+
+Do this on GitHub after the D0 PR is green and merged. Do **not** add a
+workflow, a check-aggregator job, a `.github` ruleset file, or an API script.
+
+1. Open `TheNickSanchez/passkey-mcp` on GitHub → **Settings** → **Branches**.
+2. Under **Branch protection rules**, click **Add branch protection rule**.
+   If the page only offers **Rulesets**, use **New ruleset** → **New branch
+   ruleset**, target `main`, and apply the same constraints.
+3. **Branch name pattern:** `main`.
+4. Enable **Require a pull request before merging**. Leave **Require
+   approvals** off (0 reviewers) while you are the only maintainer.
+5. Enable **Require status checks to pass before merging**. After a green D0
+   run, search and add the check names as they appear on the Actions tab
+   (typical defaults from `.github/workflows/ci.yml`):
+   - `lint`
+   - `test (macos-latest, 3.10)`
+   - `test (macos-latest, 3.14)`
+   - `test (ubuntu-latest, 3.10)`
+   - `test (ubuntu-latest, 3.14)`
+   Require all five. Do not invent a sixth job to fold them into one name.
+6. Enable **Do not allow bypassing the above settings** (include
+   administrators) so a red run cannot merge from an admin laptop.
+7. Leave **Allow force pushes** off. Leave **Allow deletions** off.
+8. Click **Create** / **Save changes**.
+9. **Settings** → **General** → scroll to **Pull Requests** → enable
+   **Automatically delete head branches**.
+
+Done when a direct push to `main` is rejected, a PR with a red required check
+cannot merge, and `main` cannot be force-pushed or deleted.
 
 ---
 
