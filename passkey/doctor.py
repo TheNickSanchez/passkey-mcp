@@ -52,7 +52,10 @@ def run_diagnostics(deep: bool = False) -> dict:
             "message": "Passkey not found in PATH",
         })
         issues.append("Passkey command not in PATH")
-        recommendations.append("Install passkey: pip install passkey-mcp")
+        recommendations.append(
+            "Install passkey: pipx install git+https://github.com/TheNickSanchez/passkey-mcp.git "
+            "(git preview until PyPI) or uv run passkey from a clone."
+        )
 
     # Check 2: Keychain access
     entries: list[str] = []

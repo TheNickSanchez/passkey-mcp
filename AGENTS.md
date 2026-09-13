@@ -1,6 +1,6 @@
 # passkey-mcp — Agent Notes
 
-Verified 2026-09-12. Roadmap is `PLAN.md` (first installable release **0.4.0**).
+Verified 2026-09-13. Roadmap is `PLAN.md` (first installable release **0.4.0**).
 Package version lives in `pyproject.toml` (also duplicated in
 `passkey/__init__.py` until D2-5). This tree is **0.3.x**, Alpha, unpublished.
 
@@ -36,12 +36,9 @@ uv run ruff check passkey/ tests/
 uv run passkey --help
 ```
 
-CI exists (`.github/workflows/ci.yml`: macOS + Ubuntu, 3.10 and 3.14). The
-only known red test on a clean runner is
-`tests/test_mcp_server.py::TestPasskeyDoctor::test_detects_missing_config`
-(doctor only iterates configs that already exist). Do not present a partial
-run as “all tests pass.” Do not ignore `test_cli.py` / `test_bundle.py` —
-those hangs are gone.
+CI exists (`.github/workflows/ci.yml`: macOS + Ubuntu, 3.10 and 3.14). Do
+not present a partial run as “all tests pass.” Do not ignore `test_cli.py`
+/ `test_bundle.py` — those hangs are gone.
 
 ## Auth
 
@@ -63,9 +60,9 @@ and mocks `passkey.cli._require_auth`. Never call real sudo/pkexec. Cover
 6. Crypto constants: import from `bundle.py`, never redefine.
 7. Do not add a third doctor or a second permission checker (`doctor.py` and
    `bundle.check_file_permissions` are the singles).
-8. `docs/SECURITY.md` currently overclaims (“approved for corporate use”).
-   Do not copy that language. README install (`pipx install passkey-mcp`)
-   404s until D2. PyPI is unpublished; no tags.
+8. Root `SECURITY.md` is the disclosure policy. Do not copy old “approved
+   for corporate use” language. PyPI is unpublished until D2; install via
+   the labeled git preview or `uv run passkey`.
 9. After a branch checkout, `uv run passkey` — not a stale global install.
 
 ## Key files

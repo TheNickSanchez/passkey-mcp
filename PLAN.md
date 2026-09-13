@@ -1,7 +1,7 @@
 # passkey-mcp — Plan to make it deployable
 
 **Target:** first installable release **v0.4.0**.
-**Current tree:** 0.3.1 (P0–P3 rewrite is in `main`, never published).
+**Current tree:** 0.3.3 on branch `d1-honest-docs` (not tagged; `main` is still 0.3.2 until this PR merges).
 
 Deployable means a teammate can install a **pinned version** with pipx, MCP
 configs can exec `passkey` from PATH, and a company security review can point
@@ -15,37 +15,35 @@ Positioning for every doc and review ticket:
 
 ---
 
-## Current state (verified 2026-09-12)
+## Current state (verified 2026-09-13)
 
 | Signal | Reality |
 |--------|---------|
 | Code on GitHub | Public, MIT, `TheNickSanchez/passkey-mcp` |
-| PyPI `passkey-mcp` | **404** — README install commands do not work |
-| GitHub Releases / tags | **None** |
-| CI | Workflow exists; only run on `main` is **red** (326 passed, 1 failed) |
-| Branch protection | **Off** — `main` has no required checks; force-push is allowed |
-| Version | Duplicated: `pyproject.toml` and `passkey/__init__.py` both hardcode `0.3.1` |
-| Version on PyPI | Never shipped. Do not tag 0.3.0 as the first release — its CHANGELOG still claims tests hang and `run` is auth-gated, which is no longer true |
+| PyPI `passkey-mcp` | **404** — unpublished. Do not advertise a PyPI install until D2. |
+| GitHub Releases / tags | **None**. First tag is 0.4.0 (D2). Do not tag 0.3.x. |
+| CI | **Green on `main`** after D0-1/D0-4: macOS + Ubuntu, Python 3.10 and 3.14 (`lint` + four `test` jobs). `--locked` sync. Do not re-verify with a partial local run. |
+| Branch protection | **Off** — D0-5 not done. `main` has no required checks; force-push and direct push are still allowed. Nick clicks later (no workflow, no ruleset YAML, no `gh api`). |
+| Version | Duplicated: `pyproject.toml` and `passkey/__init__.py` both hardcode `0.3.3` on this branch (not tagged) |
+| Version on PyPI | Never shipped. Do not tag 0.3.x. First tag is 0.4.0 (D2). |
 
 P0–P3 from the 2026-07-28 roadmap **landed in code** (hermetic tests, opt-in
 auth, `unwrap`, JSONC URL fix, CLI package, unified doctor, file-based index,
-audit cap). They did **not** land as a release. Leftover from that work:
+audit cap). D0-1 through D0-4 **landed in 0.3.2**. D1-1 through D1-8
+**landed on this branch as 0.3.3** (docs honesty). Nothing is tagged.
+Remaining leftovers — **not D1**:
 
-- CI failure: `tests/test_mcp_server.py::TestPasskeyDoctor::test_detects_missing_config`
-  (`assert result["summary"]["failed"] > 0` → 0). Root cause: doctor only
-  iterates `get_all_existing_paths()`, so on a clean runner the
-  `FileNotFoundError` path never runs. The test is environment-dependent.
-  **D0-1 decision: Option A** (hermetic tests; doctor stays silent on missing
-  clients). See D0 below.
-- `docs/SECURITY.md` claims **APPROVED FOR CORPORATE USE** (wrong deps,
-  wrong version, SOC 2 theater). A reviewer will treat that as a credibility
-  problem, not evidence.
-- README still shows `pipx install passkey-mcp` and
-  `passkey add … API_KEY=abc` (code prompts via `getpass`; values are not
-  taken from argv). Development section still says `pip install -e ".[dev]"`
-  — `[project.optional-dependencies] dev` was deleted; truth is `uv sync`.
-- `doctor.py` recommends `pip install passkey-mcp` when the binary is missing.
-- No `CONTRIBUTING.md`, no repo-root `SECURITY.md` policy, no Dependabot.
+- PyPI `passkey-mcp` is **404**. No GitHub Releases / tags. Unpublished.
+- Branch protection is **off** (D0-5 — Nick’s Settings clicks; no workflow,
+  no ruleset YAML, no `gh api`).
+- Dependabot / private vuln reporting / PyPI provenance wait for D2/D3.
+
+~~Struck (done in D1 / 0.3.3):~~ root `SECURITY.md` + `docs/SECURITY.md`
+stub (no “approved” / SOC 2 theater); README git preview + `uv run passkey`
+(no PyPI pipx, no `pip install`, no `API_KEY=abc` argv); doctor git-preview
+copy; `CONTRIBUTING.md`; `AGENTS.md` leftover red-test sentence; CHANGELOG
+0.2.0 share entropy **8 words / ~64 bits**; 0.3.2 notes promoted out of
+`[Unreleased]`.
 
 Historical P0–P3 tables are in git history (`0a9a46e` and parents). Do not
 re-open them unless a regression shows up.
@@ -54,19 +52,21 @@ re-open them unless a regression shows up.
 
 ## D0 — Green `main` (v0.4.0-dev)
 
-*Nothing gets published while CI is red.*
+*D0-1 through D0-4 are done on `main` (0.3.2). CI is green. Remaining is D0-5 (Nick’s Settings clicks). Do not publish until D2.*
 
 | # | Item | Acceptance |
 |---|------|------------|
-| 1 | **Decided — Option A** (see implementation below). Keep doctor iterating only existing paths. Make `TestPasskeyDoctor` hermetic. Do not treat a machine with no Claude/Cursor configs as a failed install. Do not require those configs on the runner. | `uv run pytest -q` green on a clean machine |
-| 2 | **Mechanical (no design fork).** In `.github/workflows/ci.yml`, add `--locked` to both `uv sync` invocations: lint job `uv sync` → `uv sync --locked`; test job `uv sync --python ${{ matrix.python }}` → `uv sync --locked --python ${{ matrix.python }}`. | CI fails if `uv.lock` is stale |
-| 3 | ~~Rewrite `AGENTS.md`.~~ **Done (this branch):** matches the tree (hermetic suite, opt-in auth, never on `run`, `uv` + `ruff.toml`, sys-* agents). | An agent (or teammate) following AGENTS.md does not hang on sudo |
-| 4 | ~~One ruff config.~~ **Done (this branch):** `ruff.toml` is the only config; dropped `[tool.ruff]` from `pyproject.toml` and ignores for deleted `claude.py` / `claude_commands.py`. | `uv run ruff check passkey/ tests/` uses a single source of rules |
-| 5 | Protect `main` — **maintainer-manual after this PR merges.** GitHub Settings clicks only. No workflow file, no Ruleset YAML in-repo, no `gh api` script. Click path below. | A red CI cannot merge. Direct push, force-push, and deletion of `main` are blocked. |
+| 1 | ~~CI hermeticity (Option A).~~ **Done (0.3.2):** doctor still iterates only existing paths; `TestPasskeyDoctor` injects a temp adapter. Missing MCP clients are not a failed install. | Green on a clean runner (no Claude/Cursor configs) |
+| 2 | ~~`uv sync --locked`.~~ **Done (0.3.2):** both CI jobs (`lint`, `test`) use `--locked`. | CI fails if `uv.lock` is stale |
+| 3 | ~~Rewrite `AGENTS.md`.~~ **Done (0.3.1 / 0.3.2):** matches the tree (hermetic suite, opt-in auth, never on `run`, `uv` + `ruff.toml`, sys-* agents). D1 struck the leftover “only known red test” sentence. | An agent following AGENTS.md does not hang on sudo |
+| 4 | ~~One ruff config.~~ **Done (0.3.1):** `ruff.toml` is the only config; dropped `[tool.ruff]` from `pyproject.toml` and ignores for deleted `claude.py` / `claude_commands.py`. | `uv run ruff check passkey/ tests/` uses a single source of rules |
+| 5 | Protect `main` — **maintainer-manual clicks for Nick after this PR merges (or anytime; not a workflow).** GitHub Settings only. No workflow file, no Ruleset YAML in-repo, no `gh api` script. Click path below. | A red CI cannot merge. Direct push, force-push, and deletion of `main` are blocked. |
 
-**Exit:** GitHub Actions green on `main` for macOS + Ubuntu, Python 3.10 and 3.14, and those checks are required to merge.
+**Exit:** GitHub Actions green on `main` for macOS + Ubuntu, Python 3.10 and 3.14 (**met**), and those checks are required to merge (**not met** until D0-5).
 
-### D0-1 — Option A (decided)
+### D0-1 — Option A (done in 0.3.2)
+
+*Historical decision record. Do not re-open unless the doctor tests regress.*
 
 **Why this, not B.** A clean machine with no Claude/Cursor configs is a normal
 first-run, not a broken install. Doctor already iterates only
@@ -124,7 +124,9 @@ Engineer checklist:
    Cursor configs. Acceptance: `uv run pytest -q` green on a clean machine
    (no MCP client configs on disk).
 
-### D0-2 — `--locked` (mechanical)
+### D0-2 — `--locked` (done in 0.3.2)
+
+*Landed. Do not re-edit CI for this.*
 
 File: `.github/workflows/ci.yml` only. Two lines, no other CI design:
 
@@ -135,9 +137,9 @@ File: `.github/workflows/ci.yml` only. Two lines, no other CI design:
 No new job, no cache change, no Python-version fork. If `uv.lock` is stale
 relative to `pyproject.toml`, both jobs fail. That is the acceptance.
 
-### D0-5 — Protect `main` (clicks only, after merge)
+### D0-5 — Protect `main` (clicks only; D0 PR already merged)
 
-Do this on GitHub after the D0 PR is green and merged. Do **not** add a
+Do this on GitHub when Nick is ready (after D1 is fine). Do **not** add a
 workflow, a check-aggregator job, a `.github` ruleset file, or an API script.
 
 1. Open `TheNickSanchez/passkey-mcp` on GitHub → **Settings** → **Branches**.
@@ -168,23 +170,144 @@ cannot merge, and `main` cannot be force-pushed or deleted.
 
 ---
 
-## D1 — Honest docs (same milestone, no version bump)
+## D1 — Honest docs (**done on this branch**, patch 0.3.3)
 
-Reviewers read README and `docs/SECURITY.md` before they read `bundle.py`.
+*D1-1 through D1-8 landed on `d1-honest-docs` as 0.3.3. Do not re-implement.
+Do not start D2. Outlines below are the decision record.*
+
+Reviewers read README and SECURITY.md before they read `bundle.py`. This PR
+was **docs honesty**, classified **patch**. sys-release already bumped
+**0.3.2 → 0.3.3** and promoted 0.3.2 notes into `## 0.3.2 (2026-09-13)`.
+Do **not** bump to 0.4.0. D2/D3 stay out of scope.
 
 | # | Item | Acceptance |
 |---|------|------------|
-| 1 | Replace `docs/SECURITY.md` with a GitHub-standard disclosure policy (how to report, what is in/out of scope, threat model in one page). **No “approved”, no SOC 2/OWASP scorecards.** Put a copy or link at repo root so GitHub’s Security tab picks it up. | File matches the code; InfoSec can attach it to a ticket |
-| 2 | README: state the product is a local injector, not a password manager. Document `require-auth` as optional/off. Linux/Windows = best-effort vs macOS Keychain ACLs. | A security engineer cannot quote the README against the threat model |
-| 3 | README install: **do not** advertise `pipx install passkey-mcp` until D2 lands. Until then, one labeled preview (`pipx install git+https://github.com/TheNickSanchez/passkey-mcp.git`) or “not published yet.” Drop `pip install` as a recommended path. | Following README cannot 404 |
-| 4 | Delete the `API_KEY=abc` argv example. `passkey add --fields` prompts. | No documented secret-in-argv path |
-| 5 | CHANGELOG: strike 0.3.0 “known issues” that were fixed in the rewrite; note share passphrases are 8 words / ~64 bits (not 4 / ~32). Add a Keep a Changelog `[Unreleased]` section (0.4.0 section is filled at D2). | Changelog matches code; new work has a place to land before the tag |
-| 6 | Doctor copy: recommend `pipx install passkey-mcp` (after D2) not `pip install` | `passkey doctor` does not push people into system Python |
-| 7 | README Development: `uv sync`, `uv run pytest`, `uv run ruff check`. Delete `pip install -e ".[dev]"`. | A new clone can run the suite from the README |
-| 8 | Short `CONTRIBUTING.md`: same commands, PR = changelog note under `[Unreleased]`, do not commit to `main`. | Second contributor does not need to reverse-engineer AGENTS.md |
+| 1 | ~~Root `SECURITY.md` + `docs/` stub.~~ **Done (0.3.3):** GitHub-standard disclosure + threat model matching `auth.py` / `mcp_server.py`. No “approved”, no SOC 2 / OWASP. | File matches the code; InfoSec can attach it |
+| 2 | ~~README product + `require-auth`.~~ **Done (0.3.3):** local injector, not a password manager; extra auth optional/off; Linux/Windows best-effort vs macOS Keychain ACLs. | README cannot be quoted against the threat model |
+| 3 | ~~README install.~~ **Done (0.3.3):** labeled git preview + `uv run passkey`. No PyPI pipx, no `pip install`. | Following README cannot 404 |
+| 4 | ~~Argv example.~~ **Done (0.3.3):** `API_KEY=abc` removed; `passkey add --fields` prompts via `getpass`. | No documented secret-in-argv path |
+| 5 | ~~CHANGELOG honesty.~~ **Done (0.3.3):** 0.3.0 known-issues stay gone; 0.2.0 share line is **8 words / ~64 bits**; 0.3.2 notes promoted; D1 notes under `[Unreleased]`. | Changelog matches code |
+| 6 | ~~Doctor copy.~~ **Done (0.3.3):** git preview + `uv run passkey`. No `pip install`, no PyPI pipx. After D2, switch to pinned pipx — **not now**. | `passkey doctor` does not 404 |
+| 7 | ~~README Development + `AGENTS.md`.~~ **Done (0.3.3):** `uv sync` / `uv run pytest` / `uv run ruff check`; leftover red-test sentence struck. | A new clone can run the suite from the README |
+| 8 | ~~`CONTRIBUTING.md`.~~ **Done (0.3.3):** same commands; PR = `[Unreleased]` note; do not commit to `main`. | Second contributor does not reverse-engineer AGENTS.md |
 
-**Exit:** A cold reader of README + SECURITY.md would describe the same threat
-model as `passkey/auth.py` and `passkey/mcp_server.py`.
+**Exit:** A cold reader of README + root `SECURITY.md` would describe the same
+threat model as `passkey/auth.py` and `passkey/mcp_server.py`. **Met on this
+branch.**
+
+### D1-1 — locked: `SECURITY.md` outline (done in 0.3.3; keep as record)
+
+**Files:** create `/SECURITY.md`. Replace `/docs/SECURITY.md` with a 3–5 line
+stub: title + “the policy lives at the [repository root](../SECURITY.md).”
+Delete the fake assessment (APPROVED, SOC 2, OWASP, “no known CVEs”,
+placeholder `[Your Team]` / `[Security Team]`).
+
+**Contact check (do not invent an email):** `pyproject.toml` author is
+`Nick Sanchez` with **no email**. README has none. Old `docs/SECURITY.md`
+placeholders are not a contact. Do not add a SOC2 / vendor inbox.
+
+Copy this structure. One page. Match the code.
+
+```
+# Security Policy
+
+## Product
+Local OS-keychain injector for MCP/CLI secrets. Moves secrets out of
+config files into the OS keychain (`keyring`, service name `passkey`).
+Not a team vault. Not a password-manager vendor. Not multi-tenant.
+Alpha, 0.x. MIT license. Point InfoSec at the MIT license + this file
+(+ green CI; required checks after D0-5). Do not claim corporate
+approval.
+
+## Reporting
+1. Prefer GitHub private vulnerability reporting if it is enabled on
+   TheNickSanchez/passkey-mcp.
+2. Else open a public issue that contains **no secrets** (no tokens,
+   no bundle files, no env dumps, no keychain exports).
+3. There is no security email in this repo. Do not invent one.
+
+## In scope
+- Secret leakage via CLI, MCP tools, doctor, audit, export / import / share
+- Local MCP config rewrite by `passkey_wrap_server` (local file write,
+  not remote RCE)
+- Keychain + index handling (`entries.json` is names only; values live
+  in the OS keychain)
+- `passkey run` environment injection (child-process env exposure)
+- Docs / install commands that advertise an unpublished PyPI package
+
+## Out of scope
+- Multi-tenant vault, SSO, recovery, org admin, cloud sync
+- Physical access to an unlocked machine, root/admin compromise,
+  keyloggers, memory forensics
+- Remote RCE / network attack surface (this product has no server and
+  makes no network calls)
+- Corporate approval, SOC 2, OWASP scorecards
+- Windows extra-auth (documented no-op; see threat model)
+
+## Threat model (must match passkey/auth.py, mcp_server.py, keychain.py, runner.py)
+
+- Secrets never in argv. Interactive input uses `getpass`. Do not
+  document `KEY=VALUE` on the command line.
+- MCP tools (`passkey_list`, `passkey_fields`, `passkey_status`,
+  `passkey_doctor`, `passkey_wrap_server`) return names, field names,
+  and status only — **never secret values**.
+- `passkey run` injects env vars into a child process and is **never**
+  extra-auth-gated (headless MCP). See `cli/__init__.py` (`run` branch)
+  and `runner.py`. Extra sudo/pkexec is opt-in
+  (`passkey config require-auth on`) and applies only to interactive
+  CLI commands. It never applies to `run`.
+- Windows extra-auth is a documented no-op (`auth.py`
+  `_authenticate_windows` returns True). Protection is Credential
+  Manager ACLs alone. Linux extra-auth is `pkexec` with a getpass+sudo
+  fallback. macOS extra-auth is `sudo -v` (Touch ID if pam_tid).
+- Primary protection is the OS keychain ACL via `keyring`. macOS
+  Keychain ACLs (app prompt / login keychain) are the strong case.
+  Linux Secret Service and Windows Credential Manager are
+  **best-effort** by comparison; Linux also needs a running, unlocked
+  keyring daemon.
+- Entry index `entries.json` (data dir) is names only, written atomically
+  at `0o600`. Secret payloads are keychain items, not that file.
+- `passkey_wrap_server` rewrites local MCP configs
+  (`.json` / `.jsonc`, user paths; skips a short list of system
+  prefixes). In scope as a **local config rewrite**, not remote RCE.
+  Optional later control: D3-4 (disable write tools) — not this PR.
+- `passkey run` prints a stderr warning: env vars can be visible to
+  other processes on the same machine. That is an accepted, documented
+  risk, not a hidden one.
+- No network, no telemetry. Supply chain **is** the install path.
+  PyPI is unpublished; distribution today is a git preview until D2.
+
+## What this file must not say
+- “Approved”, “approved for corporate use”, SOC 2, OWASP Top 10
+  scorecards, “no known vulnerabilities”, invented dependency counts,
+  or a fake reviewer sign-off.
+```
+
+### D1-6 — locked: doctor (and README) install strings (done in 0.3.3)
+
+*Landed. Do not change these strings until D2.*
+
+**File:** `passkey/doctor.py` — the `passkey_in_path` fail recommendation.
+README install block uses the same two commands.
+
+**Until D2, use exactly:**
+
+- Git preview: `pipx install git+https://github.com/TheNickSanchez/passkey-mcp.git`
+- This clone: `uv run passkey`
+
+**Do not use:**
+
+- `pip install passkey-mcp`
+- `pipx install passkey-mcp` (PyPI 404)
+- `pip install -e .` / `pip install -e ".[dev]"` as the recommended path
+
+Suggested doctor sentence (engineer may wrap for line length, not change
+the commands):
+
+`Install passkey: pipx install git+https://github.com/TheNickSanchez/passkey-mcp.git (git preview until PyPI) or uv run passkey from a clone.`
+
+After D2, README + doctor may switch to `pipx install passkey-mcp==0.4.0`.
+Not this PR.
 
 ---
 
@@ -265,13 +388,13 @@ README to the team.
 ## Sequence
 
 ```
-D0 (CI + protect main)  →  D1 (docs + CONTRIBUTING)  →  D2 (tag + PyPI)  →  D3 (audit/Dependabot)
-         days                     same PR as D0 or next         after green main
+D0-1..D0-4 (done, 0.3.2, CI green)  →  D1 (done on this branch, 0.3.3)  →  D0-5 (Nick clicks)  →  D2 (tag + PyPI)  →  D3
 ```
 
-D0 and D1 can ship as one PR to `main` with no tag. Protect `main` as soon as
-that PR is merged (otherwise the next push can skip CI). D2 is the first tag.
-Do not tag until GitHub Actions is green on the commit you tag.
+D0 code shipped on `main` as 0.3.2. **D1 landed on `d1-honest-docs` as 0.3.3**
+(not tagged). Next is **D0-5** (Nick’s Settings clicks, not a workflow),
+then D2. Do **not** start D2. D2 is the first tag and the first PyPI
+publish. Do not tag until GitHub Actions is green on the commit you tag.
 
 ---
 
