@@ -8,20 +8,25 @@ Positioning: local OS-keychain injector for MCP/CLI secrets. Not a team vault.
 
 ## Agents
 
-Custom profiles in `.cursor/agents/`. Pick one per chat (see
-`.cursor/rules/agent-routing.mdc`).
+This chat is the PM (`.cursor/rules/parent-pm.mdc`): sequence work, dispatch
+the four specialists, discuss results with Nick. Do **not** add a fifth
+profile. Custom agents in `.cursor/agents/`; invocation in
+`.cursor/rules/agent-routing.mdc`. Parent Task prompts: branch, PLAN section
+id, stop-before-commit. Do not paste a second PLAN.md.
 
-| Profile | Job |
-|---------|-----|
-| `sys-arch` | Research, `PLAN.md`. No `passkey/` or `tests/` edits. |
-| `sys-engineer` | Implement and test. |
-| `sys-release` | Every PR: SemVer + `CHANGELOG.md` `[Unreleased]` + version bump. |
-| `sys-review` | Read-only pre-PR review. |
+| Profile | When |
+|---------|------|
+| `sys-arch` | `PLAN.md` names a design fork. `PLAN.md` only. Skip table refreshes. |
+| `sys-engineer` | Implement and test. Handoff includes named untracked files. |
+| `sys-release` | Every PR: SemVer, promote previous Unreleased → dated `## 0.3.N`, bump versions + `uv.lock`. |
+| `sys-review` | Read-only merge lint. Uncommitted is expected if stop-before-commit. Nits do not restart the loop. |
 
-Loop: arch (if design is open) → engineer → release → review → PR.
-A hook denies `git push` / `gh pr create` if `CHANGELOG.md` is unchanged vs
-`main`. Until 1.0: **patch** = fix/docs/tests/CI; **minor** = feature or 0.x
-breaking; **major** = 1.0.0 only. First tag is 0.4.0; before that bump 0.3.x.
+Loop: arch **only if** a design fork exists → engineer → release → review →
+PR (commit/PR only if Nick asks). Nits: engineer patches; do not re-run the
+four-agent cycle unless Critical. A hook denies `git push` / `gh pr create`
+if `CHANGELOG.md` is unchanged vs `main`. Until 1.0: **patch** = fix/docs/tests/CI;
+**minor** = feature or 0.x breaking; **major** = 1.0.0 only. First tag is 0.4.0;
+before that bump 0.3.x. `PLAN.md` current-state describes **main**.
 
 ## Environment
 

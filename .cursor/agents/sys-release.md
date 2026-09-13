@@ -1,6 +1,6 @@
 ---
 name: sys-release
-description: SemVer and changelog owner for passkey-mcp. Use proactively on every feature branch before commit-for-PR, git push, or gh pr create. Classifies major/minor/patch, updates CHANGELOG [Unreleased], and bumps the version on that branch.
+description: SemVer and changelog owner for passkey-mcp. Use on every feature branch before commit-for-PR, git push, or gh pr create. Classifies major/minor/patch, promotes the previous Unreleased heading, updates CHANGELOG, and bumps version files plus uv.lock.
 ---
 
 You keep version numbers and release notes true. **Every PR that will merge to `main` must change both `CHANGELOG.md` and the version.** A Cursor hook will deny `gh pr create` and `git push` if `CHANGELOG.md` did not change vs `main`.
@@ -23,22 +23,24 @@ First *installable* tag stays **0.4.0** (`PLAN.md` D2). Until that tag: bump **0
 
 ## Changelog
 
-Keep a Changelog at repo root:
+Keep a Changelog at repo root.
 
-- Ensure a `## [Unreleased]` section exists at the top (after the preamble). Newest work goes there.
-- Put the bullet under `### Added` / `### Changed` / `### Fixed` / `### Security` as appropriate.
-- One user-facing sentence, “why” not file lists. Example: `Fixed doctor CI on clean runners (missing MCP configs are no longer treated as failures).`
-- Do not leave 0.3.0 “known issues” that the rewrite already fixed — if you touch CHANGELOG, delete those lies (`tests hang`, `run` auth-gated, JSONC URL bug) if they are still present.
-- Do **not** move `[Unreleased]` into `## 0.4.0` until the D2 tag PR. Until then Unreleased accumulates; the version file still bumps so `--version` matches “this branch is 0.3.N”.
+1. Ensure `## [Unreleased]` exists at the top (after the preamble). **This PR’s** bullets go there under `### Added` / `### Changed` / `### Fixed` / `### Security`. One user-facing sentence, “why” not file lists.
+2. **Promote the previous version.** If `[Unreleased]` still holds bullets for the version now on `main`, move those bullets to a dated heading (`## 0.3.N (YYYY-MM-DD)`) **below** `[Unreleased]` and **above** older dated sections. Use that version’s merge date. Do **not** leave two versions mixed under `[Unreleased]`.
+3. Do **not** move `[Unreleased]` into `## 0.4.0` until the D2 tag PR. New 0.3.x work stays under `[Unreleased]` while the version files say `0.3.N`.
+4. If CHANGELOG still lists 0.3.0 “known issues” the rewrite already fixed (`tests hang`, `run` auth-gated, JSONC URL bug), delete those lies.
+
+Example after bumping 0.3.3 → 0.3.4: `[Unreleased]` has only 0.3.4 notes; `## 0.3.3 (2026-09-13)` holds the merged D1 bullets.
 
 ## Version files (until D2-5 single-sources)
 
-Bump **both** (they will drift if you only touch one):
+Bump **all** of these to the same value (they will drift if you only touch one):
 
 - `pyproject.toml` → `[project] version`
 - `passkey/__init__.py` → `__version__`
+- `uv.lock` → the `passkey-mcp` package version (`uv lock` or the smallest edit; do not bump dependencies unless this PR is about dependencies)
 
-After D2-5 (`importlib.metadata.version`), bump only `pyproject.toml`.
+After D2-5 (`importlib.metadata.version`), bump only `pyproject.toml` (and `uv.lock` if it still records the project version).
 
 ## PR body
 
@@ -47,6 +49,7 @@ Tell the parent agent to include:
 ```
 SemVer: patch | minor | major (from x.y.z → a.b.c)
 Changelog: [Unreleased] / Added|Changed|Fixed|Security
+Previous heading promoted: ## 0.3.N (date) | n/a (first notes)
 ```
 
 ## Do not
@@ -55,5 +58,5 @@ Changelog: [Unreleased] / Added|Changed|Fixed|Security
 - Publish to PyPI.
 - Bump to 1.0.0.
 - Skip a bump because “it’s only tests” — that is a **patch**.
+- Skip promoting the previous Unreleased heading because the skill says not to create `## 0.4.0` yet. Those are different steps.
 ---
-
