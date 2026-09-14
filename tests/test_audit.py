@@ -2,7 +2,10 @@
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from passkey.audit import clear_logs, get_recent_logs, log_operation
 
@@ -125,32 +128,34 @@ class TestRotation:
 
 class TestSecurityHardening:
     def test_rejects_symlink(self, tmp_path):
-        import pytest
         real_file = tmp_path / "real.log"
         real_file.touch()
         symlink_file = tmp_path / "link.log"
         symlink_file.symlink_to(real_file)
 
-        with patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": str(symlink_file)}):
-            with pytest.raises(ValueError, match="symbolic link"):
-                from passkey.audit import get_log_path
-                get_log_path()
+        with (
+            patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": str(symlink_file)}),
+            pytest.raises(ValueError, match="symbolic link"),
+        ):
+            from passkey.audit import get_log_path
+            get_log_path()
 
     def test_rejects_system_directory(self):
-        import pytest
-        with patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": "/etc/passkey_audit.log"}):
-            with pytest.raises(ValueError, match="system directory"):
-                from passkey.audit import get_log_path
-                get_log_path()
+        with (
+            patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": "/etc/passkey_audit.log"}),
+            pytest.raises(ValueError, match="system directory"),
+        ):
+            from passkey.audit import get_log_path
+            get_log_path()
 
     def test_rejects_shell_file(self):
-        import pytest
-        from pathlib import Path
         target = Path.home() / ".zshrc"
-        with patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": str(target)}):
-            with pytest.raises(ValueError, match="shell startup file"):
-                from passkey.audit import get_log_path
-                get_log_path()
+        with (
+            patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": str(target)}),
+            pytest.raises(ValueError, match="shell startup file"),
+        ):
+            from passkey.audit import get_log_path
+            get_log_path()
 
     def test_rotation_does_not_corrupt_non_audit_files(self, tmp_path, monkeypatch):
         import passkey.audit as audit_mod

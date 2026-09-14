@@ -1,5 +1,6 @@
 """Clipboard utilities for passkey."""
 
+import contextlib
 import hashlib
 import subprocess
 import sys
@@ -76,10 +77,8 @@ def _spawn_detached_clear(text: str, timeout_seconds: int) -> None:
         # DETACHED_PROCESS = 0x00000008, CREATE_NEW_PROCESS_GROUP = 0x00000200
         kwargs["creationflags"] = 0x00000008 | 0x00000200
 
-    try:
+    with contextlib.suppress(Exception):
         subprocess.Popen([sys.executable, "-c", worker_script], **kwargs)
-    except Exception:
-        pass
 
 
 def copy_with_autoclear(text: str, timeout_seconds: int = 30) -> None:

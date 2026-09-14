@@ -1,6 +1,7 @@
 """Tests for passkey.mcp_config module — adapter-specific operations."""
 
 import json
+import subprocess
 import sys
 
 import pytest
@@ -11,6 +12,7 @@ from passkey.mcp_config import (
     find_adapter_for_path,
     get_env_from_server,
     get_mcp_servers,
+    is_file_exposed_in_git,
     load_config,
     save_config,
     set_env_on_server,
@@ -304,15 +306,11 @@ class TestFileExposedInGit:
     """Tests for is_file_exposed_in_git()."""
 
     def test_not_in_git_returns_false(self, tmp_path):
-        from passkey.mcp_config import is_file_exposed_in_git
         f = tmp_path / "some_file.json"
         f.touch()
         assert is_file_exposed_in_git(f) is False
 
     def test_in_git_and_ignored_returns_false(self, tmp_path):
-        import subprocess
-        from passkey.mcp_config import is_file_exposed_in_git
-
         # Init git repo
         subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
         (tmp_path / ".gitignore").write_text("*.backup\n")
@@ -322,9 +320,6 @@ class TestFileExposedInGit:
         assert is_file_exposed_in_git(f) is False
 
     def test_in_git_and_not_ignored_returns_true(self, tmp_path):
-        import subprocess
-        from passkey.mcp_config import is_file_exposed_in_git
-
         # Init git repo
         subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
         f = tmp_path / "config.json.backup"

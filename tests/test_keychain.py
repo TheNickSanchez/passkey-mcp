@@ -251,9 +251,8 @@ class TestDeleteEntry:
 class TestMetadataLock:
     def test_lock_is_reentrant(self, isolated_data_dir):
         from passkey.keychain import _metadata_lock
-        with _metadata_lock():
-            with _metadata_lock():
-                pass  # Must not deadlock or raise
+        with _metadata_lock(), _metadata_lock():
+            pass  # Must not deadlock or raise
 
 
 class TestRenameEntry:

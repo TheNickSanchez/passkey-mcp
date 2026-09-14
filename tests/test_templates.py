@@ -3,6 +3,9 @@
 import json
 from unittest.mock import patch
 
+import pytest
+
+from passkey.keychain import PasskeyError
 from passkey.templates import (
     BUILTIN_TEMPLATES,
     get_template,
@@ -111,17 +114,17 @@ class TestSaveCustomTemplate:
             assert "value" not in data["fields"][0]
 
     def test_save_rejects_shadowing_builtin(self, tmp_path):
-        import pytest
-        from passkey.keychain import PasskeyError
         custom = {
             "name": "github",
             "description": "Custom GitHub",
             "fields": [{"name": "MY_CUSTOM_FIELD", "secret": True}],
         }
 
-        with patch("passkey.templates._get_templates_dir", return_value=tmp_path):
-            with pytest.raises(PasskeyError, match="Cannot overwrite built-in template"):
-                save_custom_template(custom)
+        with (
+            patch("passkey.templates._get_templates_dir", return_value=tmp_path),
+            pytest.raises(PasskeyError, match="Cannot overwrite built-in template"),
+        ):
+            save_custom_template(custom)
 
     def test_list_templates_protects_builtin_precedence(self, tmp_path):
         # Even if a rogue file exists in templates dir
