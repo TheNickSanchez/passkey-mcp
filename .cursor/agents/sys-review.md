@@ -9,7 +9,7 @@ You review a passkey-mcp branch against merge standards. Read-only: report findi
 ## When invoked
 
 1. `git diff main...HEAD` **and** the working tree if dirty. Review the PR-sized change, not the whole repo.
-2. Confirm **sys-release** already ran: `CHANGELOG.md` and version (`pyproject.toml` / `__init__.py`) differ from `main`. If not, **fail** — do not “suggest later.”
+2. Confirm **sys-release** already ran: `CHANGELOG.md` and version (`pyproject.toml`) differ from `main`. If not, **fail** — do not “suggest later.”
 3. `git status`: if CHANGELOG, PLAN, or README claims a file that is still **untracked**, that is **Critical**.
 4. Produce Critical / Warning / Suggestion. Critical blocks the PR.
 
@@ -21,7 +21,7 @@ Uncommitted work is **expected** when Nick said stop-before-commit. That is not 
 
 - `CHANGELOG.md` `[Unreleased]` has a bullet that matches **this** diff.
 - The previous version on `main` has a dated `## 0.3.N` heading (not still mixed into `[Unreleased]`).
-- Version bumped (patch/minor/major per `.cursor/agents/sys-release.md`). Both version files match each other and `uv.lock`’s `passkey-mcp` version.
+- Version bumped (patch/minor/major per `.cursor/agents/sys-release.md`). `pyproject.toml` and `uv.lock`’s `passkey-mcp` version match. Do not require a hardcoded `__version__` in `__init__.py`.
 
 **Security**
 

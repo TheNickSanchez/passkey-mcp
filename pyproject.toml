@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "passkey-mcp"
-version = "0.3.4"
+version = "0.3.5"
 description = "Cross-platform secrets manager for MCP servers and CLI tools"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,6 +24,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Security",
     "Topic :: Utilities",
 ]
@@ -42,6 +44,9 @@ passkey-mcp-server = "passkey.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/TheNickSanchez/passkey-mcp"
+Issues = "https://github.com/TheNickSanchez/passkey-mcp/issues"
+Source = "https://github.com/TheNickSanchez/passkey-mcp"
+PyPI = "https://pypi.org/project/passkey-mcp/"
 Changelog = "https://github.com/TheNickSanchez/passkey-mcp/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
@@ -62,4 +67,5 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-timeout>=2.1.0",
     "ruff>=0.4.0",
+    "pip-audit>=2.7.0",
 ]

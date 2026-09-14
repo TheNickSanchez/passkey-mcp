@@ -1,7 +1,7 @@
 # passkey-mcp — Plan to make it deployable
 
 **Target:** first installable release **v0.4.0**.
-**Current tree:** 0.3.3 on branch `d1-honest-docs` (not tagged; `main` is still 0.3.2 until this PR merges).
+**Current tree:** 0.3.4 on `main` (D0-1..D0-4 and D1 merged; not tagged).
 
 Deployable means a teammate can install a **pinned version** with pipx, MCP
 configs can exec `passkey` from PATH, and a company security review can point
@@ -20,23 +20,27 @@ Positioning for every doc and review ticket:
 | Signal | Reality |
 |--------|---------|
 | Code on GitHub | Public, MIT, `TheNickSanchez/passkey-mcp` |
-| PyPI `passkey-mcp` | **404** — unpublished. Do not advertise a PyPI install until D2. |
+| PyPI `passkey-mcp` | **404** — unpublished. Do not advertise a PyPI install until D2 publish. |
 | GitHub Releases / tags | **None**. First tag is 0.4.0 (D2). Do not tag 0.3.x. |
-| CI | **Green on `main`** after D0-1/D0-4: macOS + Ubuntu, Python 3.10 and 3.14 (`lint` + four `test` jobs). `--locked` sync. Do not re-verify with a partial local run. |
-| Branch protection | **Off** — D0-5 not done. `main` has no required checks; force-push and direct push are still allowed. Nick clicks later (no workflow, no ruleset YAML, no `gh api`). |
-| Version | Duplicated: `pyproject.toml` and `passkey/__init__.py` both hardcode `0.3.3` on this branch (not tagged) |
-| Version on PyPI | Never shipped. Do not tag 0.3.x. First tag is 0.4.0 (D2). |
+| CI | **Green on `main`**. macOS + Ubuntu, Python 3.10 and 3.14 (`lint` + four `test` jobs). `--locked` sync. Do not re-verify with a partial local run. |
+| Branch protection | **Off** — D0-5 **in progress** (Nick’s Settings clicks). `main` has no required checks; force-push and direct push are still allowed. No workflow, no ruleset YAML, no `gh api`. |
+| Version | `0.3.4` on `main`, still duplicated in `pyproject.toml` and `passkey/__init__.py` until D2-5 lands. Not tagged. |
+| Version on PyPI | Never shipped. Do not tag 0.3.x. First tag is 0.4.0 (D2). Do not mark D2 done. |
 
 P0–P3 from the 2026-07-28 roadmap **landed in code** (hermetic tests, opt-in
 auth, `unwrap`, JSONC URL fix, CLI package, unified doctor, file-based index,
 audit cap). D0-1 through D0-4 **landed in 0.3.2**. D1-1 through D1-8
-**landed on this branch as 0.3.3** (docs honesty). Nothing is tagged.
-Remaining leftovers — **not D1**:
+**landed on `main` as 0.3.3** (docs honesty). Tree on `main` is **0.3.4**.
+CI is green. Nothing is tagged. Remaining leftovers:
 
 - PyPI `passkey-mcp` is **404**. No GitHub Releases / tags. Unpublished.
-- Branch protection is **off** (D0-5 — Nick’s Settings clicks; no workflow,
-  no ruleset YAML, no `gh api`).
-- Dependabot / private vuln reporting / PyPI provenance wait for D2/D3.
+  D2 is not done.
+- Branch protection is **off** (D0-5 — Nick’s Settings clicks, in progress;
+  no workflow, no ruleset YAML, no `gh api`).
+- Dependabot, lockfile audit, and the Trusted Publishing workflow are
+  D2/D3 and are not on `main` yet. Private vuln reporting (D3-2) is
+  Nick’s click. PyPI provenance exists only after the 0.4.0 Trusted
+  Publish.
 
 ~~Struck (done in D1 / 0.3.3):~~ root `SECURITY.md` + `docs/SECURITY.md`
 stub (no “approved” / SOC 2 theater); README git preview + `uv run passkey`
@@ -170,15 +174,16 @@ cannot merge, and `main` cannot be force-pushed or deleted.
 
 ---
 
-## D1 — Honest docs (**done on this branch**, patch 0.3.3)
+## D1 — Honest docs (**done on `main`**, patch 0.3.3)
 
-*D1-1 through D1-8 landed on `d1-honest-docs` as 0.3.3. Do not re-implement.
-Do not start D2. Outlines below are the decision record.*
+*D1-1 through D1-8 landed on `main` as 0.3.3. Do not re-implement.
+Outlines below are the decision record.*
 
-Reviewers read README and SECURITY.md before they read `bundle.py`. This PR
-was **docs honesty**, classified **patch**. sys-release already bumped
+Reviewers read README and SECURITY.md before they read `bundle.py`. That PR
+was **docs honesty**, classified **patch**. sys-release bumped
 **0.3.2 → 0.3.3** and promoted 0.3.2 notes into `## 0.3.2 (2026-09-13)`.
-Do **not** bump to 0.4.0. D2/D3 stay out of scope.
+Do **not** bump to 0.4.0 here. D2 is the first tag and first PyPI publish
+— prep can land; do not mark D2 done until 0.4.0 is on PyPI.
 
 | # | Item | Acceptance |
 |---|------|------------|
@@ -192,8 +197,7 @@ Do **not** bump to 0.4.0. D2/D3 stay out of scope.
 | 8 | ~~`CONTRIBUTING.md`.~~ **Done (0.3.3):** same commands; PR = `[Unreleased]` note; do not commit to `main`. | Second contributor does not reverse-engineer AGENTS.md |
 
 **Exit:** A cold reader of README + root `SECURITY.md` would describe the same
-threat model as `passkey/auth.py` and `passkey/mcp_server.py`. **Met on this
-branch.**
+threat model as `passkey/auth.py` and `passkey/mcp_server.py`. **Met on `main`.**
 
 ### D1-1 — locked: `SECURITY.md` outline (done in 0.3.3; keep as record)
 
@@ -318,7 +322,7 @@ This is the actual deploy.
 | # | Item | Acceptance |
 |---|------|------------|
 | 1 | PyPI project `passkey-mcp`, published via **Trusted Publishing** (OIDC from GitHub Actions). No long-lived API token on a laptop. | `pip index versions passkey-mcp` shows 0.4.0 |
-| 2 | Release workflow: tag `v0.4.0` → `uv build` → publish wheel + sdist → GitHub Release with those assets and CHANGELOG excerpt | `pipx install passkey-mcp==0.4.0` works on a clean Mac and Ubuntu |
+| 2 | Release workflow: GitHub Release on tag `v0.4.0` (`release: published`) → `uv build` → Trusted Publish wheel + sdist → attach those assets to that Release | `pipx install passkey-mcp==0.4.0` works on a clean Mac and Ubuntu |
 | 3 | Confirm console scripts: `passkey` and `passkey-mcp-server` land on PATH via pipx | `which passkey`; Cursor can spawn `passkey run …` |
 | 4 | pyproject hygiene: add 3.13/3.14 classifiers if we keep testing 3.14; keep `Development Status :: 3 - Alpha`; add Issues / Source / PyPI URLs alongside Homepage | `twine check dist/*` clean (or `uv build` equivalent) |
 | 5 | Single-source version: `passkey --version` reads the package metadata (`importlib.metadata.version("passkey-mcp")`), not a second hardcoded string in `__init__.py` | Bumping `pyproject.toml` is the only edit for a release |
@@ -330,17 +334,43 @@ Release loop (this is the development-standard part of D2):
 1. Move `[Unreleased]` bullets into `## 0.4.0 - YYYY-MM-DD`.
 2. Bump the single version in `pyproject.toml`.
 3. Tag annotated `v0.4.0` on the green commit.
-4. GitHub Release body = that changelog section; attach wheel + sdist.
-5. PyPI publish from the tag via Trusted Publishing.
+4. Publish a GitHub Release on that tag (body = that changelog section).
+5. `release: published` runs `release.yml`: `uv build`, Trusted Publish, attach wheel + sdist.
 
-Trusted Publishing setup (manual, once): PyPI account 2FA → pending publisher
-for `TheNickSanchez/passkey-mcp` → workflow
-`.github/workflows/release.yml` using `pypa/gh-action-pypi-publish` on
-`release: published` (or `workflow_dispatch` + tag). Do not `twine upload`
-from a developer machine.
+Trusted Publishing setup (manual, once; trigger locked in D2-1 / D2-2
+below): PyPI account 2FA → pending publisher for
+`TheNickSanchez/passkey-mcp` → workflow `.github/workflows/release.yml`
+using `pypa/gh-action-pypi-publish` on `release: published` **only**. Do
+not `twine upload` from a developer machine.
 
 **Exit:** The team install command is `pipx install passkey-mcp==0.4.0`.
 Git clone is no longer the distribution channel.
+
+### D2-1 / D2-2 — locked: Trusted Publishing trigger
+
+**Locked: `on: release: types: [published]`.** Not `workflow_dispatch` +
+tag. File stays `.github/workflows/release.yml` using
+`pypa/gh-action-pypi-publish`. Do not add both. Do not invent `push:
+tags` or a third trigger.
+
+**Why this, not dispatch.** Publishing a GitHub Release is the
+intentional 0.4.0 gate (drafts do not fire). A tag alone does not
+publish. `workflow_dispatch` can run on a branch ref and is the
+unintended-trigger example in PyPI’s Trusted Publishing security model.
+Solo maintainer: the Release click is enough; a second Actions dispatch
+can leave “tagged but PyPI 404” or “on PyPI but no Release.”
+
+- Pending publisher (Nick, once): owner `TheNickSanchez`, repo
+  `passkey-mcp`, workflow filename `release.yml`. No laptop API token.
+- Workflow: `release: published` only → `uv build` → Trusted Publish
+  wheel + sdist → attach those assets to the same Release.
+- Split build and publish jobs; `id-token: write` only on publish.
+- First tag is `v0.4.0`. Do not tag 0.3.x. PyPI `passkey-mcp` stays 404
+  until that publish. Stay Alpha. Local keychain injector, not a vault.
+
+**Non-goals (this lock):** do not mark D2 done, tag, or upload from this
+PR; no ruleset YAML; no required GitHub environment (Release publish is
+the human gate; environment is optional later).
 
 ---
 
@@ -388,13 +418,16 @@ README to the team.
 ## Sequence
 
 ```
-D0-1..D0-4 (done, 0.3.2, CI green)  →  D1 (done on this branch, 0.3.3)  →  D0-5 (Nick clicks)  →  D2 (tag + PyPI)  →  D3
+D0-1..D0-4 (done on main, 0.3.2, CI green)  →  D1 (done on main, 0.3.3; tree 0.3.4)  →  D0-5 (Nick clicks, in progress)  +  D2 prep  →  D2 (tag + PyPI 0.4.0)  →  D3 remainder
 ```
 
-D0 code shipped on `main` as 0.3.2. **D1 landed on `d1-honest-docs` as 0.3.3**
-(not tagged). Next is **D0-5** (Nick’s Settings clicks, not a workflow),
-then D2. Do **not** start D2. D2 is the first tag and the first PyPI
-publish. Do not tag until GitHub Actions is green on the commit you tag.
+D0 code shipped on `main` as 0.3.2. **D1 shipped on `main` as 0.3.3**
+(docs honesty). `main` is **0.3.4**, CI green, nothing tagged. **D0-5**
+(Nick’s Settings clicks, not a workflow) is in progress and does not
+block D2 prep. D2 is the first tag and the first PyPI publish — do not
+mark D2 done, do not tag 0.3.x, and do not advertise a PyPI install
+while the project is 404. Do not tag until GitHub Actions is green on
+the commit you tag.
 
 ---
 

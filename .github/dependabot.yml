@@ -1,0 +1,12 @@
+# mcp>=1.0.0,<2.0.0 in pyproject.toml is load-bearing (FastMCP removed
+# in v2). Dependabot will not propose mcp 2.x while that range stays.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
