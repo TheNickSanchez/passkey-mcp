@@ -10,6 +10,14 @@
 
 ### Changed
 
+- CI and release workflows use `setup-uv` v7, `upload-artifact` v7, and
+  `download-artifact` v8 (Dependabot #10–#12, landed together so the
+  publish job keeps a matching artifact pair).
+
+## 0.3.6 (2026-09-14)
+
+### Changed
+
 - PLAN current-state describes `main` at 0.3.5 (Protect Main on, D2 prep
   landed; leftover is required check `audit` and D2 publish).
 - SECURITY.md points InfoSec at protected `main` and private
