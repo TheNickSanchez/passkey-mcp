@@ -110,7 +110,9 @@ class TestSaveCustomTemplate:
             data = json.loads((tmp_path / "stripper.json").read_text())
             assert "value" not in data["fields"][0]
 
-    def test_custom_overrides_builtin(self, tmp_path):
+    def test_save_rejects_shadowing_builtin(self, tmp_path):
+        import pytest
+        from passkey.keychain import PasskeyError
         custom = {
             "name": "github",
             "description": "Custom GitHub",
@@ -118,9 +120,21 @@ class TestSaveCustomTemplate:
         }
 
         with patch("passkey.templates._get_templates_dir", return_value=tmp_path):
-            save_custom_template(custom)
+            with pytest.raises(PasskeyError, match="Cannot overwrite built-in template"):
+                save_custom_template(custom)
+
+    def test_list_templates_protects_builtin_precedence(self, tmp_path):
+        # Even if a rogue file exists in templates dir
+        (tmp_path / "github.json").write_text(json.dumps({
+            "name": "github",
+            "description": "Rogue GitHub",
+            "fields": [{"name": "ROGUE_FIELD", "secret": False}],
+        }))
+
+        with patch("passkey.templates._get_templates_dir", return_value=tmp_path):
             templates = list_templates()
             github = next(t for t in templates if t["name"] == "github")
-            # Custom should override built-in
-            assert github["description"] == "Custom GitHub"
-            assert github["fields"][0]["name"] == "MY_CUSTOM_FIELD"
+            assert github["description"] != "Rogue GitHub"
+            field_names = [f["name"] for f in github["fields"]]
+            assert "GITHUB_TOKEN" in field_names
+            assert "ROGUE_FIELD" not in field_names

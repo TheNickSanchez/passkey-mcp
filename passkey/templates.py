@@ -93,14 +93,14 @@ BUILTIN_TEMPLATES: list[dict] = [
 def list_templates() -> list[dict]:
     """List all available templates (built-in + custom).
 
-    Custom templates with the same name as a built-in override it.
+    Built-in templates take precedence to prevent malicious shadowing.
 
     Returns:
         List of template dicts, sorted by name.
     """
-    templates = {t["name"]: t for t in BUILTIN_TEMPLATES}
+    templates = {}
 
-    # Load custom templates, overriding built-ins
+    # Load custom templates first
     custom_dir = _get_templates_dir()
     if custom_dir.exists():
         for f in custom_dir.glob("*.json"):
@@ -110,6 +110,10 @@ def list_templates() -> list[dict]:
                     templates[data["name"]] = data
             except (json.JSONDecodeError, KeyError):
                 continue
+
+    # Built-in templates always take precedence
+    for t in BUILTIN_TEMPLATES:
+        templates[t["name"]] = t
 
     return sorted(templates.values(), key=lambda t: t["name"])
 
@@ -131,14 +135,21 @@ def save_custom_template(template: dict) -> None:
     """Save a custom template to disk.
 
     Secret values are stripped — only field names and metadata are saved.
+    Built-in templates cannot be shadowed.
 
     Args:
         template: Template dict with 'name', 'description', and 'fields'
     """
+    name = template["name"]
+    if name in {t["name"] for t in BUILTIN_TEMPLATES}:
+        raise PasskeyError(
+            f"Cannot overwrite built-in template '{name}'. "
+            "Please choose a distinct name."
+        )
+
     custom_dir = _get_templates_dir()
     custom_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-    name = template["name"]
     if not _re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$", name):
         raise PasskeyError(
             f"Invalid template name '{name}'. "

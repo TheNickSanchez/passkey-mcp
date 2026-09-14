@@ -76,9 +76,21 @@ def _is_lock_stale() -> bool:
         return True
 
 
+_lock_depth = 0
+
+
 @contextlib.contextmanager
 def _metadata_lock():
-    """Context manager for a PID-aware file lock to prevent index race conditions."""
+    """Context manager for a re-entrant, PID-aware file lock to prevent index race conditions."""
+    global _lock_depth
+    if _lock_depth > 0:
+        _lock_depth += 1
+        try:
+            yield
+        finally:
+            _lock_depth -= 1
+        return
+
     lock_file = _get_lock_file()
     ensure_data_dir()
     start_time = time.monotonic()
@@ -101,9 +113,11 @@ def _metadata_lock():
                 ) from None
             time.sleep(0.1)
 
+    _lock_depth = 1
     try:
         yield
     finally:
+        _lock_depth = 0
         with contextlib.suppress(OSError):
             os.remove(lock_file)
 
@@ -268,15 +282,6 @@ def _get_entry(name: str, *, log_read: bool) -> Entry | None:
         # This operation is atomic and does not need the metadata lock
         data = keyring.get_password(SERVICE, name)
         if not data:
-            # Before returning None, ensure it's not a dangling entry in the index
-            with _metadata_lock():
-                entries = _read_index_nolock()
-                if name in entries:
-                    entries.remove(name)
-                    _write_index_nolock(entries)
-                    log_operation(
-                        "metadata_cleanup", name, details={"reason": "dangling entry found"}
-                    )
             return None
 
         entry = Entry.from_json(name, data)
@@ -374,13 +379,13 @@ def rename_entry(old_name: str, new_entry: Entry) -> None:
         if new_entry.name != old_name and new_entry.name in existing:
             raise PasskeyError(f"Entry '{new_entry.name}' already exists.")
 
-    # Save new entry
-    save_entry(new_entry, is_update=(new_entry.name == old_name))
+        # Save new entry
+        save_entry(new_entry, is_update=(new_entry.name == old_name))
 
-    # Delete old entry if name changed
-    if new_entry.name != old_name:
-        delete_entry(old_name)
-        log_operation("rename", old_name, details={"new_name": new_entry.name})
+        # Delete old entry if name changed
+        if new_entry.name != old_name:
+            delete_entry(old_name)
+            log_operation("rename", old_name, details={"new_name": new_entry.name})
 
 
 def get_all_entries() -> list[Entry]:

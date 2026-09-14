@@ -9,6 +9,7 @@ import contextlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -440,6 +441,31 @@ def backup_config(path: Path, backup_path: Path | None = None) -> Path:
     shutil.copy2(path, target)
     target.chmod(0o600)
     return target
+
+
+def is_file_exposed_in_git(path: Path) -> bool:
+    """Check if a file resides inside a git repository and is NOT ignored by .gitignore."""
+    try:
+        # Check if parent directory is inside a git working tree
+        res = subprocess.run(
+            ["git", "-C", str(path.parent), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if res.returncode != 0 or res.stdout.strip() != "true":
+            return False
+
+        # Check if git ignores the file
+        check_ignore = subprocess.run(
+            ["git", "-C", str(path.parent), "check-ignore", "-q", str(path.name)],
+            capture_output=True,
+            timeout=2,
+        )
+        # returncode 0 means ignored (safe), returncode 1 means not ignored (exposed!)
+        return check_ignore.returncode == 1
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------

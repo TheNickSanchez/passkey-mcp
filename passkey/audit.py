@@ -1,5 +1,6 @@
 """Audit logging for passkey operations."""
 
+import contextlib
 import json
 import os
 from datetime import datetime
@@ -10,11 +11,64 @@ from .dirs import get_data_dir
 # When the log exceeds this size, the oldest half of the lines is dropped.
 MAX_LOG_BYTES = 1_000_000  # ~1 MB
 
+_DISALLOWED_PREFIXES = (
+    "/etc",
+    "/private/etc",
+    "/System",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/var/run",
+    "/private/var/run",
+    "/private/var/root",
+    "/dev",
+)
+
+_SENSITIVE_FILENAMES = frozenset({
+    ".bashrc",
+    ".zshrc",
+    ".profile",
+    ".bash_profile",
+    ".zprofile",
+    ".bash_history",
+    ".zsh_history",
+})
+
+
+def _validate_log_path(path: Path) -> None:
+    """Validate that audit log does not target critical system or sensitive files."""
+    try:
+        resolved = path.resolve()
+    except Exception:
+        resolved = path
+
+    for p in (path, resolved):
+        path_str = str(p)
+        for prefix in _DISALLOWED_PREFIXES:
+            if path_str == prefix or path_str.startswith(prefix + "/"):
+                raise ValueError(f"Audit log path cannot be inside system directory '{prefix}'")
+
+        home = Path.home().resolve()
+        for sensitive_sub in (".ssh", ".gnupg", ".aws"):
+            sens_dir = home / sensitive_sub
+            if path_str == str(sens_dir) or path_str.startswith(str(sens_dir) + "/"):
+                raise ValueError(f"Audit log path cannot be inside sensitive directory '{sensitive_sub}'")
+
+    if resolved.name in _SENSITIVE_FILENAMES or path.name in _SENSITIVE_FILENAMES:
+        raise ValueError(f"Audit log path cannot target shell startup file '{path.name}'")
+
 
 def get_log_path() -> Path:
     """Get the audit log path, creating directory if needed."""
     default = get_data_dir() / "audit.log"
-    log_path = Path(os.environ.get("PASSKEY_AUDIT_LOG", default))
+    override = os.environ.get("PASSKEY_AUDIT_LOG")
+    if override:
+        log_path = Path(override).expanduser()
+        if log_path.is_symlink():
+            raise ValueError("Audit log path cannot be a symbolic link")
+        _validate_log_path(log_path)
+    else:
+        log_path = default
     log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     return log_path
 
@@ -22,9 +76,16 @@ def get_log_path() -> Path:
 def _rotate_if_needed(log_path: Path) -> None:
     """Cap the log size by dropping the oldest half of the lines."""
     try:
-        if not log_path.exists() or log_path.stat().st_size <= MAX_LOG_BYTES:
+        if not log_path.exists() or log_path.is_symlink() or log_path.stat().st_size <= MAX_LOG_BYTES:
             return
         lines = log_path.read_text().splitlines(keepends=True)
+        if lines:
+            try:
+                sample = json.loads(lines[0])
+                if not isinstance(sample, dict) or "operation" not in sample:
+                    return
+            except json.JSONDecodeError:
+                return
         keep = lines[len(lines) // 2 :]
         log_path.write_text("".join(keep))
     except OSError:
@@ -33,10 +94,11 @@ def _rotate_if_needed(log_path: Path) -> None:
 
 def _ensure_secure_permissions(path: Path) -> None:
     """Ensure file has secure permissions (owner only)."""
-    if path.exists():
+    if path.exists() and not path.is_symlink():
         current_mode = path.stat().st_mode & 0o777
         if current_mode != 0o600:
-            path.chmod(0o600)
+            with contextlib.suppress(OSError):
+                path.chmod(0o600)
 
 
 def log_operation(

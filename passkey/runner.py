@@ -57,6 +57,9 @@ def run_with_secrets(entries: list[str], command: list[str]) -> int:
     if loaded_count == 0:
         raise PasskeyError("No entries loaded, aborting command.")
 
+    if not command:
+        raise PasskeyError("No command specified to run.")
+
     try:
         result = subprocess.run(command, env=env)
         return result.returncode

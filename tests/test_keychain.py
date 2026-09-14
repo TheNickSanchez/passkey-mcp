@@ -192,6 +192,21 @@ class TestGetEntry:
         mock_keyring.get_password.return_value = ""
         assert get_entry("empty") is None
 
+    def test_get_entry_does_not_purge_index_on_missing_keyring_value(self, mock_keyring, isolated_data_dir):
+        """SEC-03: Transient keyring failure or missing secret must not delete entry from index."""
+        from passkey.keychain import _get_index_path
+        index_file = _get_index_path()
+        index_file.parent.mkdir(parents=True, exist_ok=True)
+        index_file.write_text('["transient_entry"]')
+
+        mock_keyring.get_password.return_value = None
+        result = get_entry("transient_entry")
+        assert result is None
+
+        # Verify entry remains in the index!
+        saved_index = json.loads(index_file.read_text())
+        assert "transient_entry" in saved_index
+
 
 class TestDeleteEntry:
     """Tests for delete_entry()."""
@@ -231,3 +246,26 @@ class TestDeleteEntry:
         result = delete_entry("test")
 
         assert result is True
+
+
+class TestMetadataLock:
+    def test_lock_is_reentrant(self, isolated_data_dir):
+        from passkey.keychain import _metadata_lock
+        with _metadata_lock():
+            with _metadata_lock():
+                pass  # Must not deadlock or raise
+
+
+class TestRenameEntry:
+    def test_rename_entry_under_lock(self, mock_keyring, isolated_data_dir):
+        from passkey.keychain import _get_index_path, rename_entry
+        index_file = _get_index_path()
+        index_file.parent.mkdir(parents=True, exist_ok=True)
+        index_file.write_text('["old_name"]')
+
+        new_entry = Entry(name="new_name", fields={"KEY": "val"})
+        rename_entry("old_name", new_entry)
+
+        saved_index = json.loads(index_file.read_text())
+        assert "new_name" in saved_index
+        assert "old_name" not in saved_index

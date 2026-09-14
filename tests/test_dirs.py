@@ -101,6 +101,22 @@ class TestEnsureDataDir:
         assert result.exists()
         assert result.is_dir()
 
+    def test_tightens_permissions_on_existing_directory(self, tmp_path):
+        """Tightens permissions to 0o700 even if directory already exists with loose perms."""
+        import sys
+        if sys.platform == "win32":
+            return
+        import passkey.dirs as dirs
+        target = tmp_path / "loose_dir"
+        target.mkdir(mode=0o755)
+        target.chmod(0o755)
+        assert target.stat().st_mode & 0o777 == 0o755
+
+        with patch.object(dirs, "get_data_dir", return_value=target):
+            dirs.ensure_data_dir()
+
+        assert target.stat().st_mode & 0o777 == 0o700
+
 
 class TestMigration:
     """Tests for migration logic."""

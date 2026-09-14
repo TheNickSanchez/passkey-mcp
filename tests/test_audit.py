@@ -121,3 +121,44 @@ class TestRotation:
             log_operation("a", "e")
             log_operation("b", "e")
         assert len(log_file.read_text().strip().split("\n")) == 2
+
+
+class TestSecurityHardening:
+    def test_rejects_symlink(self, tmp_path):
+        import pytest
+        real_file = tmp_path / "real.log"
+        real_file.touch()
+        symlink_file = tmp_path / "link.log"
+        symlink_file.symlink_to(real_file)
+
+        with patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": str(symlink_file)}):
+            with pytest.raises(ValueError, match="symbolic link"):
+                from passkey.audit import get_log_path
+                get_log_path()
+
+    def test_rejects_system_directory(self):
+        import pytest
+        with patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": "/etc/passkey_audit.log"}):
+            with pytest.raises(ValueError, match="system directory"):
+                from passkey.audit import get_log_path
+                get_log_path()
+
+    def test_rejects_shell_file(self):
+        import pytest
+        from pathlib import Path
+        target = Path.home() / ".zshrc"
+        with patch.dict(os.environ, {"PASSKEY_AUDIT_LOG": str(target)}):
+            with pytest.raises(ValueError, match="shell startup file"):
+                from passkey.audit import get_log_path
+                get_log_path()
+
+    def test_rotation_does_not_corrupt_non_audit_files(self, tmp_path, monkeypatch):
+        import passkey.audit as audit_mod
+        fake_db = tmp_path / "data.db"
+        fake_db.write_text("BINARY_OR_SQL_NON_JSON_CONTENT\n" * 100)
+        original_content = fake_db.read_text()
+        monkeypatch.setattr(audit_mod, "MAX_LOG_BYTES", 50)
+
+        audit_mod._rotate_if_needed(fake_db)
+        # Content must not be truncated
+        assert fake_db.read_text() == original_content

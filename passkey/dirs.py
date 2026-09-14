@@ -38,6 +38,13 @@ def ensure_data_dir() -> Path:
     """Create and return the data directory with secure permissions."""
     data_dir = get_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if sys.platform != "win32" and not data_dir.is_symlink():
+        try:
+            current_mode = data_dir.stat().st_mode & 0o777
+            if current_mode != 0o700:
+                data_dir.chmod(0o700)
+        except OSError:
+            pass
     return data_dir
 
 

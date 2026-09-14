@@ -21,6 +21,7 @@ from .mcp_config import (
     get_env_from_server,
     get_mcp_servers,
     get_server_security_status,
+    is_file_exposed_in_git,
     is_passkey_wrapped,
     load_config,
     rewrite_server_for_passkey,
@@ -199,6 +200,9 @@ def cmd_init(
         backup_target = Path(backup_path) if backup_path else None
         actual_backup = backup_config(path, backup_target)
         print(f"Backup created: {actual_backup}")
+        if is_file_exposed_in_git(actual_backup):
+            print(f"  ⚠️  WARNING: Backup contains plaintext secrets in an unignored git repo: {actual_backup}")
+            print(f"     Add '{actual_backup.name}' to .gitignore to prevent accidental credential leakage!")
     except Exception as e:
         raise PasskeyError(f"Error creating backup: {e}") from e
 
@@ -656,6 +660,9 @@ def cmd_unwrap(
             set_mcp_servers(config, adapter, servers)
             save_config(config, path)
             print(f"  Backup: {backup}")
+            if is_file_exposed_in_git(backup):
+                print(f"  ⚠️  WARNING: Backup contains plaintext secrets in an unignored git repo: {backup}")
+                print(f"     Add '{backup.name}' to .gitignore to prevent accidental credential leakage!")
             print()
             unwrapped_total += len(to_restore)
         except Exception as e:
@@ -770,9 +777,12 @@ def cmd_add(
         set_mcp_servers(config, adapter, servers)
 
         try:
-            backup_config(config_path)
+            backup = backup_config(config_path)
             save_config(config, config_path)
             print(f"Updated {adapter.display_name} config to use passkey wrapper")
+            if is_file_exposed_in_git(backup):
+                print(f"  ⚠️  WARNING: Backup contains plaintext secrets in an unignored git repo: {backup}")
+                print(f"     Add '{backup.name}' to .gitignore to prevent accidental credential leakage!")
         except Exception as e:
             print(f"Warning: Could not update config: {e}", file=sys.stderr)
 

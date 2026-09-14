@@ -298,3 +298,36 @@ class TestGetAllConfigPaths:
         paths = adapter.get_all_existing_paths()
         assert existing in paths
         assert tmp_path / "nope.json" not in paths
+
+
+class TestFileExposedInGit:
+    """Tests for is_file_exposed_in_git()."""
+
+    def test_not_in_git_returns_false(self, tmp_path):
+        from passkey.mcp_config import is_file_exposed_in_git
+        f = tmp_path / "some_file.json"
+        f.touch()
+        assert is_file_exposed_in_git(f) is False
+
+    def test_in_git_and_ignored_returns_false(self, tmp_path):
+        import subprocess
+        from passkey.mcp_config import is_file_exposed_in_git
+
+        # Init git repo
+        subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
+        (tmp_path / ".gitignore").write_text("*.backup\n")
+        f = tmp_path / "config.json.backup"
+        f.touch()
+
+        assert is_file_exposed_in_git(f) is False
+
+    def test_in_git_and_not_ignored_returns_true(self, tmp_path):
+        import subprocess
+        from passkey.mcp_config import is_file_exposed_in_git
+
+        # Init git repo
+        subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
+        f = tmp_path / "config.json.backup"
+        f.touch()
+
+        assert is_file_exposed_in_git(f) is True
