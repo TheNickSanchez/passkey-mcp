@@ -7,13 +7,15 @@ secrets out of config files into the OS keychain (`keyring`, service name
 `passkey`). It is not a team vault, a password-manager vendor, or a
 multi-tenant product. The project is Alpha, 0.x, and MIT-licensed.
 
-Point InfoSec at the MIT license and this file (plus green CI; required
-checks after D0-5). This file does not claim corporate approval.
+Point InfoSec at the MIT license and this file (plus green CI and
+required checks on protected `main`). This file does not claim
+corporate approval.
 
 ## Reporting
 
-1. Prefer GitHub private vulnerability reporting if it is enabled on
+1. Prefer GitHub private vulnerability reporting on
    [TheNickSanchez/passkey-mcp](https://github.com/TheNickSanchez/passkey-mcp).
+   Reports there: aim to acknowledge within **7 days**.
 2. Otherwise open a public issue that contains **no secrets** — no tokens,
    no bundle files, no env dumps, and no keychain exports.
 3. There is no security email in this repository. Do not invent one.

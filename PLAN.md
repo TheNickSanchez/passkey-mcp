@@ -1,7 +1,7 @@
 # passkey-mcp — Plan to make it deployable
 
 **Target:** first installable release **v0.4.0**.
-**Current tree:** 0.3.4 on `main` (D0-1..D0-4 and D1 merged; not tagged).
+**Current tree:** 0.3.5 on `main` (D0–D1 and D2 prep merged; not tagged).
 
 Deployable means a teammate can install a **pinned version** with pipx, MCP
 configs can exec `passkey` from PATH, and a company security review can point
@@ -15,32 +15,34 @@ Positioning for every doc and review ticket:
 
 ---
 
-## Current state (verified 2026-09-13)
+## Current state (verified 2026-09-14)
 
 | Signal | Reality |
 |--------|---------|
 | Code on GitHub | Public, MIT, `TheNickSanchez/passkey-mcp` |
 | PyPI `passkey-mcp` | **404** — unpublished. Do not advertise a PyPI install until D2 publish. |
 | GitHub Releases / tags | **None**. First tag is 0.4.0 (D2). Do not tag 0.3.x. |
-| CI | **Green on `main`**. macOS + Ubuntu, Python 3.10 and 3.14 (`lint` + four `test` jobs). `--locked` sync. Do not re-verify with a partial local run. |
-| Branch protection | **Off** — D0-5 **in progress** (Nick’s Settings clicks). `main` has no required checks; force-push and direct push are still allowed. No workflow, no ruleset YAML, no `gh api`. |
-| Version | `0.3.4` on `main`, still duplicated in `pyproject.toml` and `passkey/__init__.py` until D2-5 lands. Not tagged. |
+| CI | **Green on `main`**. macOS + Ubuntu, Python 3.10 and 3.14 (`lint` + four `test` jobs) plus `audit` (`pip-audit` on the lockfile). `--locked` sync. Dependabot + `release.yml` are on `main` (`release.yml` fires on GitHub Release publish; PyPI stays 404 until D2). Do not re-verify with a partial local run. |
+| Branch protection | **On** — ruleset **Protect Main**: required checks are `lint` + four `test` jobs. Direct push, force-push, and deletion of `main` are blocked. Leftover: Nick adds required check `audit` in Settings. No workflow, no ruleset YAML, no `gh api`. |
+| Version | `0.3.5` on `main`. Single-source: `passkey --version` reads `importlib.metadata.version("passkey-mcp")`. Not tagged. |
 | Version on PyPI | Never shipped. Do not tag 0.3.x. First tag is 0.4.0 (D2). Do not mark D2 done. |
+| Private vuln reporting | **On**. Matches `SECURITY.md`. |
 
 P0–P3 from the 2026-07-28 roadmap **landed in code** (hermetic tests, opt-in
 auth, `unwrap`, JSONC URL fix, CLI package, unified doctor, file-based index,
 audit cap). D0-1 through D0-4 **landed in 0.3.2**. D1-1 through D1-8
-**landed on `main` as 0.3.3** (docs honesty). Tree on `main` is **0.3.4**.
-CI is green. Nothing is tagged. Remaining leftovers:
+**landed on `main` as 0.3.3** (docs honesty). Tree on `main` is **0.3.5**
+(PR #5: Trusted Publishing workflow, Dependabot, lockfile audit,
+single-source `--version`). CI is green. Branch protection is on. Private
+vuln reporting is on. Nothing is tagged. Remaining leftovers:
 
 - PyPI `passkey-mcp` is **404**. No GitHub Releases / tags. Unpublished.
-  D2 is not done.
-- Branch protection is **off** (D0-5 — Nick’s Settings clicks, in progress;
-  no workflow, no ruleset YAML, no `gh api`).
-- Dependabot, lockfile audit, and the Trusted Publishing workflow are
-  D2/D3 and are not on `main` yet. Private vuln reporting (D3-2) is
-  Nick’s click. PyPI provenance exists only after the 0.4.0 Trusted
-  Publish.
+  D2 publish is not done.
+- Required check `audit` is not in Protect Main yet (Nick’s Settings
+  click; no workflow, no ruleset YAML, no `gh api`).
+- D2-6 / D2-7 (README pin, MCP smoke) and D3-4 / D3-5 (wrap-disable,
+  attestations) are still open. PyPI provenance exists only after the
+  0.4.0 Trusted Publish.
 
 ~~Struck (done in D1 / 0.3.3):~~ root `SECURITY.md` + `docs/SECURITY.md`
 stub (no “approved” / SOC 2 theater); README git preview + `uv run passkey`
@@ -49,6 +51,12 @@ copy; `CONTRIBUTING.md`; `AGENTS.md` leftover red-test sentence; CHANGELOG
 0.2.0 share entropy **8 words / ~64 bits**; 0.3.2 notes promoted out of
 `[Unreleased]`.
 
+~~Struck (done in 0.3.5 / PR #5):~~ D0-5 Protect Main (`lint` + four `test`
+jobs; leftover: add `audit`); D2-4 pyproject classifiers + URLs (Alpha,
+unpublished); D2-5 single-source `--version`; D3-1 CI `pip-audit`; D3-2
+private vuln reporting; D3-3 Dependabot for uv + Actions (`mcp` stays
+`<2`). Do not mark D2 publish (tag / PyPI / README pin) done.
+
 Historical P0–P3 tables are in git history (`0a9a46e` and parents). Do not
 re-open them unless a regression shows up.
 
@@ -56,7 +64,7 @@ re-open them unless a regression shows up.
 
 ## D0 — Green `main` (v0.4.0-dev)
 
-*D0-1 through D0-4 are done on `main` (0.3.2). CI is green. Remaining is D0-5 (Nick’s Settings clicks). Do not publish until D2.*
+*D0-1 through D0-5 are done on `main` (0.3.2 / Protect Main). CI is green and required to merge (`lint` + four `test` jobs). Leftover: Nick adds required check `audit`. Do not publish until D2.*
 
 | # | Item | Acceptance |
 |---|------|------------|
@@ -64,9 +72,9 @@ re-open them unless a regression shows up.
 | 2 | ~~`uv sync --locked`.~~ **Done (0.3.2):** both CI jobs (`lint`, `test`) use `--locked`. | CI fails if `uv.lock` is stale |
 | 3 | ~~Rewrite `AGENTS.md`.~~ **Done (0.3.1 / 0.3.2):** matches the tree (hermetic suite, opt-in auth, never on `run`, `uv` + `ruff.toml`, sys-* agents). D1 struck the leftover “only known red test” sentence. | An agent following AGENTS.md does not hang on sudo |
 | 4 | ~~One ruff config.~~ **Done (0.3.1):** `ruff.toml` is the only config; dropped `[tool.ruff]` from `pyproject.toml` and ignores for deleted `claude.py` / `claude_commands.py`. | `uv run ruff check passkey/ tests/` uses a single source of rules |
-| 5 | Protect `main` — **maintainer-manual clicks for Nick after this PR merges (or anytime; not a workflow).** GitHub Settings only. No workflow file, no Ruleset YAML in-repo, no `gh api` script. Click path below. | A red CI cannot merge. Direct push, force-push, and deletion of `main` are blocked. |
+| 5 | ~~Protect `main`.~~ **Done (ruleset Protect Main):** required checks `lint` + four `test` jobs. Direct push, force-push, and deletion of `main` are blocked. Leftover: Nick adds required check `audit` in Settings (D3-1 job is on `main`; not yet required). No workflow, no ruleset YAML, no `gh api`. | A red CI cannot merge. Direct push, force-push, and deletion of `main` are blocked. |
 
-**Exit:** GitHub Actions green on `main` for macOS + Ubuntu, Python 3.10 and 3.14 (**met**), and those checks are required to merge (**not met** until D0-5).
+**Exit:** GitHub Actions green on `main` for macOS + Ubuntu, Python 3.10 and 3.14 (**met**), and those checks are required to merge (**met** — Protect Main: `lint` + four `test` jobs). Leftover: add required check `audit`.
 
 ### D0-1 — Option A (done in 0.3.2)
 
@@ -141,36 +149,26 @@ File: `.github/workflows/ci.yml` only. Two lines, no other CI design:
 No new job, no cache change, no Python-version fork. If `uv.lock` is stale
 relative to `pyproject.toml`, both jobs fail. That is the acceptance.
 
-### D0-5 — Protect `main` (clicks only; D0 PR already merged)
+### D0-5 — Protect `main` (done; leftover: add `audit`)
 
-Do this on GitHub when Nick is ready (after D1 is fine). Do **not** add a
-workflow, a check-aggregator job, a `.github` ruleset file, or an API script.
+*Landed. Ruleset Protect Main is on (`lint` + four `test` jobs). Do **not**
+add a workflow, a check-aggregator job, a `.github` ruleset file, or an
+API script.*
 
-1. Open `TheNickSanchez/passkey-mcp` on GitHub → **Settings** → **Branches**.
-2. Under **Branch protection rules**, click **Add branch protection rule**.
-   If the page only offers **Rulesets**, use **New ruleset** → **New branch
-   ruleset**, target `main`, and apply the same constraints.
-3. **Branch name pattern:** `main`.
-4. Enable **Require a pull request before merging**. Leave **Require
-   approvals** off (0 reviewers) while you are the only maintainer.
-5. Enable **Require status checks to pass before merging**. After a green D0
-   run, search and add the check names as they appear on the Actions tab
-   (typical defaults from `.github/workflows/ci.yml`):
-   - `lint`
-   - `test (macos-latest, 3.10)`
-   - `test (macos-latest, 3.14)`
-   - `test (ubuntu-latest, 3.10)`
-   - `test (ubuntu-latest, 3.14)`
-   Require all five. Do not invent a sixth job to fold them into one name.
-6. Enable **Do not allow bypassing the above settings** (include
-   administrators) so a red run cannot merge from an admin laptop.
-7. Leave **Allow force pushes** off. Leave **Allow deletions** off.
-8. Click **Create** / **Save changes**.
-9. **Settings** → **General** → scroll to **Pull Requests** → enable
-   **Automatically delete head branches**.
+Leftover for Nick (Settings only): add required check `audit` (the D3-1
+job on `main`). Do not call `gh api`. Do not add ruleset YAML.
 
-Done when a direct push to `main` is rejected, a PR with a red required check
-cannot merge, and `main` cannot be force-pushed or deleted.
+Leftover click path (do not create a second rule):
+
+1. **Settings** → **Rules** → **Rulesets** → open **Protect Main**.
+2. **Require status checks to pass** → **Add checks** → add `audit`
+   (the check name from Actions on PR #5 / `75aebae`).
+3. Save. Required list should be `lint`, the four `test (os, py)` jobs,
+   and `audit`. Do not add a workflow or ruleset YAML. Do not call `gh api`.
+
+**Met** except `audit` is not yet a required check. A direct push to `main`
+is rejected, a PR with a red required check cannot merge, and `main` cannot
+be force-pushed or deleted.
 
 ---
 
@@ -324,8 +322,8 @@ This is the actual deploy.
 | 1 | PyPI project `passkey-mcp`, published via **Trusted Publishing** (OIDC from GitHub Actions). No long-lived API token on a laptop. | `pip index versions passkey-mcp` shows 0.4.0 |
 | 2 | Release workflow: GitHub Release on tag `v0.4.0` (`release: published`) → `uv build` → Trusted Publish wheel + sdist → attach those assets to that Release | `pipx install passkey-mcp==0.4.0` works on a clean Mac and Ubuntu |
 | 3 | Confirm console scripts: `passkey` and `passkey-mcp-server` land on PATH via pipx | `which passkey`; Cursor can spawn `passkey run …` |
-| 4 | pyproject hygiene: add 3.13/3.14 classifiers if we keep testing 3.14; keep `Development Status :: 3 - Alpha`; add Issues / Source / PyPI URLs alongside Homepage | `twine check dist/*` clean (or `uv build` equivalent) |
-| 5 | Single-source version: `passkey --version` reads the package metadata (`importlib.metadata.version("passkey-mcp")`), not a second hardcoded string in `__init__.py` | Bumping `pyproject.toml` is the only edit for a release |
+| 4 | ~~pyproject hygiene.~~ **Done (0.3.5):** 3.13/3.14 classifiers; `Development Status :: 3 - Alpha`; Issues / Source / PyPI URLs alongside Homepage. Stay Alpha and unpublished. | `twine check dist/*` clean (or `uv build` equivalent) |
+| 5 | ~~Single-source version.~~ **Done (0.3.5):** `passkey --version` reads `importlib.metadata.version("passkey-mcp")`. | Bumping `pyproject.toml` is the only edit for a release |
 | 6 | README install block becomes the pipx command **pinned in the release notes** (`pipx install passkey-mcp==0.4.0`). Offer `uv tool install passkey-mcp` as the uv-native twin. | Glama / scrapers that copy the README stop advertising a 404 |
 | 7 | Smoke the MCP path once after install: `passkey doctor`, wrap a dummy server, start it with no tty and no sudo | Wrapped server starts on stock macOS |
 
@@ -381,9 +379,9 @@ you. Do it immediately after D2 if a review is inbound.
 
 | # | Item | Acceptance |
 |---|------|------------|
-| 1 | CI job: `uv run pip-audit` or `osv-scanner` on the lockfile | Known CVEs in deps fail the build |
-| 2 | Enable GitHub private vulnerability reporting on the repo | Matches SECURITY.md |
-| 3 | Dependabot or `uv` dependabot-equivalent for `pyproject.toml` / Actions | `mcp` cannot silently float to 2.x (pin `>=1,<2` is load-bearing — FastMCP removed in v2) |
+| 1 | ~~CI job: `uv run pip-audit` on the lockfile.~~ **Done (0.3.5):** job `audit` in `.github/workflows/ci.yml`. Leftover: Nick adds `audit` as a required check in Protect Main. | Known CVEs in deps fail the build |
+| 2 | ~~Enable GitHub private vulnerability reporting.~~ **Done:** matches `SECURITY.md`. | Matches SECURITY.md |
+| 3 | ~~Dependabot for `pyproject.toml` / Actions.~~ **Done (0.3.5):** `.github/dependabot.yml` weekly uv + github-actions. `mcp>=1.0.0,<2.0.0` stays load-bearing (FastMCP removed in v2). | `mcp` cannot silently float to 2.x |
 | 4 | Optional: setting to disable MCP write tools (`passkey_wrap_server`) for corporate installs | InfoSec can say “the assistant cannot rewrite configs” |
 | 5 | Release attestations come for free with Trusted Publishing — link them from SECURITY.md | Reviewer can verify the wheel |
 
@@ -418,13 +416,15 @@ README to the team.
 ## Sequence
 
 ```
-D0-1..D0-4 (done on main, 0.3.2, CI green)  →  D1 (done on main, 0.3.3; tree 0.3.4)  →  D0-5 (Nick clicks, in progress)  +  D2 prep  →  D2 (tag + PyPI 0.4.0)  →  D3 remainder
+D0-1..D0-5 (done on main; Protect Main on; leftover: required check `audit`)  →  D1 (done on main, 0.3.3)  →  D2 prep (done on main, 0.3.5: release.yml, Dependabot, audit, single-source version)  →  D2 (tag + PyPI 0.4.0)  →  D3 remainder (D3-4, D3-5)
 ```
 
 D0 code shipped on `main` as 0.3.2. **D1 shipped on `main` as 0.3.3**
-(docs honesty). `main` is **0.3.4**, CI green, nothing tagged. **D0-5**
-(Nick’s Settings clicks, not a workflow) is in progress and does not
-block D2 prep. D2 is the first tag and the first PyPI publish — do not
+(docs honesty). `main` is **0.3.5**, CI green (`lint` + four `test` jobs +
+`audit`), Protect Main on, private vuln reporting on, nothing tagged.
+**D0-5 leftover:** Nick adds required check `audit` in Settings (not a
+workflow). D2 prep (D2-4, D2-5, D3-1, D3-3, `release.yml`) landed in
+0.3.5. D2 publish is the first tag and the first PyPI publish — do not
 mark D2 done, do not tag 0.3.x, and do not advertise a PyPI install
 while the project is 404. Do not tag until GitHub Actions is green on
 the commit you tag.
