@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+## 0.4.0 (2026-09-14)
+
+### Changed
+
+- First installable release is 0.4.0: still Alpha, a local OS-keychain
+  injector for MCP/CLI secrets, not a team vault. This PR does not tag,
+  publish to PyPI, or open a GitHub Release; D2 publish stays open until
+  Nick’s Release.
+- PLAN current-state describes `main` as 0.4.0 untagged, with Protect Main
+  requiring `lint`, the four `test` jobs, and `audit`.
+- Dependabot ignores `mcp` semver-major so a range-widening PR (like #7)
+  cannot land mcp 2.x (FastMCP was removed in v2).
+
+## 0.3.7 (2026-09-14)
+
 ### Changed
 
 - CI and release workflows use `setup-uv` v7, `upload-artifact` v7, and

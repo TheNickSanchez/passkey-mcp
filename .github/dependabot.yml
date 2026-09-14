@@ -1,11 +1,15 @@
 # mcp>=1.0.0,<2.0.0 in pyproject.toml is load-bearing (FastMCP removed
-# in v2). Dependabot will not propose mcp 2.x while that range stays.
+# in v2). A range comment is not enough: Dependabot PR #7 widened the
+# pin to mcp>=1.0.0,<3. Ignore mcp semver-major so 2.x cannot land.
 version: 2
 updates:
   - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: mcp
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
