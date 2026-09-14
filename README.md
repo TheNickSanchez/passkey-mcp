@@ -7,12 +7,32 @@ and injects them as environment variables at runtime.
 This is **not** a team password manager, a shared vault, or a 1Password
 replacement. Alpha, 0.x.
 
+![How passkey injects secrets: mcp.json to passkey run to OS keychain to child env](docs/architecture.png)
+
 No plaintext secrets in config files. No cloud sync. No network. Primary
 protection is the OS keychain ACL. Extra sudo/pkexec is **optional and off
 by default** (`passkey config require-auth on`) and **never** applies to
 `passkey run` (headless MCP). macOS Keychain ACLs are the strong case;
 Linux Secret Service and Windows Credential Manager are best-effort by
 comparison (Linux also needs a running, unlocked keyring daemon).
+
+## How it works
+
+1. You store named entries (one or more fields per entry) in the OS keychain.
+   Values never go in `mcp.json` or in argv. Interactive input uses `getpass`.
+2. `passkey init` (opt-in) rewrites existing MCP configs so the editor starts
+   `passkey run ENTRY -- <original command>` instead of a command with
+   tokens in `env`. **Install does not scan Claude, Cursor, or other tools.**
+   First `passkey` with no args is onboarding (`new`), not a wrap.
+3. At start, `passkey run` reads the keychain and injects env vars into **that
+   child process only**. MCP tools (`passkey_list`, `passkey_fields`,
+   `passkey_status`, `passkey_doctor`, `passkey_wrap_server`) return names,
+   field names, and status — **never secret values**.
+4. `passkey unwrap` restores the original commands. A `.backup` is written
+   before `init` and `unwrap`.
+
+Diagram source: [`docs/architecture.mmd`](docs/architecture.mmd). Disclosure
+and threat model: [SECURITY.md](SECURITY.md).
 
 ## Features
 
@@ -35,6 +55,9 @@ comparison (Linux also needs a running, unlocked keyring daemon).
 
 PyPI `passkey-mcp` is **unpublished**. Do not run `pipx install passkey-mcp`
 or `pip install passkey-mcp` — those 404 until the 0.4.0 release.
+
+Installing does **not** wrap MCP configs. Wrapping is `passkey init` after
+you have entries you want injected.
 
 **Preview (git, until PyPI):**
 
@@ -170,6 +193,11 @@ passkey run myapi -- curl -H "Authorization: Bearer $API_TOKEN" https://api.exam
 ```
 
 ### Tool Integration
+
+Wrapping is explicit. `passkey init` only sees adapter paths that already
+exist on disk (Claude, Cursor, VS Code, …). A machine with none of those
+configs is a first run, not a failed install — `passkey doctor` stays
+quiet about missing clients.
 
 ```bash
 # Scan configs and migrate plaintext secrets to keychain
@@ -347,6 +375,9 @@ so you can also restore by hand.
 
 ## MCP Config Example
 
+`passkey init` rewrites detected servers from the first form to the second.
+`passkey unwrap` goes the other way.
+
 **Before (insecure — secret in plaintext):**
 ```json
 {
@@ -400,7 +431,9 @@ AI assistants can **discover** entry names but never see secret values — secre
 | Linux    | `~/.config/passkey/` (respects `$XDG_CONFIG_HOME`) |
 | Windows  | `%APPDATA%\passkey\` |
 
-Secrets themselves are stored in the **system keychain**, not on disk. The data directory holds metadata (lock file, audit log).
+Override with `PASSKEY_DATA_DIR`. Secrets themselves are in the **system
+keychain**, not in that directory. On disk you get metadata only: lock file,
+audit log, and `entries.json` (names — not values).
 
 ## Security
 
@@ -411,8 +444,10 @@ Secrets themselves are stored in the **system keychain**, not on disk. The data 
 - **Secure export**: Files created with `chmod 600` (owner-only)
 - **Encrypted bundles**: AES-256-GCM + scrypt (N=2^20) for portable transfer
 - **LLM-safe**: AI assistants can list entries but never read values
+- **No network**: no telemetry, no cloud sync; supply chain is the install path
 
-See [SECURITY.md](SECURITY.md) for the disclosure policy and threat model.
+See [SECURITY.md](SECURITY.md) for the disclosure policy and threat model
+(private vulnerability reporting; aim to acknowledge within 7 days).
 
 ## Troubleshooting
 
@@ -447,10 +482,19 @@ passkey import backup.json --mode merge
 
 ## Development
 
+Python 3.10+. **`uv` only** — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ```bash
 uv sync
 uv run pytest -q
 uv run ruff check passkey/ tests/
+```
+
+Regenerate the architecture graphic (requires `@mermaid-js/mermaid-cli`):
+
+```bash
+mmdc -i docs/architecture.mmd -o docs/architecture.svg -b transparent
+mmdc -i docs/architecture.mmd -o docs/architecture.png -b '#ffffff' -s 2
 ```
 
 ## License

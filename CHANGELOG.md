@@ -14,6 +14,8 @@
   landed; leftover is required check `audit` and D2 publish).
 - SECURITY.md points InfoSec at protected `main` and private
   vulnerability reporting as on, not as D0-5 leftovers.
+- README shows how wrapping works (config → `passkey run` → OS keychain →
+  child env) and states that install does not scan editor configs.
 
 ## 0.3.5 (2026-09-14)
 

@@ -1,0 +1,30 @@
+%%{init: {
+  "theme": "neutral",
+  "flowchart": { "curve": "basis", "htmlLabels": true },
+  "themeVariables": {
+    "fontFamily": "ui-sans-serif, system-ui, sans-serif",
+    "fontSize": "16px"
+  }
+}}%%
+flowchart LR
+  subgraph editor ["Editor / MCP config"]
+    CFG["mcp.json<br/>command + args only<br/>no tokens"]
+  end
+
+  subgraph pk ["passkey"]
+    RUN["passkey run ENTRY -- …"]
+  end
+
+  subgraph os ["This machine"]
+    KC["OS keychain<br/>keyring service passkey"]
+  end
+
+  subgraph child ["Child process"]
+    ENV["environment variables"]
+    APP["MCP server or CLI"]
+  end
+
+  CFG -->|"wrap: passkey init"| RUN
+  RUN --> KC
+  KC -->|"values for this process only"| ENV
+  ENV --> APP

@@ -15,6 +15,7 @@ corporate approval.
 
 1. Prefer GitHub private vulnerability reporting on
    [TheNickSanchez/passkey-mcp](https://github.com/TheNickSanchez/passkey-mcp).
+   Reports there: aim to acknowledge within **7 days**.
 2. Otherwise open a public issue that contains **no secrets** — no tokens,
    no bundle files, no env dumps, and no keychain exports.
 3. There is no security email in this repository. Do not invent one.
