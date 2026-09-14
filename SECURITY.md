@@ -82,7 +82,8 @@ processes on the same machine. That is an accepted, documented risk, not
 a hidden one.
 
 There is no network and no telemetry. Supply chain **is** the install
-path. PyPI is unpublished; distribution today is a git preview until D2.
+path. First installable release is PyPI **0.4.0** via Trusted Publishing
+(`pipx install passkey-mcp==0.4.0`). Stay Alpha.
 
 ## What this file must not say
 

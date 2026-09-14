@@ -4,9 +4,18 @@
 > labels were not earned (test suite cannot run to completion, auth layer
 > breaks headless MCP flows on stock macOS, no CI). Versions were re-baselined:
 > `1.0.0 → 0.0.1`, `1.1.0 → 0.1.0`, `1.2.0 → 0.2.0`. See `PLAN.md` for the
-> roadmap to a real 1.0. First installable tag will be **0.4.0**.
+> roadmap to a real 1.0. First installable tag is **0.4.0**.
 
 ## [Unreleased]
+
+### Changed
+
+- README and `passkey doctor` recommend `pipx install passkey-mcp==0.4.0`
+  (PyPI is live). `uv tool install passkey-mcp` is the uv-native twin.
+  Clone development stays `uv run passkey`.
+- PLAN current-state describes `main` after D2 publish: tag `v0.4.0`,
+  PyPI 0.4.0, Protect Main including `audit`. D2-6 is this pin; D2-7
+  MCP smoke and D3-4 / D3-5 stay open.
 
 ## 0.4.0 (2026-09-14)
 

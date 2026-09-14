@@ -1,9 +1,11 @@
 # passkey-mcp — Agent Notes
 
-Verified 2026-09-13. Roadmap is `PLAN.md` (first installable release **0.4.0**).
-Package version lives in `pyproject.toml`. `passkey --version` reads
-`importlib.metadata.version("passkey-mcp")`. This tree is **0.3.x**, Alpha,
-unpublished.
+Verified 2026-09-14. Roadmap is `PLAN.md` (first installable release **0.4.0**,
+on PyPI). Package version lives in `pyproject.toml`. `passkey --version`
+reads `importlib.metadata.version("passkey-mcp")`. This tree is **0.4.x**,
+Alpha.
+
+Positioning: local OS-keychain injector for MCP/CLI secrets. Not a team vault.
 
 Positioning: local OS-keychain injector for MCP/CLI secrets. Not a team vault.
 
@@ -33,7 +35,8 @@ before that bump 0.3.x. `PLAN.md` current-state describes **main**.
 
 - Python 3.10+; this machine is 3.14. **`uv` only — never pip.**
 - `uv sync` creates `.venv/`. Lint config is **`ruff.toml` only**.
-- Exercise the CLI with `uv run passkey …` (pipx is stale until D2 / PyPI).
+- Exercise the CLI with `uv run passkey …` from a clone. Team install is
+  `pipx install passkey-mcp==0.4.0`.
 
 ```bash
 uv sync
@@ -67,8 +70,8 @@ and mocks `passkey.cli._require_auth`. Never call real sudo/pkexec. Cover
 7. Do not add a third doctor or a second permission checker (`doctor.py` and
    `bundle.check_file_permissions` are the singles).
 8. Root `SECURITY.md` is the disclosure policy. Do not copy old “approved
-   for corporate use” language. PyPI is unpublished until D2; install via
-   the labeled git preview or `uv run passkey`.
+   for corporate use” language. Team install is
+   `pipx install passkey-mcp==0.4.0`.
 9. After a branch checkout, `uv run passkey` — not a stale global install.
 
 ## Key files
