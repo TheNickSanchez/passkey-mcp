@@ -13,7 +13,7 @@ Version on this branch: `<!-- x.y.z -->` (must differ from `main`)
 ## Release notes
 
 - [ ] `CHANGELOG.md` `[Unreleased]` updated (Added / Changed / Fixed / Security)
-- [ ] `pyproject.toml` and `passkey/__init__.py` versions match
+- [ ] `pyproject.toml` `[project] version` bumped (single source; `uv.lock` matches)
 
 ## Test plan
 

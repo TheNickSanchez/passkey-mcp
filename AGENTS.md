@@ -1,8 +1,9 @@
 # passkey-mcp — Agent Notes
 
 Verified 2026-09-13. Roadmap is `PLAN.md` (first installable release **0.4.0**).
-Package version lives in `pyproject.toml` (also duplicated in
-`passkey/__init__.py` until D2-5). This tree is **0.3.x**, Alpha, unpublished.
+Package version lives in `pyproject.toml`. `passkey --version` reads
+`importlib.metadata.version("passkey-mcp")`. This tree is **0.3.x**, Alpha,
+unpublished.
 
 Positioning: local OS-keychain injector for MCP/CLI secrets. Not a team vault.
 

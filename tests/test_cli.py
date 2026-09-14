@@ -158,6 +158,42 @@ class TestPositionalFallback:
         assert exc_info.value.code == 1
 
 
+class TestVersionFlag:
+    """passkey --version reads importlib.metadata, not a hardcoded string."""
+
+    def test_init_does_not_hardcode_version(self):
+        """passkey/__init__.py must not contain a second version literal."""
+        import re
+        from pathlib import Path
+
+        import passkey
+
+        text = Path(passkey.__file__).read_text()
+        assert not re.search(r'__version__\s*=\s*["\']\d+\.\d+', text)
+
+    def test_version_prints_package_metadata(self, capsys):
+        """--version includes the installed passkey-mcp metadata version."""
+        from importlib.metadata import version
+
+        expected = version("passkey-mcp")
+        parser = create_parser()
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--version"])
+        assert exc_info.value.code == 0
+        assert expected in capsys.readouterr().out
+
+    def test_version_reads_importlib_metadata(self, capsys):
+        """--version uses importlib.metadata.version('passkey-mcp')."""
+        with patch("passkey.cli.parser.package_version", return_value="9.9.9"):
+            parser = create_parser()
+            with pytest.raises(SystemExit) as exc_info:
+                parser.parse_args(["--version"])
+        assert exc_info.value.code == 0
+        out = capsys.readouterr().out
+        assert "9.9.9" in out
+        assert "passkey" in out
+
+
 class TestParserSubcommands:
     """Tests for argument parser subcommands."""
 

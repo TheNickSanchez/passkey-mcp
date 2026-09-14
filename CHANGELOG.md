@@ -8,6 +8,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- Trusted Publishing workflow builds wheel and sdist when a GitHub Release
+  is published; PyPI stays unpublished until the 0.4.0 tag.
+- Dependabot weekly PRs for uv and GitHub Actions (`mcp` stays `<2.0.0`).
+
+### Changed
+
+- `passkey --version` reads package metadata, so a `pyproject.toml` bump is
+  the only version edit.
+- Packaging metadata lists Python 3.13/3.14 and Issues/Source/PyPI URLs;
+  status stays Alpha and unpublished.
+- PLAN current-state describes `main` at 0.3.4 (D2 prep is not a 0.4.0
+  release).
+
+### Security
+
+- CI runs `pip-audit` against the locked tree so known dependency CVEs
+  fail the build. Locked `cryptography` to 50.0.1 (PYSEC-2026-3552).
+
+## 0.3.4 (2026-09-13)
+
 ### Changed
 
 - Agent loop: skip sys-arch unless PLAN.md names a design fork; parent chat

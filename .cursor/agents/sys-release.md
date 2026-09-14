@@ -32,15 +32,14 @@ Keep a Changelog at repo root.
 
 Example after bumping 0.3.3 → 0.3.4: `[Unreleased]` has only 0.3.4 notes; `## 0.3.3 (2026-09-13)` holds the merged D1 bullets.
 
-## Version files (until D2-5 single-sources)
+## Version files
 
-Bump **all** of these to the same value (they will drift if you only touch one):
+Bump these to the same value (they will drift if you only touch one):
 
 - `pyproject.toml` → `[project] version`
-- `passkey/__init__.py` → `__version__`
 - `uv.lock` → the `passkey-mcp` package version (`uv lock` or the smallest edit; do not bump dependencies unless this PR is about dependencies)
 
-After D2-5 (`importlib.metadata.version`), bump only `pyproject.toml` (and `uv.lock` if it still records the project version).
+Do **not** re-add a hardcoded `__version__` in `passkey/__init__.py`. `passkey --version` reads `importlib.metadata.version("passkey-mcp")`.
 
 ## PR body
 

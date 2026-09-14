@@ -1,8 +1,7 @@
 """Argument parser for passkey CLI."""
 
 import argparse
-
-from .. import __version__
+from importlib.metadata import version as package_version
 
 SUBPARSER_GROUPS = [
     ("Entry Management", [
@@ -76,7 +75,11 @@ Examples:
         """,
     )
 
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {package_version('passkey-mcp')}",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
 
