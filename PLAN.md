@@ -1,8 +1,7 @@
 # passkey-mcp — Plan to make it deployable
 
 **Target:** first installable release **v0.4.0**.
-**Current tree:** 0.4.0 on `main` (untagged; D2 prep landed; D2 publish still
-open until Nick’s Release).
+**Current tree:** 0.4.1 (D2-6 install pin). PyPI and tag remain **0.4.0**.
 
 Deployable means a teammate can install a **pinned version** with pipx, MCP
 configs can exec `passkey` from PATH, and a company security review can point
@@ -21,12 +20,12 @@ Positioning for every doc and review ticket:
 | Signal | Reality |
 |--------|---------|
 | Code on GitHub | Public, MIT, `TheNickSanchez/passkey-mcp` |
-| PyPI `passkey-mcp` | **404** — unpublished. Do not advertise a PyPI install until D2 publish. |
-| GitHub Releases / tags | **None**. First tag is 0.4.0 (D2 publish). Do not invent tags. |
-| CI | **Green on `main`**. macOS + Ubuntu, Python 3.10 and 3.14 (`lint` + four `test` jobs) plus `audit` (`pip-audit` on the lockfile). `--locked` sync. Dependabot + `release.yml` are on `main` (`release.yml` fires on GitHub Release publish; PyPI stays 404 until D2 publish). Dependabot ignores `mcp` semver-major. Do not re-verify with a partial local run. |
-| Branch protection | **On** — ruleset **Protect Main**: required checks are `lint` + four `test` jobs + `audit`. Direct push, force-push, and deletion of `main` are blocked. No leftover Settings click. No workflow, no ruleset YAML, no `gh api`. |
-| Version | `0.4.0` on `main`, **untagged**. Single-source: `passkey --version` reads `importlib.metadata.version("passkey-mcp")`. Stay Alpha. Local keychain injector, not a vault. |
-| Version on PyPI | Never shipped. D2 publish (tag / PyPI / README pin) is still open until Nick’s Release. Do not mark D2 publish done. |
+| PyPI `passkey-mcp` | **0.4.0** — Trusted Publishing from GitHub Release `v0.4.0`. Team install: `pipx install passkey-mcp==0.4.0`. |
+| GitHub Releases / tags | **`v0.4.0`**. Do not retag 0.4.0. Later docs patches bump 0.4.x without a new tag unless Nick publishes. |
+| CI | **Green on `main`**. macOS + Ubuntu, Python 3.10 and 3.14 (`lint` + four `test` jobs) plus `audit`. `--locked` sync. Dependabot + `release.yml` on `main`. Dependabot ignores `mcp` semver-major. Do not re-verify with a partial local run. |
+| Branch protection | **On** — ruleset **Protect Main**: required checks are `lint` + four `test` jobs + `audit`. Direct push, force-push, and deletion of `main` are blocked. |
+| Version | `0.4.1`. Single-source: `passkey --version` reads `importlib.metadata.version("passkey-mcp")`. Stay Alpha. Local keychain injector, not a vault. PyPI artifact stays 0.4.0 until a later Release. |
+| Version on PyPI | **0.4.0**. README/doctor pin is D2-6 (this PR). Do not advertise unpinned `pip install passkey-mcp` as the team command. |
 | Private vuln reporting | **On**. Matches `SECURITY.md`. |
 
 P0–P3 from the 2026-07-28 roadmap **landed in code** (hermetic tests, opt-in
@@ -34,18 +33,15 @@ auth, `unwrap`, JSONC URL fix, CLI package, unified doctor, file-based index,
 audit cap). D0-1 through D0-4 **landed in 0.3.2**. D1-1 through D1-8
 **landed on `main` as 0.3.3** (docs honesty). D2 prep **landed in 0.3.5**
 (PR #5: Trusted Publishing workflow, Dependabot, lockfile audit,
-single-source `--version`). Tree on `main` is **0.4.0 untagged** (D2 version;
-not a PyPI release). Protect Main requires `lint` + four `test` jobs +
-`audit`. Dependabot ignores `mcp` semver-major (PR #7 widened `mcp>=1,<2`
+single-source `--version`). Tree on `main` is **0.4.0 tagged**; PyPI **0.4.0**
+is live. Protect Main requires `lint` + four `test` jobs + `audit`.
+Dependabot ignores `mcp` semver-major (PR #7 widened `mcp>=1,<2`
 to `<3`; the range stays `mcp>=1.0.0,<2.0.0`). CI is green. Private vuln
-reporting is on. Stay Alpha. Local keychain injector, not a vault. Nothing
-is tagged. Remaining leftovers:
+reporting is on. Stay Alpha. Local keychain injector, not a vault.
+Remaining leftovers:
 
-- PyPI `passkey-mcp` is **404**. No GitHub Releases / tags. Unpublished.
-  D2 publish (tag / PyPI / README pin) is still open until Nick’s Release.
-- D2-6 / D2-7 (README pin, MCP smoke) and D3-4 / D3-5 (wrap-disable,
-  attestations) are still open. PyPI provenance exists only after the
-  0.4.0 Trusted Publish.
+- D2-7 (MCP smoke) and D3-4 / D3-5 (wrap-disable, attestations) are still
+  open. Link PyPI attestations in SECURITY.md after D3-5.
 
 ~~Struck (done in D1 / 0.3.3):~~ root `SECURITY.md` + `docs/SECURITY.md`
 stub (no “approved” / SOC 2 theater); README git preview + `uv run passkey`
@@ -60,8 +56,12 @@ single-source `--version`; D3-1 CI `pip-audit`; D3-2 private vuln reporting;
 D3-3 Dependabot for uv + Actions (`mcp` stays `<2`).
 
 ~~Struck (done in 0.4.0):~~ Protect Main required check `audit` (Nick added
-it). Dependabot ignore `mcp` semver-major. Version is 0.4.0 untagged. Do
-not mark D2 publish (tag / PyPI / README pin) done.
+it). Dependabot ignore `mcp` semver-major. Tag `v0.4.0`. PyPI 0.4.0 via
+Trusted Publishing.
+
+~~Struck (done in 0.4.1 / D2-6):~~ README + doctor install strings are
+pinned pipx `passkey-mcp==0.4.0` (uv tool twin). Clone stays `uv run passkey`.
+Do not mark D2-7 / D3-4 / D3-5 done.
 
 Historical P0–P3 tables are in git history (`0a9a46e` and parents). Do not
 re-open them unless a regression shows up.
@@ -185,10 +185,10 @@ Do **not** bump to 0.4.0 here. D2 is the first tag and first PyPI publish
 |---|------|------------|
 | 1 | ~~Root `SECURITY.md` + `docs/` stub.~~ **Done (0.3.3):** GitHub-standard disclosure + threat model matching `auth.py` / `mcp_server.py`. No “approved”, no SOC 2 / OWASP. | File matches the code; InfoSec can attach it |
 | 2 | ~~README product + `require-auth`.~~ **Done (0.3.3):** local injector, not a password manager; extra auth optional/off; Linux/Windows best-effort vs macOS Keychain ACLs. | README cannot be quoted against the threat model |
-| 3 | ~~README install.~~ **Done (0.3.3):** labeled git preview + `uv run passkey`. No PyPI pipx, no `pip install`. | Following README cannot 404 |
+| 3 | ~~README install.~~ **Done (0.3.3 / superseded 0.4.1):** was git preview. D2-6 switched to pinned pipx. | Following README cannot 404 |
 | 4 | ~~Argv example.~~ **Done (0.3.3):** `API_KEY=abc` removed; `passkey add --fields` prompts via `getpass`. | No documented secret-in-argv path |
 | 5 | ~~CHANGELOG honesty.~~ **Done (0.3.3):** 0.3.0 known-issues stay gone; 0.2.0 share line is **8 words / ~64 bits**; 0.3.2 notes promoted; D1 notes under `[Unreleased]`. | Changelog matches code |
-| 6 | ~~Doctor copy.~~ **Done (0.3.3):** git preview + `uv run passkey`. No `pip install`, no PyPI pipx. After D2, switch to pinned pipx — **not now**. | `passkey doctor` does not 404 |
+| 6 | ~~Doctor copy.~~ **Done (0.3.3 / superseded 0.4.1):** was git preview. D2-6 switched to pinned pipx. | `passkey doctor` does not 404 |
 | 7 | ~~README Development + `AGENTS.md`.~~ **Done (0.3.3):** `uv sync` / `uv run pytest` / `uv run ruff check`; leftover red-test sentence struck. | A new clone can run the suite from the README |
 | 8 | ~~`CONTRIBUTING.md`.~~ **Done (0.3.3):** same commands; PR = `[Unreleased]` note; do not commit to `main`. | Second contributor does not reverse-engineer AGENTS.md |
 
@@ -283,31 +283,21 @@ approval.
   or a fake reviewer sign-off.
 ```
 
-### D1-6 — locked: doctor (and README) install strings (done in 0.3.3)
+### D1-6 — locked: doctor (and README) install strings (done in 0.3.3; superseded D2-6 / 0.4.1)
 
-*Landed. Do not change these strings until D2.*
+*Historical lock. D2-6 replaced these strings.*
 
-**File:** `passkey/doctor.py` — the `passkey_in_path` fail recommendation.
-README install block uses the same two commands.
+**Now (0.4.1):**
 
-**Until D2, use exactly:**
-
-- Git preview: `pipx install git+https://github.com/TheNickSanchez/passkey-mcp.git`
+- Team: `pipx install passkey-mcp==0.4.0`
+- uv twin: `uv tool install passkey-mcp`
 - This clone: `uv run passkey`
 
-**Do not use:**
+**Do not use** unpinned `pip install passkey-mcp` as the documented team path.
 
-- `pip install passkey-mcp`
-- `pipx install passkey-mcp` (PyPI 404)
-- `pip install -e .` / `pip install -e ".[dev]"` as the recommended path
+Doctor sentence:
 
-Suggested doctor sentence (engineer may wrap for line length, not change
-the commands):
-
-`Install passkey: pipx install git+https://github.com/TheNickSanchez/passkey-mcp.git (git preview until PyPI) or uv run passkey from a clone.`
-
-After D2, README + doctor may switch to `pipx install passkey-mcp==0.4.0`.
-Not this PR.
+`Install passkey: pipx install passkey-mcp==0.4.0 or uv tool install passkey-mcp.`
 
 ---
 
@@ -317,12 +307,12 @@ This is the actual deploy.
 
 | # | Item | Acceptance |
 |---|------|------------|
-| 1 | PyPI project `passkey-mcp`, published via **Trusted Publishing** (OIDC from GitHub Actions). No long-lived API token on a laptop. | `pip index versions passkey-mcp` shows 0.4.0 |
-| 2 | Release workflow: GitHub Release on tag `v0.4.0` (`release: published`) → `uv build` → Trusted Publish wheel + sdist → attach those assets to that Release | `pipx install passkey-mcp==0.4.0` works on a clean Mac and Ubuntu |
-| 3 | Confirm console scripts: `passkey` and `passkey-mcp-server` land on PATH via pipx | `which passkey`; Cursor can spawn `passkey run …` |
-| 4 | ~~pyproject hygiene.~~ **Done (0.3.5):** 3.13/3.14 classifiers; `Development Status :: 3 - Alpha`; Issues / Source / PyPI URLs alongside Homepage. Stay Alpha and unpublished. | `twine check dist/*` clean (or `uv build` equivalent) |
+| 1 | ~~PyPI project `passkey-mcp`.~~ **Done (0.4.0):** Trusted Publishing from GitHub Release. | `pip index versions passkey-mcp` shows 0.4.0 |
+| 2 | ~~Release workflow.~~ **Done (0.4.0):** `v0.4.0` Release ran `release.yml`. | `pipx install passkey-mcp==0.4.0` works |
+| 3 | ~~Console scripts.~~ **Done (0.4.0):** `passkey` and `passkey-mcp-server` on PATH via pipx. | `which passkey` |
+| 4 | ~~pyproject hygiene.~~ **Done (0.3.5):** 3.13/3.14 classifiers; `Development Status :: 3 - Alpha`; Issues / Source / PyPI URLs alongside Homepage. Stay Alpha. | `twine check dist/*` clean (or `uv build` equivalent) |
 | 5 | ~~Single-source version.~~ **Done (0.3.5):** `passkey --version` reads `importlib.metadata.version("passkey-mcp")`. | Bumping `pyproject.toml` is the only edit for a release |
-| 6 | README install block becomes the pipx command **pinned in the release notes** (`pipx install passkey-mcp==0.4.0`). Offer `uv tool install passkey-mcp` as the uv-native twin. | Glama / scrapers that copy the README stop advertising a 404 |
+| 6 | ~~README / doctor pin.~~ **Done (0.4.1):** `pipx install passkey-mcp==0.4.0`; `uv tool install passkey-mcp` twin. Clone stays `uv run passkey`. | Glama / scrapers that copy the README stop advertising a 404 |
 | 7 | Smoke the MCP path once after install: `passkey doctor`, wrap a dummy server, start it with no tty and no sudo | Wrapped server starts on stock macOS |
 
 Release loop (this is the development-standard part of D2):
@@ -406,26 +396,23 @@ A person who has never seen this repo can:
 4. `passkey unwrap` to leave
 5. Point InfoSec at: MIT license, threat model in SECURITY.md, green **required** CI on protected `main`, tagged `v0.4.0`, PyPI 0.4.0, GitHub Release
 
-Until that list is true, do not call it deployed, and do not send the current
-README to the team.
+Until D2-7 (wrap smoke) is done, do not call the MCP path fully smoked.
+The README install command is sendable after D2-6.
 
 ---
 
 ## Sequence
 
 ```
-D0-1..D0-5 (done on main; Protect Main requires lint + four test jobs + audit)  →  D1 (done on main, 0.3.3)  →  D2 prep (done on main, 0.3.5: release.yml, Dependabot, audit, single-source version)  →  D2 version (0.4.0 untagged)  →  D2 publish (tag + PyPI 0.4.0; Nick’s Release)  →  D3 remainder (D3-4, D3-5)
+D0-1..D0-5 (done; Protect Main requires lint + four tests + audit)  →  D1 (0.3.3)  →  D2 prep (0.3.5)  →  D2 publish (tag v0.4.0 + PyPI 0.4.0)  →  D2-6 (0.4.1 README/doctor pin)  →  D2-7 / D3-4 / D3-5
 ```
 
 D0 code shipped on `main` as 0.3.2. **D1 shipped on `main` as 0.3.3**
-(docs honesty). D2 prep (D2-4, D2-5, D3-1, D3-3, `release.yml`) landed in
-0.3.5. `main` is **0.4.0 untagged**. CI green (`lint` + four `test` jobs +
-`audit`), Protect Main requires those six checks, private vuln reporting
-on, nothing tagged. Stay Alpha. Local keychain injector, not a vault.
-D2 publish is the first tag and the first PyPI publish — do not mark D2
-publish done, do not invent tags or PyPI, and do not advertise a PyPI
-install while the project is 404. Do not tag until GitHub Actions is
-green on the commit you tag.
+(docs honesty). D2 prep landed in 0.3.5. **D2 publish landed:** tag
+`v0.4.0`, PyPI 0.4.0, Trusted Publishing. **D2-6** is the README/doctor
+pin (0.4.1). Stay Alpha. Local keychain injector, not a vault. Leftover:
+D2-7 MCP smoke, D3-4 wrap-disable, D3-5 attestations link. Do not retag
+0.4.0. Do not advertise unpinned `pip install` as the team command.
 
 ---
 

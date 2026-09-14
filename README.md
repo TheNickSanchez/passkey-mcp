@@ -53,17 +53,21 @@ and threat model: [SECURITY.md](SECURITY.md).
 
 ## Installation
 
-PyPI `passkey-mcp` is **unpublished**. Do not run `pipx install passkey-mcp`
-or `pip install passkey-mcp` — those 404 until the 0.4.0 release.
+```bash
+pipx install passkey-mcp==0.4.0
+```
+
+or:
+
+```bash
+uv tool install passkey-mcp
+```
+
+Stay on the pinned pipx line for team installs. Unpinned `pip install
+passkey-mcp` is not the documented path.
 
 Installing does **not** wrap MCP configs. Wrapping is `passkey init` after
 you have entries you want injected.
-
-**Preview (git, until PyPI):**
-
-```bash
-pipx install git+https://github.com/TheNickSanchez/passkey-mcp.git
-```
 
 **This repo / clone:**
 
