@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+### Security
+
+- A locked or empty keychain no longer deletes the matching name from
+  `entries.json`.
+- An existing data directory with group/other bits set is tightened to
+  `0o700` on POSIX without following a symlink.
+
+## 0.4.2 (2026-09-14)
+
 ### Changed
 
 - `passkey get --all` copies `KEY='value'` env lines (every value

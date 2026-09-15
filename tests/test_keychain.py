@@ -1,6 +1,7 @@
 """Tests for passkey.keychain module."""
 
 import json
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -191,6 +192,21 @@ class TestGetEntry:
         """Returns None for empty string."""
         mock_keyring.get_password.return_value = ""
         assert get_entry("empty") is None
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX index regression")
+    @pytest.mark.parametrize("blank", [None, ""])
+    def test_blank_keyring_does_not_drop_index_row(
+        self, mock_keyring, isolated_data_dir, blank
+    ):
+        """Locked/transient keychain must not delete the entries.json row."""
+        from passkey.keychain import _get_index_path
+
+        _get_index_path().parent.mkdir(parents=True, exist_ok=True)
+        _get_index_path().write_text('["keep-me"]')
+        mock_keyring.get_password.return_value = blank
+
+        assert get_entry("keep-me") is None
+        assert json.loads(_get_index_path().read_text()) == ["keep-me"]
 
 
 class TestDeleteEntry:
