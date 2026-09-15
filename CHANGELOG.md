@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `passkey get --all` and `passkey generate` keep the copied secret on
+  the clipboard for 30 seconds after the CLI exits, instead of wiping
+  it immediately via an atexit handler.
+
+## 0.4.1 (2026-09-14)
+
 ### Changed
 
 - README and `passkey doctor` recommend `pipx install passkey-mcp==0.4.0`
