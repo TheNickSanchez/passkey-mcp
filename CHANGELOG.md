@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `passkey get --all` copies `KEY='value'` env lines (every value
+  single-quoted). Interactive `get` still copies a raw field value.
+
 ### Fixed
 
 - `passkey get --all` and `passkey generate` keep the copied secret on

@@ -115,8 +115,8 @@ class TestInfoCommand:
 class TestGetCommand:
     """Tests for 'get' subcommand."""
 
-    def test_get_all_copies_key_value_pairs(self, mock_keychain, capsys):
-        """get --all copies all fields as key:value pairs."""
+    def test_get_all_copies_env_assignments(self, mock_keychain, capsys):
+        """get --all copies all fields as quoted KEY=value env lines."""
         mock_keychain["get"].return_value = Entry(
             name="test",
             fields={"A": "1", "B": "2"}
@@ -127,9 +127,32 @@ class TestGetCommand:
             main()
 
         mock_copy.assert_called_once()
-        call_arg = mock_copy.call_args[0][0]
-        assert "A:1" in call_arg
-        assert "B:2" in call_arg
+        assert mock_copy.call_args[0][0] == "A='1'\nB='2'"
+
+    def test_get_all_quotes_shell_metacharacters(self, mock_keychain):
+        mock_keychain["get"].return_value = Entry(
+            name="test",
+            fields={"TOKEN": "a!b|c&d"},
+        )
+
+        with patch.object(sys, "argv", ["passkey", "get", "test", "--all"]), \
+             patch("passkey.commands.copy_with_autoclear") as mock_copy:
+            main()
+
+        copied = mock_copy.call_args[0][0]
+        assert copied == "TOKEN='a!b|c&d'"
+
+    def test_get_all_quotes_embedded_apostrophes(self, mock_keychain):
+        mock_keychain["get"].return_value = Entry(
+            name="test",
+            fields={"NOTE": "it's fine"},
+        )
+
+        with patch.object(sys, "argv", ["passkey", "get", "test", "--all"]), \
+             patch("passkey.commands.copy_with_autoclear") as mock_copy:
+            main()
+
+        assert mock_copy.call_args[0][0] == "NOTE='it'\"'\"'s fine'"
 
 
 class TestPositionalFallback:
