@@ -369,13 +369,22 @@ def cmd_list(names_only: bool = False) -> None:
         print("".join(parts))
 
 
+def _posix_single_quote(value: str) -> str:
+    """Always wrap in single quotes. Embed apostrophes as POSIX '\\''."""
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def fields_as_env(fields: dict[str, str]) -> str:
+    """Format fields as KEY='value' lines. Every value is quoted."""
+    return "\n".join(f"{k}={_posix_single_quote(v)}" for k, v in fields.items())
+
+
 def cmd_get_all(entry: Entry) -> None:
-    """Copy all fields from entry to clipboard as key:value pairs."""
+    """Copy all fields to the clipboard as KEY='value' lines."""
     if not entry:
         raise PasskeyError("Entry not found")
 
-    output = "\n".join(f"{k}:{v}" for k, v in entry.fields.items())
-    copy_with_autoclear(output, timeout_seconds=30)
+    copy_with_autoclear(fields_as_env(entry.fields), timeout_seconds=30)
     print(
         f"Copied {len(entry.fields)} field(s) from '{entry.name}' to clipboard (auto-clears in 30s)"
     )

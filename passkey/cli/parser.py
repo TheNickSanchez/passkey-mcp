@@ -100,7 +100,7 @@ Examples:
         "-a",
         dest="get_all",
         action="store_true",
-        help="Copy all fields to clipboard instead of interactive picker",
+        help="Copy all fields as KEY='value' env lines instead of interactive picker",
     )
     get_parser.completer = _entry_completer
 

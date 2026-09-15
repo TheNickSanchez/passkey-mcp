@@ -10,6 +10,19 @@
 
 ### Changed
 
+- `passkey get --all` copies `KEY='value'` env lines (every value
+  single-quoted). Interactive `get` still copies a raw field value.
+
+### Fixed
+
+- `passkey get --all` and `passkey generate` keep the copied secret on
+  the clipboard for 30 seconds after the CLI exits, instead of wiping
+  it immediately via an atexit handler.
+
+## 0.4.1 (2026-09-14)
+
+### Changed
+
 - README and `passkey doctor` recommend `pipx install passkey-mcp==0.4.0`
   (PyPI is live). `uv tool install passkey-mcp` is the uv-native twin.
   Clone development stays `uv run passkey`.
