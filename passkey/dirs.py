@@ -34,10 +34,36 @@ def get_legacy_data_dir() -> Path:
     return Path.home() / ".passkey"
 
 
+def _chmod_data_dir_if_loose(data_dir: Path) -> None:
+    """Tighten an existing data dir to 0o700 if group/other bits are set.
+
+    Does not follow a symlink (O_NOFOLLOW). No-op if open/chmod fails.
+    """
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(data_dir, flags)
+    except OSError:
+        return
+    try:
+        mode = os.fstat(fd).st_mode & 0o777
+        if mode & ~0o700:
+            os.fchmod(fd, 0o700)
+    except OSError:
+        return
+    finally:
+        os.close(fd)
+
+
 def ensure_data_dir() -> Path:
     """Create and return the data directory with secure permissions."""
     data_dir = get_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if sys.platform != "win32":
+        _chmod_data_dir_if_loose(data_dir)
     return data_dir
 
 

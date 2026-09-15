@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 
 class TestGetDataDir:
     """Tests for get_data_dir()."""
@@ -100,6 +102,33 @@ class TestEnsureDataDir:
             result = dirs.ensure_data_dir()
         assert result.exists()
         assert result.is_dir()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
+    def test_tightens_existing_loose_permissions(self, tmp_path):
+        """Existing 0o755 data dir is chmod'd to 0o700."""
+        import passkey.dirs as dirs
+
+        target = tmp_path / "passkey"
+        target.mkdir()
+        target.chmod(0o755)
+        with patch.object(dirs, "get_data_dir", return_value=target):
+            dirs.ensure_data_dir()
+        assert oct(target.stat().st_mode & 0o777) == "0o700"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
+    def test_does_not_chmod_through_symlink(self, tmp_path):
+        """A data-dir symlink is not followed; the target mode is left alone."""
+        import passkey.dirs as dirs
+
+        real = tmp_path / "real"
+        real.mkdir()
+        real.chmod(0o755)
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        with patch.object(dirs, "get_data_dir", return_value=link):
+            dirs.ensure_data_dir()
+        assert oct(real.stat().st_mode & 0o777) == "0o755"
+        assert link.is_symlink()
 
 
 class TestMigration:

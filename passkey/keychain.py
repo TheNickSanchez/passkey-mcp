@@ -268,15 +268,8 @@ def _get_entry(name: str, *, log_read: bool) -> Entry | None:
         # This operation is atomic and does not need the metadata lock
         data = keyring.get_password(SERVICE, name)
         if not data:
-            # Before returning None, ensure it's not a dangling entry in the index
-            with _metadata_lock():
-                entries = _read_index_nolock()
-                if name in entries:
-                    entries.remove(name)
-                    _write_index_nolock(entries)
-                    log_operation(
-                        "metadata_cleanup", name, details={"reason": "dangling entry found"}
-                    )
+            # Empty/None can mean a locked or transient keychain, not a
+            # deleted entry. Leave the name in entries.json.
             return None
 
         entry = Entry.from_json(name, data)
