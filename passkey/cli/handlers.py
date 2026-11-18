@@ -37,13 +37,24 @@ def handle_run_command(parser, args):
     """Handler for the 'run' subcommand."""
     from ..interactive import is_interactive, select_multiple_entries
 
-    run_args = args.args
+    run_args = list(args.args)
     if "--" not in run_args:
-        parser.error("Usage: passkey run <entries...> -- <command>")
+        parser.error("Usage: passkey run [-q|--quiet] [--no-masking] <entries...> -- <command>")
 
     sep_idx = run_args.index("--")
-    entries = run_args[:sep_idx]
+    pre_sep = run_args[:sep_idx]
     cmd = run_args[sep_idx + 1 :]
+
+    no_masking = bool(getattr(args, "no_masking", False))
+    quiet = bool(getattr(args, "quiet", False))
+    entries: list[str] = []
+    for token in pre_sep:
+        if token == "--no-masking":
+            no_masking = True
+        elif token in ("-q", "--quiet"):
+            quiet = True
+        else:
+            entries.append(token)
 
     if not entries:
         if is_interactive():
@@ -54,7 +65,7 @@ def handle_run_command(parser, args):
     if not cmd:
         raise PasskeyError("No command specified after --")
 
-    rc = runner.run_with_secrets(entries, cmd)
+    rc = runner.run_with_secrets(entries, cmd, no_masking=no_masking, quiet=quiet)
     sys.exit(rc)
 
 

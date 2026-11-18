@@ -18,9 +18,12 @@ from .mcp_config import (
     ToolAdapter,
     backup_config,
     extract_secrets,
+    get_backups_dir,
     get_env_from_server,
     get_mcp_servers,
     get_server_security_status,
+    get_wrapped_entry_name,
+    is_file_exposed_in_git,
     is_passkey_wrapped,
     load_config,
     rewrite_server_for_passkey,
@@ -171,20 +174,22 @@ def cmd_init(
 
     print()
 
+    backup_preview = backup_path if backup_path else f"{get_backups_dir()}/{path.name}.<timestamp>.backup"
+
     if dry_run:
         print("[Dry run - no changes will be made]")
         print()
         print("This would:")
         print("  1. Store secrets in system keychain")
         print("  2. Update config to use passkey wrapper")
-        print(f"  3. Create backup at {path}{backup_path if backup_path else '.backup'}")
+        print(f"  3. Create 0600 backup at {backup_preview}")
         return
 
     # Confirm
     print("This will:")
     print("  1. Store secrets in system keychain")
     print("  2. Update config to use passkey wrapper")
-    print(f"  3. Create backup at {path}.backup")
+    print(f"  3. Create 0600 backup at {backup_preview}")
     print()
 
     confirm = input("Continue? [Y/n]: ").strip().lower()
@@ -199,6 +204,11 @@ def cmd_init(
         backup_target = Path(backup_path) if backup_path else None
         actual_backup = backup_config(path, backup_target)
         print(f"Backup created: {actual_backup}")
+        if backup_target and is_file_exposed_in_git(actual_backup):
+            print(
+                f"WARNING: Custom backup '{actual_backup}' is inside a git worktree and not gitignored!",
+                file=sys.stderr,
+            )
     except Exception as e:
         raise PasskeyError(f"Error creating backup: {e}") from e
 
@@ -484,8 +494,7 @@ def cmd_servers(
 
             for name, server_config in servers.items():
                 if is_passkey_wrapped(server_config):
-                    args = server_config.get("args", [])
-                    entry_name = args[1] if len(args) >= 2 and args[0] == "run" else name
+                    entry_name = get_wrapped_entry_name(server_config) or name
                     result = {
                         "name": name,
                         "tool": adapter.name,

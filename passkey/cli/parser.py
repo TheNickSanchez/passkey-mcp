@@ -131,8 +131,7 @@ Examples:
     # set-field
     set_field_parser = subparsers.add_parser("set-field", help="Add or update a field")
     set_field_parser.add_argument("entry", help="Entry name")
-    set_field_parser.add_argument("field", help="Field name")
-    set_field_parser.add_argument("value", nargs="?", help="Field value (prompts if omitted)")
+    set_field_parser.add_argument("field", help="Field name (prompts securely for value)")
     set_field_parser.completer = _entry_completer
 
     # check
@@ -155,6 +154,17 @@ Examples:
 
     # run
     run_parser = subparsers.add_parser("run", help="Run command with secrets as env vars")
+    run_parser.add_argument(
+        "--no-masking",
+        action="store_true",
+        help="Disable masking of secret values on child stdout and stderr",
+    )
+    run_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress passkey warning and status output on stderr",
+    )
     run_parser.add_argument("args", nargs=argparse.REMAINDER, help="entries... -- command")
 
     # audit

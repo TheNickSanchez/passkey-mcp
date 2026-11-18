@@ -12,6 +12,7 @@ from pathlib import Path
 from .keychain import PasskeyError, get_all_entries, list_entries
 from .mcp_config import (
     ADAPTERS,
+    BACKUP_SUFFIX,
     MCPConfigError,
     find_passkey_command,
     get_mcp_servers,
@@ -112,6 +113,21 @@ def run_diagnostics(deep: bool = False) -> dict:
                     "message": f"{adapter.display_name} config invalid: {e}",
                 })
                 issues.append(f"{adapter.display_name} config is invalid")
+
+            # Flag lingering plaintext .backup files sitting next to MCP configs
+            adjacent_backup = Path(str(config_path) + BACKUP_SUFFIX)
+            if adjacent_backup.exists():
+                checks.append({
+                    "name": f"{adapter_name}_backup",
+                    "status": "warn",
+                    "message": f"Lingering backup file next to {adapter.display_name} config: {adjacent_backup}",
+                })
+                issues.append(
+                    f"Lingering backup file next to {adapter.display_name} config may contain plaintext secrets: {adjacent_backup}"
+                )
+                recommendations.append(
+                    f"Remove or move lingering backup: rm '{adjacent_backup}'"
+                )
 
     if deep:
         _deep_checks(checks, issues, recommendations)

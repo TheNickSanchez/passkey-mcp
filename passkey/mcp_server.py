@@ -146,16 +146,25 @@ def _validate_config_paths(paths: list[str]) -> list[Path]:
     so the caller can produce appropriate error messages.
     """
     _FORBIDDEN_PREFIXES = (
-        "/etc/", "/dev/", "/proc/", "/sys/", "/bin/", "/sbin/",
+        "/etc/", "/private/etc/", "/dev/", "/proc/", "/sys/", "/bin/", "/sbin/",
         "/usr/bin/", "/usr/sbin/", "/usr/lib/", "/lib/", "/boot/",
-        "/var/root/", "/System/",
+        "/var/root/", "/private/var/", "/System/",
     )
     resolved = []
     for p in paths:
-        pp = Path(p).expanduser().resolve()
+        expanded = Path(p).expanduser()
+        pp = expanded.resolve()
         if pp.suffix not in (".json", ".jsonc"):
             continue
-        if str(pp).startswith(_FORBIDDEN_PREFIXES):
+        expanded_str = str(expanded)
+        resolved_str = str(pp)
+        # Allow macOS per-user temporary directories (/private/var/folders/...)
+        if resolved_str.startswith("/private/var/folders/"):
+            resolved.append(pp)
+            continue
+        if expanded_str.startswith(_FORBIDDEN_PREFIXES) or resolved_str.startswith(
+            _FORBIDDEN_PREFIXES
+        ):
             continue
         resolved.append(pp)
     return resolved
@@ -187,6 +196,17 @@ def passkey_wrap_server(
         - configs_skipped: List of configs where server not found
         - errors: Any errors encountered
     """
+    from .settings import mcp_write_tools_enabled
+
+    if not mcp_write_tools_enabled():
+        return {
+            "success": False,
+            "message": (
+                "MCP write tools are disabled by policy (mcp-write-tools = False). "
+                "Enable with 'passkey config mcp-write-tools on' if intended."
+            ),
+        }
+
     try:
         entry = get_entry(server_name)
     except PasskeyError as e:

@@ -7,7 +7,43 @@ log) and never invokes real OS authentication (sudo/pkexec/UAC).
 
 from unittest.mock import patch
 
+import keyring
+import keyring.backend
 import pytest
+
+
+class _InMemoryKeyring(keyring.backend.KeyringBackend):
+    """Hermetic in-memory keyring so no test can ever touch the real OS keychain."""
+
+    priority = 1
+
+    def __init__(self) -> None:
+        self._store: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self._store.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self._store[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        if (service, username) not in self._store:
+            from keyring.errors import PasswordDeleteError
+
+            raise PasswordDeleteError(f"No password for ({service}, {username})")
+        del self._store[(service, username)]
+
+
+@pytest.fixture(autouse=True)
+def isolated_keyring():
+    """Replace the process keyring backend with a fresh per-test in-memory store."""
+    prev = keyring.get_keyring()
+    mem = _InMemoryKeyring()
+    keyring.set_keyring(mem)
+    try:
+        yield mem
+    finally:
+        keyring.set_keyring(prev)
 
 
 @pytest.fixture(autouse=True)

@@ -3,6 +3,7 @@
 import getpass
 import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -601,6 +602,11 @@ def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: boo
 
     if file_path == "-":
         if not no_secrets:
+            if not sys.stdin.isatty():
+                raise PasskeyError(
+                    "Plaintext export to stdout requires an interactive terminal (TTY). "
+                    "Use a file path, --encrypt, or --no-secrets instead."
+                )
             confirm = (
                 input(
                     "WARNING: This will print secrets to stdout (visible in terminal history).\n"
