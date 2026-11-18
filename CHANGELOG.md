@@ -30,6 +30,7 @@
 - Removed unused positional `value` argument from `passkey set-field` so secrets cannot enter process `argv`.
 - Added `mcp-write-tools` setting to lock down `passkey_wrap_server` (`PLAN.md` D3-4) and expanded MCP path validation to block macOS `/private/etc/` and `/private/var/` symlink targets.
 - `passkey doctor` warns on lingering `.backup` files next to MCP configs.
+- Updated locked transitive dependencies (`certifi`, `filelock`, `msgpack`, `pyjwt`, `urllib3`) in `uv.lock` to clear `pip-audit` advisories.
 
 ### Fixed
 
