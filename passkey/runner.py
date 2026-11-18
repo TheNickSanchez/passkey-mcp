@@ -13,7 +13,7 @@ from .masking import SecretMasker
 from .models import Entry
 from .references import is_reference, parse_dotenv_file, resolve_reference
 
-_IDLE_FLUSH_SECONDS = 0.005
+_SELECT_POLL_SECONDS = 0.1
 _READ_CHUNK_BYTES = 4096
 
 
@@ -58,12 +58,8 @@ def _run_masked_subprocess(
 
     try:
         while sel.get_map():
-            events = sel.select(timeout=_IDLE_FLUSH_SECONDS)
+            events = sel.select(timeout=_SELECT_POLL_SECONDS)
             if not events:
-                for _, masker, target in stream_map.values():
-                    flushed = masker.flush()
-                    if flushed:
-                        _write_stream_bytes(target, flushed)
                 if proc.poll() is not None and not sel.get_map():
                     break
                 continue

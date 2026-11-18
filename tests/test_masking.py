@@ -99,6 +99,23 @@ class TestRunnerStreamMasking:
         assert "https://api.example.com" in captured.out
         assert "SECURITY WARNING" not in captured.err
 
+    def test_blocks_slow_drip_split_chunk_exfiltration(self, capsys):
+        secret = "sk-drip-attack-secret-value-999"
+        save_entry(Entry(name="drip", fields={"API_SECRET": secret}))
+        script = (
+            "import os, time; "
+            "s = os.environ['API_SECRET'].encode(); "
+            "os.write(1, s[:4]); "
+            "time.sleep(0.05); "
+            "os.write(1, s[4:] + b'\\n')"
+        )
+        rc = run_with_secrets(["drip"], [sys.executable, "-c", script], quiet=True)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert secret not in out
+        assert "sk-d" not in out
+        assert out.strip() == CONCEALED_TEXT
+
     def test_no_masking_flag_allows_raw_output(self, capsys):
         save_entry(Entry(name="svc", fields={"API_SECRET": "sk-live-raw-allowed-12345"}))
         # Using python to write to a file or checking returncode with subprocess
