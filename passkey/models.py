@@ -6,7 +6,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 ENTRY_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
-RESERVED_NAMES = frozenset({"__entries__", "__audit_hmac_key__", "__lease_hmac_key__"})
+RESERVED_NAMES = frozenset(
+    {
+        "__entries__",
+        "__audit_hmac_key__",
+        "__lease_hmac_key__",
+        "help",
+        "version",
+    }
+)
 VALID_POLICIES = frozenset({"allow", "prompt"})
 
 

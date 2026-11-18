@@ -628,6 +628,7 @@ def cmd_edit(entry: Entry) -> None:
         return
 
     final_name, fields, config = result
+    final_name = _validate_entry_name(final_name)
     updated = Entry(
         name=final_name,
         fields=fields,
@@ -703,8 +704,7 @@ def cmd_clone(source: Entry, dest_name: str | None = None) -> None:
                 input(f"New entry name [{source.name}_copy]: ").strip() or f"{source.name}_copy"
             )
 
-    if not dest_name:
-        raise PasskeyError("Entry name cannot be empty")
+    dest_name = _validate_entry_name(dest_name)
     if dest_name in existing:
         raise PasskeyError(
             f"Entry '{dest_name}' already exists. Delete it first or choose a different name."
@@ -731,6 +731,7 @@ def cmd_clone(source: Entry, dest_name: str | None = None) -> None:
         return
 
     final_name, fields, config = result
+    final_name = _validate_entry_name(final_name)
     if final_name != dest_name and final_name in existing:
         raise PasskeyError(f"Entry '{final_name}' already exists.")
     entry = Entry(name=final_name, fields=fields, config=config, policy=source.policy)

@@ -452,6 +452,23 @@ class TestHelpGroupingAndBackwardsCompat:
         assert e3.value.code == 0
         assert capsys.readouterr().out.strip() == ver_sub
 
+    def test_help_and_version_are_reserved_entry_names(self, capsys):
+        from passkey.models import RESERVED_NAMES, is_valid_name
+
+        for reserved in ("help", "version"):
+            assert reserved in RESERVED_NAMES
+            assert is_valid_name(reserved) is False
+            with pytest.raises(ValueError, match="reserved name"):
+                Entry(name=reserved, fields={"K": "V"})
+
+            with (
+                patch.object(sys, "argv", ["passkey", "new", reserved]),
+                pytest.raises(SystemExit) as exc,
+            ):
+                main()
+            assert exc.value.code == 1
+            assert "reserved name" in capsys.readouterr().err
+
 
 class TestBarePasskeyFTUEAndInitPreview:
     """Tests for bare passkey States A, B, C and clearer passkey init preview."""
