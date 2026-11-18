@@ -50,6 +50,41 @@ BUILTIN_TEMPLATES: list[dict] = [
         ],
     },
     {
+        "name": "claude",
+        "description": "Anthropic Claude Code / API access",
+        "fields": [
+            {"name": "ANTHROPIC_API_KEY", "description": "Anthropic API key (sk-ant-...)", "secret": True},
+        ],
+    },
+    {
+        "name": "codex",
+        "description": "OpenAI Codex CLI access",
+        "fields": [
+            {"name": "OPENAI_API_KEY", "description": "OpenAI API key (sk-...)", "secret": True},
+        ],
+    },
+    {
+        "name": "gemini",
+        "description": "Google Gemini CLI / API access",
+        "fields": [
+            {"name": "GEMINI_API_KEY", "description": "Gemini API key", "secret": True},
+        ],
+    },
+    {
+        "name": "cursor-agent",
+        "description": "Cursor CLI agent API access",
+        "fields": [
+            {"name": "CURSOR_API_KEY", "description": "Cursor API key", "secret": True},
+        ],
+    },
+    {
+        "name": "wrangler",
+        "description": "Cloudflare Wrangler API token",
+        "fields": [
+            {"name": "CLOUDFLARE_API_TOKEN", "description": "Cloudflare API token", "secret": True},
+        ],
+    },
+    {
         "name": "stripe",
         "description": "Stripe payment processing",
         "fields": [

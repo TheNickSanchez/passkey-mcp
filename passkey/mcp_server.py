@@ -146,16 +146,25 @@ def _validate_config_paths(paths: list[str]) -> list[Path]:
     so the caller can produce appropriate error messages.
     """
     _FORBIDDEN_PREFIXES = (
-        "/etc/", "/dev/", "/proc/", "/sys/", "/bin/", "/sbin/",
+        "/etc/", "/private/etc/", "/dev/", "/proc/", "/sys/", "/bin/", "/sbin/",
         "/usr/bin/", "/usr/sbin/", "/usr/lib/", "/lib/", "/boot/",
-        "/var/root/", "/System/",
+        "/var/root/", "/private/var/", "/System/",
     )
     resolved = []
     for p in paths:
-        pp = Path(p).expanduser().resolve()
+        expanded = Path(p).expanduser()
+        pp = expanded.resolve()
         if pp.suffix not in (".json", ".jsonc"):
             continue
-        if str(pp).startswith(_FORBIDDEN_PREFIXES):
+        expanded_str = str(expanded)
+        resolved_str = str(pp)
+        # Allow macOS per-user temporary directories (/private/var/folders/...)
+        if resolved_str.startswith("/private/var/folders/"):
+            resolved.append(pp)
+            continue
+        if expanded_str.startswith(_FORBIDDEN_PREFIXES) or resolved_str.startswith(
+            _FORBIDDEN_PREFIXES
+        ):
             continue
         resolved.append(pp)
     return resolved
@@ -187,6 +196,17 @@ def passkey_wrap_server(
         - configs_skipped: List of configs where server not found
         - errors: Any errors encountered
     """
+    from .settings import mcp_write_tools_enabled
+
+    if not mcp_write_tools_enabled():
+        return {
+            "success": False,
+            "message": (
+                "MCP write tools are disabled by policy (mcp-write-tools = False). "
+                "Enable with 'passkey config mcp-write-tools on' if intended."
+            ),
+        }
+
     try:
         entry = get_entry(server_name)
     except PasskeyError as e:
@@ -248,6 +268,102 @@ def passkey_wrap_server(
         "configs_skipped": configs_skipped,
         "errors": errors,
     }
+
+
+@mcp.tool()
+def passkey_validate_references(file_path: str) -> dict:
+    """Validate passkey://<entry>/<field> secret references in a template or env file.
+
+    Checks whether every referenced entry and field exists in the keychain
+    without exposing any secret values.
+
+    Args:
+        file_path: Path to a template or .env.passkey file containing passkey:// references
+
+    Returns:
+        Dictionary with {"valid": bool, "checked": int, "missing": [...]}
+    """
+    from .references import validate_references_in_file
+
+    _FORBIDDEN_PREFIXES = (
+        "/etc/", "/private/etc/", "/dev/", "/proc/", "/sys/", "/bin/", "/sbin/",
+        "/usr/bin/", "/usr/sbin/", "/usr/lib/", "/lib/", "/boot/",
+        "/var/root/", "/private/var/", "/System/",
+    )
+    expanded = Path(file_path).expanduser()
+    resolved = expanded.resolve()
+    resolved_str = str(resolved)
+    if not resolved_str.startswith("/private/var/folders/") and (
+        str(expanded).startswith(_FORBIDDEN_PREFIXES)
+        or resolved_str.startswith(_FORBIDDEN_PREFIXES)
+    ):
+        return {
+            "valid": False,
+            "checked": 0,
+            "missing": [{"reference": "", "reason": "Access to system path denied"}],
+        }
+
+    try:
+        return validate_references_in_file(resolved)
+    except PasskeyError as e:
+        return {
+            "valid": False,
+            "checked": 0,
+            "missing": [{"reference": "", "reason": str(e)}],
+        }
+
+
+@mcp.tool()
+def passkey_audit_recent(limit: int = 20) -> list[dict]:
+    """Return recent sanitized audit log records with caller attribution.
+
+    Secret values and HMAC key material are never included.
+
+    Args:
+        limit: Maximum number of recent records to return (default: 20, max: 100)
+
+    Returns:
+        List of sanitized audit log entries (most recent first)
+    """
+    from .audit import get_sanitized_recent_logs
+
+    return get_sanitized_recent_logs(limit=limit)
+
+
+@mcp.tool()
+def passkey_cdp_autofill(entry_name: str, cdp_url: str) -> dict:
+    """Deterministically fill credentials into a local Chrome DevTools browser tab.
+
+    Disabled by default; enable explicitly via ``passkey config mcp-browser-broker on``.
+    Verifies exact scheme + host + port match against the entry's ORIGIN config
+    before touching any secret fields, and never returns secret values.
+
+    Args:
+        entry_name: Name of the passkey entry containing ORIGIN and credentials
+        cdp_url: Loopback CDP WebSocket URL (e.g., ws://127.0.0.1:9222)
+
+    Returns:
+        Dictionary with {"filled": bool, "origin": str, "fields_injected": [...]}
+    """
+    from .browser_broker import cdp_autofill
+    from .settings import mcp_browser_broker_enabled
+
+    if not mcp_browser_broker_enabled():
+        return {
+            "filled": False,
+            "message": (
+                "MCP browser broker is disabled by default (mcp-browser-broker = False). "
+                "Enable with 'passkey config mcp-browser-broker on'."
+            ),
+        }
+
+    try:
+        return cdp_autofill(entry_name, cdp_url)
+    except PasskeyError as e:
+        return {
+            "filled": False,
+            "message": str(e),
+        }
 
 
 def main():

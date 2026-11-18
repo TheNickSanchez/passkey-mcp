@@ -68,7 +68,13 @@ def ensure_data_dir() -> Path:
 
 
 def check_migration_needed() -> bool:
-    """Return True if a legacy ~/.passkey directory exists and new dir is empty."""
+    """Return True if a legacy ~/.passkey directory exists and new dir is empty.
+
+    Never auto-migrates ~/.passkey when PASSKEY_DATA_DIR is explicitly set
+    (isolated test/smoke directories and portable overrides).
+    """
+    if os.environ.get("PASSKEY_DATA_DIR"):
+        return False
     legacy = get_legacy_data_dir()
     new = get_data_dir()
     if not legacy.exists():

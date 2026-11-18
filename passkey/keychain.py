@@ -20,7 +20,7 @@ from keyring.errors import KeyringError, PasswordDeleteError
 
 from .audit import log_operation
 from .dirs import ensure_data_dir, get_data_dir
-from .models import Entry
+from .models import RESERVED_NAMES, Entry
 
 SERVICE = "passkey"
 METADATA_KEY = "__entries__"  # legacy keychain-held index (migrated to file)
@@ -264,6 +264,8 @@ def save_entry(entry: Entry, is_update: bool = False) -> None:
 
 def _get_entry(name: str, *, log_read: bool) -> Entry | None:
     """Retrieve entry from Keychain by name (internal; read logging optional)."""
+    if name in RESERVED_NAMES:
+        raise PasskeyError(f"'{name}' is a reserved internal key")
     try:
         # This operation is atomic and does not need the metadata lock
         data = keyring.get_password(SERVICE, name)

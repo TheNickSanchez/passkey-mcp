@@ -255,11 +255,18 @@ def import_bundle(
                 skipped += 1
             continue
 
+        raw_policy = entry_data.get("policy")
+        policy = (
+            raw_policy
+            if raw_policy in ("allow", "prompt")
+            else (existing.policy if existing else "allow")
+        )
         entry = Entry(
             name=name,
             fields=fields,
             config=config,
             source="bundle-import",
+            policy=policy,
         )
         save_entry(entry, is_update=existing is not None)
         action = "updated" if existing else "created"

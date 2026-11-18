@@ -8,11 +8,16 @@ MCP server configurations across different AI coding tools
 import contextlib
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+
+from .dirs import ensure_data_dir
 
 BACKUP_SUFFIX = ".backup"
 
@@ -67,6 +72,17 @@ NON_SECRET_VARS = {
 }
 
 
+_SECRET_VALUE_REGEXES = (
+    re.compile(r"://[^/\s:@]+:[^/\s@]+@"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{8,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{12,}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{6,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+"),
+)
+
+
 def is_likely_secret(var_name: str) -> bool:
     """Determine if an env var name likely contains a secret."""
     if var_name in NON_SECRET_VARS:
@@ -77,12 +93,26 @@ def is_likely_secret(var_name: str) -> bool:
     return any(pattern in upper for pattern in SECRET_PATTERNS)
 
 
+def is_likely_secret_value(value: object) -> bool:
+    """Detect embedded credentials or well-known API token prefixes in an env value."""
+    if not isinstance(value, str):
+        return False
+    stripped = value.strip()
+    if not stripped or stripped.startswith("passkey://"):
+        return False
+    return any(rx.search(stripped) for rx in _SECRET_VALUE_REGEXES)
+
+
 def extract_secrets(env: dict) -> tuple[dict, dict]:
     """Split env vars into secrets and non-secrets."""
     secrets = {}
     non_secrets = {}
     for key, value in env.items():
-        if is_likely_secret(key):
+        if isinstance(value, str) and value.strip().startswith("passkey://"):
+            non_secrets[key] = value
+        elif is_likely_secret(key) or (
+            key not in NON_SECRET_VARS and is_likely_secret_value(value)
+        ):
             secrets[key] = value
         else:
             non_secrets[key] = value
@@ -434,9 +464,59 @@ def save_config(config: dict, path: Path) -> None:
         raise
 
 
+def is_file_exposed_in_git(path: Path) -> bool:
+    """Return True if path resides inside a git working tree and is not gitignored."""
+    expanded = path.expanduser()
+    parent = expanded.parent if str(expanded.parent) else Path(".")
+    try:
+        resolved_parent = parent.resolve()
+    except OSError:
+        resolved_parent = parent
+
+    target = resolved_parent / expanded.name
+    try:
+        inside = subprocess.run(
+            ["git", "-C", str(resolved_parent), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if inside.returncode != 0 or inside.stdout.strip().lower() != "true":
+            return False
+
+        ignored = subprocess.run(
+            ["git", "-C", str(resolved_parent), "check-ignore", "-q", str(target)],
+            capture_output=True,
+            timeout=5,
+        )
+        # returncode 0 => path is ignored (safe); non-zero => not ignored (exposed)
+        return ignored.returncode != 0
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        return False
+
+
+def get_backups_dir() -> Path:
+    """Return the isolated backups directory inside the passkey data dir."""
+    backups_dir = ensure_data_dir() / "backups"
+    backups_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if sys.platform != "win32":
+        with contextlib.suppress(OSError):
+            backups_dir.chmod(0o700)
+    return backups_dir
+
+
 def backup_config(path: Path, backup_path: Path | None = None) -> Path:
-    """Create a backup of an MCP config file."""
-    target = backup_path or Path(str(path) + BACKUP_SUFFIX)
+    """Create a 0o600 backup of an MCP config file.
+
+    By default, backups are stored in <data_dir>/backups/ with a timestamp so
+    plaintext pre-migration secrets are never left inside workspace directories.
+    """
+    if backup_path is not None:
+        target = backup_path.expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        ts = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        target = get_backups_dir() / f"{path.name}.{ts}{BACKUP_SUFFIX}"
     shutil.copy2(path, target)
     target.chmod(0o600)
     return target
@@ -483,6 +563,49 @@ def is_passkey_wrapped(server_config: dict) -> bool:
     return False
 
 
+def get_wrapped_entry_name(server_config: dict) -> str | None:
+    """Extract the primary passkey entry name from a wrapped server config.
+
+    Supports both standard string-command configs (args=["run", ...]) and
+    array-command configs (command=["passkey", "run", ...]), ignoring run flags
+    such as -q/--quiet, --no-masking, and --env-file.
+    """
+    if not is_passkey_wrapped(server_config):
+        return None
+
+    tokens: list[str] = []
+    args = server_config.get("args", [])
+    command = server_config.get("command", "")
+
+    if isinstance(args, list) and args and args[0] == "run":
+        tokens = [str(t) for t in args[1:]]
+    elif isinstance(command, list) and len(command) >= 2 and command[1] == "run":
+        tokens = [str(t) for t in command[2:]]
+    else:
+        return None
+
+    if "--" in tokens:
+        tokens = tokens[: tokens.index("--")]
+
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in ("-q", "--quiet", "--no-masking"):
+            i += 1
+            continue
+        if tok == "--env-file":
+            i += 2
+            continue
+        if tok.startswith("--env-file="):
+            i += 1
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        return tok
+    return None
+
+
 def rewrite_server_for_passkey(
     server_name: str,
     server_config: dict,
@@ -501,7 +624,7 @@ def rewrite_server_for_passkey(
 
     if adapter.command_is_array:
         # OpenCode style: command is an array
-        new_config["command"] = ["passkey", "run", server_name, "--"]
+        new_config["command"] = ["passkey", "run", "--quiet", server_name, "--"]
         original_command = server_config.get("command", [])
         if isinstance(original_command, list):
             new_config["command"].extend(original_command)
@@ -511,7 +634,14 @@ def rewrite_server_for_passkey(
         original_command = server_config.get("command", "")
         original_args = server_config.get("args", [])
         new_config["command"] = "passkey"
-        new_config["args"] = ["run", server_name, "--", original_command, *list(original_args)]
+        new_config["args"] = [
+            "run",
+            "--quiet",
+            server_name,
+            "--",
+            original_command,
+            *list(original_args),
+        ]
 
     # Extract and keep non-secret env vars
     env = get_env_from_server(server_config, adapter)
@@ -614,9 +744,8 @@ def get_server_security_status(
     }
 
     if is_passkey_wrapped(server_config):
-        args = server_config.get("args", [])
-        if len(args) >= 2 and args[0] == "run":
-            entry_name = args[1]
+        entry_name = get_wrapped_entry_name(server_config)
+        if entry_name:
             result["passkey_entry"] = entry_name
 
             if entry_name not in passkey_entries:

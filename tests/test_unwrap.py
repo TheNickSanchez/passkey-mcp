@@ -107,7 +107,7 @@ def _write_claude_config(tmp_path, servers):
 
 
 class TestCmdUnwrap:
-    def test_unwrap_restores_inline_command(self, tmp_path, capsys):
+    def test_unwrap_restores_inline_command(self, tmp_path, isolated_data_dir, capsys):
         config_path = _write_claude_config(tmp_path, {"slack": dict(WRAPPED_STANDARD)})
         cmd_unwrap(tool="claude", config_path=str(config_path))
         data = json.loads(config_path.read_text())
@@ -117,8 +117,10 @@ class TestCmdUnwrap:
         assert slack["env"] == {"NODE_ENV": "production"}
         # Secrets not restored by default
         assert "SLACK_TOKEN" not in slack.get("env", {})
-        # Backup created
-        assert (tmp_path / "claude.json.backup").exists()
+        # Backup relocated into isolated data_dir/backups instead of next to config
+        assert not (tmp_path / "claude.json.backup").exists()
+        backups = list((isolated_data_dir / "backups").glob("claude.json.*.backup"))
+        assert len(backups) == 1
 
     def test_unwrap_dry_run_writes_nothing(self, tmp_path):
         config_path = _write_claude_config(tmp_path, {"slack": dict(WRAPPED_STANDARD)})

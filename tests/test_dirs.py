@@ -155,8 +155,9 @@ class TestMigration:
              patch.object(dirs, "get_data_dir", return_value=fake_new):
             assert dirs.check_migration_needed() is False
 
-    def test_migration_needed_when_legacy_exists_new_empty(self, tmp_path):
+    def test_migration_needed_when_legacy_exists_new_empty(self, tmp_path, monkeypatch):
         """Migration needed when legacy exists and new is empty."""
+        monkeypatch.delenv("PASSKEY_DATA_DIR", raising=False)
         import passkey.dirs as dirs
         fake_legacy = tmp_path / "old"
         fake_new = tmp_path / "new"
@@ -166,8 +167,20 @@ class TestMigration:
              patch.object(dirs, "get_data_dir", return_value=fake_new):
             assert dirs.check_migration_needed() is True
 
-    def test_run_migration_copies_files(self, tmp_path):
+    def test_migration_skipped_when_passkey_data_dir_override_set(self, tmp_path, monkeypatch):
+        """Explicit PASSKEY_DATA_DIR never pulls files from ~/.passkey."""
+        import passkey.dirs as dirs
+        fake_legacy = tmp_path / "old"
+        fake_new = tmp_path / "isolated"
+        fake_legacy.mkdir()
+        (fake_legacy / "audit.log").write_text("data")
+        monkeypatch.setenv("PASSKEY_DATA_DIR", str(fake_new))
+        with patch.object(dirs, "get_legacy_data_dir", return_value=fake_legacy):
+            assert dirs.check_migration_needed() is False
+
+    def test_run_migration_copies_files(self, tmp_path, monkeypatch):
         """run_migration_if_needed copies files from legacy to new dir."""
+        monkeypatch.delenv("PASSKEY_DATA_DIR", raising=False)
         import passkey.dirs as dirs
         fake_legacy = tmp_path / "old"
         fake_new = tmp_path / "new"

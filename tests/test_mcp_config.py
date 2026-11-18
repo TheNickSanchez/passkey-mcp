@@ -115,7 +115,9 @@ class TestOpenCodeArrayCommand:
             "environment": {"TOKEN": "secret"},
         }
         result = rewrite_server_for_passkey("myserver", original, adapter)
-        assert result["command"] == ["passkey", "run", "myserver", "--", "python", "-m", "server"]
+        assert result["command"] == [
+            "passkey", "run", "--quiet", "myserver", "--", "python", "-m", "server"
+        ]
         assert result["args"] == ["--verbose"]
         assert "environment" not in result  # TOKEN removed as secret
 
@@ -124,7 +126,9 @@ class TestOpenCodeArrayCommand:
         adapter = ADAPTERS["opencode"]
         original = {"command": ["python", "-m", "server"]}
         result = rewrite_server_for_passkey("myserver", original, adapter)
-        assert result["command"] == ["passkey", "run", "myserver", "--", "python", "-m", "server"]
+        assert result["command"] == [
+            "passkey", "run", "--quiet", "myserver", "--", "python", "-m", "server"
+        ]
 
     def test_is_passkey_wrapped_array(self):
         from passkey.mcp_config import is_passkey_wrapped

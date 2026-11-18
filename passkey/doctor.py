@@ -12,6 +12,7 @@ from pathlib import Path
 from .keychain import PasskeyError, get_all_entries, list_entries
 from .mcp_config import (
     ADAPTERS,
+    BACKUP_SUFFIX,
     MCPConfigError,
     find_passkey_command,
     get_mcp_servers,
@@ -113,6 +114,21 @@ def run_diagnostics(deep: bool = False) -> dict:
                 })
                 issues.append(f"{adapter.display_name} config is invalid")
 
+            # Flag lingering plaintext .backup files sitting next to MCP configs
+            adjacent_backup = Path(str(config_path) + BACKUP_SUFFIX)
+            if adjacent_backup.exists():
+                checks.append({
+                    "name": f"{adapter_name}_backup",
+                    "status": "warn",
+                    "message": f"Lingering backup file next to {adapter.display_name} config: {adjacent_backup}",
+                })
+                issues.append(
+                    f"Lingering backup file next to {adapter.display_name} config may contain plaintext secrets: {adjacent_backup}"
+                )
+                recommendations.append(
+                    f"Remove or move lingering backup: rm '{adjacent_backup}'"
+                )
+
     if deep:
         _deep_checks(checks, issues, recommendations)
 
@@ -192,3 +208,24 @@ def _deep_checks(checks: list[dict], issues: list[str], recommendations: list[st
             "status": "pass",
             "message": "No insecure bundle files detected",
         })
+
+    # Audit log HMAC chain integrity
+    from .audit import verify_audit_log
+
+    audit_check = verify_audit_log()
+    if audit_check["valid"]:
+        checks.append({
+            "name": "audit_integrity",
+            "status": "pass",
+            "message": f"Audit log HMAC chain valid ({audit_check['checked']} records verified)",
+        })
+    else:
+        checks.append({
+            "name": "audit_integrity",
+            "status": "fail",
+            "message": f"Audit log integrity check failed: {audit_check['error']}",
+        })
+        issues.append(f"Audit log tampering or corruption detected: {audit_check['error']}")
+        recommendations.append(
+            "Inspect audit log with 'passkey audit --verify' or reset with 'passkey audit --clear'"
+        )

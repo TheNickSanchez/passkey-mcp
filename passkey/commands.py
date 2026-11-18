@@ -1,12 +1,15 @@
 """CLI command handlers for passkey."""
 
+import contextlib
 import getpass
 import json
 import os
+import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from .audit import clear_logs, get_recent_logs, log_operation
+from .audit import clear_logs, get_recent_logs, log_operation, verify_audit_log
 from .clipboard import copy_with_autoclear
 from .keychain import (
     PasskeyError,
@@ -16,7 +19,7 @@ from .keychain import (
     list_entries,
     save_entry,
 )
-from .models import RESERVED_NAMES, Entry
+from .models import RESERVED_NAMES, VALID_POLICIES, Entry
 
 
 def cmd_get_interactive(entry: Entry) -> None:
@@ -449,6 +452,8 @@ def cmd_edit(entry: Entry) -> None:
         config=config,
         created=entry.created,
         source=entry.source,
+        last_rotated=entry.last_rotated,
+        policy=entry.policy,
     )
     if final_name != entry.name:
         rename_entry(entry.name, updated)
@@ -475,6 +480,8 @@ def _cmd_edit_noninteractive(entry: Entry) -> None:
             config=entry.config,
             created=entry.created,
             source=entry.source,
+            last_rotated=entry.last_rotated,
+            policy=entry.policy,
         ),
         is_update=True,
     )
@@ -505,7 +512,12 @@ def cmd_clone(source: Entry, dest_name: str | None = None) -> None:
         )
 
     if not is_interactive():
-        entry = Entry(name=dest_name, fields=source.fields.copy(), config=source.config.copy())
+        entry = Entry(
+            name=dest_name,
+            fields=source.fields.copy(),
+            config=source.config.copy(),
+            policy=source.policy,
+        )
         save_entry(entry, is_update=False)
         print(f"Cloned '{source.name}' → '{dest_name}' with {len(entry.fields)} field(s)")
         return
@@ -522,7 +534,7 @@ def cmd_clone(source: Entry, dest_name: str | None = None) -> None:
     final_name, fields, config = result
     if final_name != dest_name and final_name in existing:
         raise PasskeyError(f"Entry '{final_name}' already exists.")
-    entry = Entry(name=final_name, fields=fields, config=config)
+    entry = Entry(name=final_name, fields=fields, config=config, policy=source.policy)
     save_entry(entry, is_update=False)
     print(f"Cloned '{source.name}' → '{final_name}' with {len(fields)} field(s)")
 
@@ -567,6 +579,7 @@ def cmd_info(entry: Entry) -> None:
         raise PasskeyError("Entry not found")
 
     print(f"Entry: {entry.name}")
+    print(f"Policy: {entry.policy}")
     print(f"Created: {entry.created or 'unknown'}")
     print(f"Modified: {entry.modified or 'unknown'}")
     print(f"Source: {entry.source or 'unknown'}")
@@ -577,8 +590,35 @@ def cmd_info(entry: Entry) -> None:
         print(f"  {key}")
 
 
+def cmd_policy(entry: Entry, policy_value: str | None = None) -> None:
+    """Show or update an entry's access policy ('allow' or 'prompt')."""
+    if not entry:
+        raise PasskeyError("Entry not found")
+
+    if policy_value is None:
+        print(f"{entry.name}: policy = {entry.policy}")
+        return
+
+    normalized = policy_value.strip().lower()
+    if normalized not in VALID_POLICIES:
+        raise PasskeyError(
+            f"Invalid policy '{policy_value}'. Expected one of: {', '.join(sorted(VALID_POLICIES))}"
+        )
+
+    entry.policy = normalized
+    save_entry(entry, is_update=True)
+    log_operation("policy", entry.name, details={"policy": normalized})
+    print(f"Set policy for '{entry.name}' to '{normalized}'")
+
+
 def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: bool = False) -> None:
     """Export entries to JSON file."""
+    if file_path == "-" and not no_secrets and not sys.stdin.isatty():
+        raise PasskeyError(
+            "Plaintext export to stdout requires an interactive terminal (TTY). "
+            "Use a file path, --encrypt, or --no-secrets instead."
+        )
+
     all_entries = get_all_entries()
     if not all_entries:
         print("No entries to export")
@@ -601,6 +641,11 @@ def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: boo
 
     if file_path == "-":
         if not no_secrets:
+            if not sys.stdin.isatty():
+                raise PasskeyError(
+                    "Plaintext export to stdout requires an interactive terminal (TTY). "
+                    "Use a file path, --encrypt, or --no-secrets instead."
+                )
             confirm = (
                 input(
                     "WARNING: This will print secrets to stdout (visible in terminal history).\n"
@@ -632,8 +677,76 @@ def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: boo
     log_operation("export", details={"count": len(all_entries), "no_secrets": no_secrets})
 
 
-def cmd_audit(limit: int = 20, clear: bool = False) -> None:
-    """View or clear audit log."""
+def cmd_inject(
+    in_file: str,
+    out_file: str | None = None,
+    *,
+    to_stdout: bool = False,
+    force: bool = False,
+) -> None:
+    """Resolve {{ passkey://entry/field }} placeholders from in_file into out_file (0o600)."""
+    from .leases import authorize_entry_access
+    from .references import render_template
+
+    src = Path(in_file).expanduser()
+    if not src.exists() or not src.is_file():
+        raise PasskeyError(f"Template file not found: '{src}'")
+
+    template_text = src.read_text(encoding="utf-8")
+    rendered = render_template(template_text, authorize_fn=authorize_entry_access)
+
+    if out_file is None or out_file == "-":
+        if not to_stdout:
+            raise PasskeyError(
+                "Refusing to write resolved secrets to stdout without --stdout. "
+                "Specify -o <outfile> or pass --stdout in an interactive terminal."
+            )
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            raise PasskeyError(
+                "Writing resolved secrets with --stdout requires an interactive terminal (TTY)."
+            )
+        sys.stdout.write(rendered)
+        if not rendered.endswith("\n"):
+            sys.stdout.write("\n")
+        log_operation("inject", details={"mode": "stdout"})
+        return
+
+    dest = Path(out_file).expanduser()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if dest.exists() and not force:
+        raise PasskeyError(
+            f"Output file '{dest}' already exists. Pass --force to overwrite atomically."
+        )
+
+    fd, tmp_path = tempfile.mkstemp(
+        dir=dest.parent,
+        prefix=".passkey-inject-",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(rendered)
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, dest)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
+
+    print(f"Injected secrets into {dest} (permissions 0600)")
+    log_operation("inject", details={"mode": "file"})
+
+
+def cmd_audit(limit: int = 20, clear: bool = False, verify: bool = False) -> None:
+    """View, verify, or clear audit log."""
+    if verify:
+        result = verify_audit_log()
+        if not result["valid"]:
+            raise PasskeyError(f"Audit log verification FAILED: {result['error']}")
+        print(f"Audit log verified OK ({result['checked']} record(s) intact)")
+        return
+
     if clear:
         confirm = input("Clear audit log? [y/N]: ").strip().lower()
         if confirm == "y":
@@ -655,10 +768,14 @@ def cmd_audit(limit: int = 20, clear: bool = False) -> None:
         op = log.get("operation", "?")
         entry = log.get("entry", "")
         success = "OK" if log.get("success", True) else "FAIL"
+        actor = log.get("actor")
+        actor_str = ""
+        if isinstance(actor, dict):
+            actor_str = f" [{actor.get('type', '?')}:{actor.get('client', '?')}]"
         details_str = ", ".join(
             f"{k}={v}" for k, v in log.get("details", {}).items() if k != "error"
         )
-        line = f"[{ts}] {op.upper():8s} {success:4s} {entry}"
+        line = f"[{ts}] {op.upper():8s} {success:4s} {entry}{actor_str}"
         if details_str:
             line += f" ({details_str})"
         print(line)
