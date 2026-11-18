@@ -763,10 +763,22 @@ def cmd_add(
         final_fields = existing_entry.fields.copy()
     final_fields.update(new_fields)
 
-    # Save entry
+    # Save entry (preserve existing metadata per Landmine #3)
     try:
-        entry = Entry(name=server, fields=final_fields, source=f"{adapter.name}-add")
-        save_entry(entry)
+        if existing_entry:
+            entry = Entry(
+                name=server,
+                fields=final_fields,
+                config=existing_entry.config,
+                created=existing_entry.created,
+                source=existing_entry.source or f"{adapter.name}-add",
+                last_rotated=existing_entry.last_rotated,
+                policy=existing_entry.policy,
+            )
+            save_entry(entry, is_update=True)
+        else:
+            entry = Entry(name=server, fields=final_fields, source=f"{adapter.name}-add")
+            save_entry(entry)
         print(f"Saved {len(new_fields)} new field(s) to passkey entry '{server}'")
     except PasskeyError as e:
         raise PasskeyError(str(e)) from e
