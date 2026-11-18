@@ -256,7 +256,7 @@ def handle_onboarding_or_help(parser) -> None:
         print()
 
         action = questionary.select(
-            "Migrate these secrets into your OS keychain now? [Y/n]",
+            "How would you like to get started?",
             choices=[
                 questionary.Choice(
                     "Migrate exposed MCP secrets now (passkey init)", "init"

@@ -467,8 +467,9 @@ class TestBarePasskeyFTUEAndInitPreview:
         assert "Claude Code" in out
         assert "github" in out
         assert "GITHUB_TOKEN" in out
-        # Prompted to migrate secrets into OS keychain
-        assert "Migrate these secrets into your OS keychain now?" in select_spy.call_args[0][0]
+        # Prompted with clean arrow-key menu label (no [Y/n] suffix)
+        assert select_spy.call_args[0][0] == "How would you like to get started?"
+        assert "[Y/n]" not in select_spy.call_args[0][0]
         # Secret migrated to keychain and masked in preview
         migrated = get_entry("github")
         assert migrated is not None
@@ -509,6 +510,58 @@ class TestBarePasskeyFTUEAndInitPreview:
         mock_select.assert_called_once()
         mock_get_ui.assert_called_once()
         assert mock_get_ui.call_args[0][0].name == "stripe"
+
+    def test_state_c_single_field_autocopies_immediately(self, capsys):
+        entry = Entry(name="github", fields={"GITHUB_TOKEN": "ghp_single_secret_123456"})
+        save_entry(entry)
+
+        with (
+            patch("passkey.interactive.is_interactive", return_value=True),
+            patch("passkey.interactive.select_entry", return_value="github"),
+            patch("passkey.commands.copy_with_autoclear") as mock_copy,
+            patch("questionary.select") as mock_field_select,
+            patch.object(sys, "argv", ["passkey"]),
+        ):
+            main()
+
+        # Single-field entry copies immediately without a second picker prompt
+        mock_field_select.assert_not_called()
+        mock_copy.assert_called_once_with("ghp_single_secret_123456", timeout_seconds=30)
+        out = capsys.readouterr().out
+        assert "Copied 'GITHUB_TOKEN' from 'github' to clipboard (auto-clears in 30s)" in out
+
+    def test_get_interactive_multi_field_uses_arrow_key_picker(self, capsys):
+        from passkey.commands import cmd_get_interactive
+
+        entry = Entry(
+            name="stripe",
+            fields={
+                "STRIPE_SECRET_KEY": "sk_live_1234567890abcdef9a2",
+                "WEBHOOK_PIN": "4821",
+            },
+        )
+        mock_q = MagicMock()
+        mock_q.ask.return_value = "STRIPE_SECRET_KEY"
+
+        with (
+            patch("passkey.interactive.is_interactive", return_value=True),
+            patch("questionary.select", return_value=mock_q) as select_spy,
+            patch("passkey.commands.copy_with_autoclear") as mock_copy,
+        ):
+            cmd_get_interactive(entry)
+
+        select_spy.assert_called_once()
+        assert select_spy.call_args[0][0] == "Select field from 'stripe'"
+        choice_titles = [
+            c.title
+            for c in select_spy.call_args.kwargs["choices"]
+            if hasattr(c, "title") and isinstance(c.title, str)
+        ]
+        assert any("STRIPE_SECRET_KEY" in t and "sk_…9a2" in t for t in choice_titles)
+        assert any("WEBHOOK_PIN" in t and "••••" in t for t in choice_titles)
+        assert any("Copy all fields" in t for t in choice_titles)
+        mock_copy.assert_called_once_with("sk_live_1234567890abcdef9a2", timeout_seconds=30)
+        assert "Copied 'STRIPE_SECRET_KEY' from 'stripe' to clipboard" in capsys.readouterr().out
 
     def test_init_preview_shows_masked_secrets_non_secrets_backup_and_unwrap(
         self, tmp_path, isolated_data_dir, capsys

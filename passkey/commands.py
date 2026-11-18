@@ -22,7 +22,7 @@ from .models import ENTRY_NAME_PATTERN, RESERVED_NAMES, VALID_POLICIES, Entry
 
 
 def cmd_get_interactive(entry: Entry) -> None:
-    """Interactive key picker - select fields to copy to clipboard."""
+    """Interactive key picker — auto-copies single fields or uses arrow-key picker."""
     if not entry:
         raise PasskeyError("Entry not found")
 
@@ -31,6 +31,54 @@ def cmd_get_interactive(entry: Entry) -> None:
         return
 
     field_names = list(entry.fields.keys())
+
+    # Single-field shortcut: copy immediately so `passkey -> Enter` is 1 step
+    if len(field_names) == 1:
+        field_name = field_names[0]
+        copy_with_autoclear(entry.fields[field_name], timeout_seconds=30)
+        print(f"Copied '{field_name}' from '{entry.name}' to clipboard (auto-clears in 30s)")
+        return
+
+    from .interactive import PASSKEY_STYLE, format_secret_preview, is_interactive
+
+    if is_interactive():
+        import questionary
+
+        key_w = max(len(k) for k in field_names)
+        choices: list = [
+            questionary.Choice(
+                f"{fname:<{key_w}}  {format_secret_preview(entry.fields[fname])}",
+                value=fname,
+            )
+            for fname in field_names
+        ]
+        choices.extend(
+            [
+                questionary.Separator(),
+                questionary.Choice("Copy all fields (KEY='value')", value="__all__"),
+                questionary.Choice("(cancel)", value=None),
+            ]
+        )
+
+        selected = questionary.select(
+            f"Select field from '{entry.name}'",
+            choices=choices,
+            style=PASSKEY_STYLE,
+            instruction="(Use arrow keys, type to filter)",
+            use_jk_keys=False,
+        ).ask()
+
+        if selected is None:
+            return
+        if selected == "__all__":
+            cmd_get_all(entry)
+            return
+
+        copy_with_autoclear(entry.fields[selected], timeout_seconds=30)
+        print(f"Copied '{selected}' from '{entry.name}' to clipboard (auto-clears in 30s)")
+        return
+
+    # Non-TTY fallback for multi-field entries
     print(f"\nEntry: {entry.name}\n" + "-" * 30)
     for i, name in enumerate(field_names, 1):
         print(f"  {i}. {name}")
