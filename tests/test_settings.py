@@ -16,7 +16,11 @@ from passkey.settings import (
 
 class TestLoadSettings:
     def test_defaults_when_no_file(self, isolated_data_dir):
-        assert load_settings() == {"require_auth": False, "mcp_write_tools": True}
+        assert load_settings() == {
+            "require_auth": False,
+            "mcp_write_tools": True,
+            "mcp_browser_broker": False,
+        }
 
     def test_roundtrip(self, isolated_data_dir):
         set_setting("require_auth", True)
@@ -26,7 +30,11 @@ class TestLoadSettings:
         path = isolated_data_dir / "settings.json"
         isolated_data_dir.mkdir(parents=True, exist_ok=True)
         path.write_text("{not json")
-        assert load_settings() == {"require_auth": False, "mcp_write_tools": True}
+        assert load_settings() == {
+            "require_auth": False,
+            "mcp_write_tools": True,
+            "mcp_browser_broker": False,
+        }
 
     def test_wrong_type_falls_back_to_default(self, isolated_data_dir):
         isolated_data_dir.mkdir(parents=True, exist_ok=True)

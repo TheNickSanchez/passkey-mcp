@@ -64,6 +64,11 @@ def mount_env_fifo(
     if not initial_found:
         raise PasskeyError("No matching entries found in keychain for mount.")
 
+    if authorize_fn is None:
+        from .leases import authorize_entry_access
+
+        authorize_fn = authorize_entry_access
+
     fifo_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.mkfifo(fifo_path, 0o600)

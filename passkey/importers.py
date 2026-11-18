@@ -57,6 +57,7 @@ def _handle_existing(
                 config=dict(existing.config),  # Preserve config
                 created=existing.created,  # Preserve original created
                 source=source,
+                policy=existing.policy,  # Preserve access policy
             )
             save_entry(entry)
         return True, "overwritten"

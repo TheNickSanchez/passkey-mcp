@@ -20,6 +20,7 @@ from .keychain import PasskeyError
 _SETTINGS_SCHEMA: dict[str, tuple[type, object]] = {
     "require_auth": (bool, False),
     "mcp_write_tools": (bool, True),
+    "mcp_browser_broker": (bool, False),
 }
 
 
@@ -89,6 +90,11 @@ def require_auth_enabled() -> bool:
 def mcp_write_tools_enabled() -> bool:
     """True when mutating MCP server tools (e.g. passkey_wrap_server) are allowed."""
     return bool(load_settings().get("mcp_write_tools", True))
+
+
+def mcp_browser_broker_enabled() -> bool:
+    """True when the opt-in passkey_cdp_autofill MCP tool is enabled."""
+    return bool(load_settings().get("mcp_browser_broker", False))
 
 
 def _parse_bool(raw: str) -> bool:

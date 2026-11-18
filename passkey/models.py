@@ -7,6 +7,7 @@ from datetime import datetime
 
 ENTRY_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 RESERVED_NAMES = frozenset({"__entries__", "__audit_hmac_key__", "__lease_hmac_key__"})
+VALID_POLICIES = frozenset({"allow", "prompt"})
 
 
 def is_valid_name(name) -> bool:
@@ -43,6 +44,7 @@ class Entry:
     modified: str | None = None
     source: str | None = None
     last_rotated: str | None = None
+    policy: str = "allow"
 
     def __post_init__(self):
         """Validate entry name and set timestamps."""
@@ -53,6 +55,10 @@ class Entry:
                 f"Invalid entry name '{self.name}'. "
                 "Names must be 1-64 chars: letters, digits, hyphens, underscores, dots. "
                 "Must start with a letter or digit."
+            )
+        if self.policy not in VALID_POLICIES:
+            raise ValueError(
+                f"Invalid policy '{self.policy}'. Expected one of: {', '.join(sorted(VALID_POLICIES))}"
             )
         now = datetime.now().isoformat()
         if self.created is None:
@@ -73,6 +79,7 @@ class Entry:
                 "created": self.created,
                 "modified": self.modified,
                 "source": self.source,
+                "policy": self.policy,
             },
             "fields": self.fields,
             "config": self.config,
@@ -90,6 +97,7 @@ class Entry:
             "created": self.created,
             "modified": self.modified,
             "source": self.source,
+            "policy": self.policy,
         }
         if self.last_rotated:
             result["last_rotated"] = self.last_rotated
@@ -100,20 +108,15 @@ class Entry:
         """Create Entry from name and JSON string.
 
         Handles legacy format (just fields), v1 format (with _meta),
-        and v2 format (with _meta, fields, and config).
-
-        Args:
-            name: The entry identifier
-            data: JSON string containing field data
-
-        Returns:
-            New Entry instance with parsed fields and metadata
+        and v2 format (with _meta, fields, config, and policy).
         """
         parsed = json.loads(data)
 
         # Check if new format with _meta
         if isinstance(parsed, dict) and "_meta" in parsed:
             meta = parsed["_meta"]
+            raw_policy = meta.get("policy", "allow")
+            policy = raw_policy if raw_policy in VALID_POLICIES else "allow"
             return cls(
                 name=name,
                 fields=parsed.get("fields", {}),
@@ -122,6 +125,7 @@ class Entry:
                 modified=meta.get("modified"),
                 source=meta.get("source"),
                 last_rotated=meta.get("last_rotated"),
+                policy=policy,
             )
         else:
             # Legacy format - just fields dict

@@ -330,6 +330,42 @@ def passkey_audit_recent(limit: int = 20) -> list[dict]:
     return get_sanitized_recent_logs(limit=limit)
 
 
+@mcp.tool()
+def passkey_cdp_autofill(entry_name: str, cdp_url: str) -> dict:
+    """Deterministically fill credentials into a local Chrome DevTools browser tab.
+
+    Disabled by default; enable explicitly via ``passkey config mcp-browser-broker on``.
+    Verifies exact scheme + host + port match against the entry's ORIGIN config
+    before touching any secret fields, and never returns secret values.
+
+    Args:
+        entry_name: Name of the passkey entry containing ORIGIN and credentials
+        cdp_url: Loopback CDP WebSocket URL (e.g., ws://127.0.0.1:9222)
+
+    Returns:
+        Dictionary with {"filled": bool, "origin": str, "fields_injected": [...]}
+    """
+    from .browser_broker import cdp_autofill
+    from .settings import mcp_browser_broker_enabled
+
+    if not mcp_browser_broker_enabled():
+        return {
+            "filled": False,
+            "message": (
+                "MCP browser broker is disabled by default (mcp-browser-broker = False). "
+                "Enable with 'passkey config mcp-browser-broker on'."
+            ),
+        }
+
+    try:
+        return cdp_autofill(entry_name, cdp_url)
+    except PasskeyError as e:
+        return {
+            "filled": False,
+            "message": str(e),
+        }
+
+
 def main():
     """Run the MCP server."""
     mcp.run()

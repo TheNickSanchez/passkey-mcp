@@ -5,10 +5,10 @@ from importlib.metadata import version as package_version
 
 SUBPARSER_GROUPS = [
     ("Entry Management", [
-        "new", "list", "get", "edit", "delete", "info", "clone", "set-field", "check", "audit",
+        "new", "list", "get", "edit", "delete", "info", "clone", "set-field", "policy", "check", "audit",
     ]),
     ("Secrets", [
-        "generate", "rotate",
+        "generate", "rotate", "lease",
     ]),
     ("Templates", [
         "template",
@@ -20,7 +20,7 @@ SUBPARSER_GROUPS = [
         "export", "import",
     ]),
     ("Run", [
-        "run", "inject", "mount",
+        "run", "inject", "mount", "plugin", "browser-fill",
     ]),
     ("MCP Integration", [
         "init", "unwrap", "status", "doctor", "servers", "add", "hook",
@@ -133,6 +133,19 @@ Examples:
     set_field_parser.add_argument("entry", help="Entry name")
     set_field_parser.add_argument("field", help="Field name (prompts securely for value)")
     set_field_parser.completer = _entry_completer
+
+    # policy
+    policy_parser = subparsers.add_parser(
+        "policy", help="Show or set an entry's access policy (allow or prompt)"
+    )
+    policy_parser.add_argument("entry", help="Entry name")
+    policy_parser.add_argument(
+        "policy_value",
+        nargs="?",
+        choices=["allow", "prompt"],
+        help="Access policy: 'allow' (headless) or 'prompt' (requires Touch ID / lease)",
+    )
+    policy_parser.completer = _entry_completer
 
     # check
     check_parser = subparsers.add_parser("check", help="Verify required fields exist")
@@ -386,5 +399,59 @@ Examples:
 
     # mcp-serve
     subparsers.add_parser("mcp-serve", help="Start the MCP server (usually called internally)")
+
+    # lease
+    lease_parser = subparsers.add_parser(
+        "lease", help="Manage time- and use-scoped leases for 'prompt' policy entries"
+    )
+    lease_sub = lease_parser.add_subparsers(dest="lease_command")
+    lease_grant = lease_sub.add_parser("grant", help="Grant a temporary lease for an entry")
+    lease_grant.add_argument("entry", help="Entry name")
+    lease_grant.add_argument(
+        "--ttl", default="15m", help="Lease duration (e.g., 15m, 30s, 1h; default: 15m)"
+    )
+    lease_grant.add_argument(
+        "--max-uses", type=int, help="Maximum number of injections before automatic expiry"
+    )
+    lease_sub.add_parser("list", help="List active leases")
+    lease_revoke = lease_sub.add_parser("revoke", help="Revoke one or all active leases")
+    lease_revoke.add_argument("entry", nargs="?", help="Entry name to revoke")
+    lease_revoke.add_argument("--all", action="store_true", dest="revoke_all", help="Revoke all leases")
+
+    # plugin
+    plugin_parser = subparsers.add_parser(
+        "plugin", help="Zero-config secret injection wrappers for AI and cloud CLIs"
+    )
+    plugin_sub = plugin_parser.add_subparsers(dest="plugin_command")
+    plugin_sub.add_parser("list", help="List supported CLI plugins and active bindings")
+    plugin_init = plugin_sub.add_parser("init", help="Bind a CLI plugin to a passkey entry")
+    plugin_init.add_argument("cli", help="CLI executable name (e.g., claude, gh, aws)")
+    plugin_init.add_argument("--entry", help="Passkey entry name (defaults to CLI template name)")
+    plugin_init.add_argument(
+        "--scope",
+        choices=["session", "dir", "global"],
+        default="global",
+        help="Binding scope: session (shell snippet), dir (.passkey.toml), or global (default)",
+    )
+    plugin_run = plugin_sub.add_parser("run", help="Run a CLI plugin with masked secret injection")
+    plugin_run.add_argument("cli", help="CLI executable name")
+    plugin_run.add_argument("--entry", help="Explicit passkey entry override")
+    plugin_run.add_argument(
+        "--no-masking", action="store_true", help="Disable stdout/stderr secret masking"
+    )
+    plugin_run.add_argument("args", nargs=argparse.REMAINDER, help="-- <cli arguments>")
+
+    # browser-fill
+    bf_parser = subparsers.add_parser(
+        "browser-fill",
+        help="Deterministically fill credentials into a local CDP browser tab",
+    )
+    bf_parser.add_argument("entry", help="Passkey entry containing ORIGIN and credentials")
+    bf_parser.add_argument(
+        "--cdp-url",
+        required=True,
+        help="Loopback Chrome DevTools WebSocket URL (e.g., ws://127.0.0.1:9222)",
+    )
+    bf_parser.completer = _entry_completer
 
     return parser

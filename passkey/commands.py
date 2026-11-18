@@ -19,7 +19,7 @@ from .keychain import (
     list_entries,
     save_entry,
 )
-from .models import RESERVED_NAMES, Entry
+from .models import RESERVED_NAMES, VALID_POLICIES, Entry
 
 
 def cmd_get_interactive(entry: Entry) -> None:
@@ -452,6 +452,8 @@ def cmd_edit(entry: Entry) -> None:
         config=config,
         created=entry.created,
         source=entry.source,
+        last_rotated=entry.last_rotated,
+        policy=entry.policy,
     )
     if final_name != entry.name:
         rename_entry(entry.name, updated)
@@ -478,6 +480,8 @@ def _cmd_edit_noninteractive(entry: Entry) -> None:
             config=entry.config,
             created=entry.created,
             source=entry.source,
+            last_rotated=entry.last_rotated,
+            policy=entry.policy,
         ),
         is_update=True,
     )
@@ -508,7 +512,12 @@ def cmd_clone(source: Entry, dest_name: str | None = None) -> None:
         )
 
     if not is_interactive():
-        entry = Entry(name=dest_name, fields=source.fields.copy(), config=source.config.copy())
+        entry = Entry(
+            name=dest_name,
+            fields=source.fields.copy(),
+            config=source.config.copy(),
+            policy=source.policy,
+        )
         save_entry(entry, is_update=False)
         print(f"Cloned '{source.name}' → '{dest_name}' with {len(entry.fields)} field(s)")
         return
@@ -525,7 +534,7 @@ def cmd_clone(source: Entry, dest_name: str | None = None) -> None:
     final_name, fields, config = result
     if final_name != dest_name and final_name in existing:
         raise PasskeyError(f"Entry '{final_name}' already exists.")
-    entry = Entry(name=final_name, fields=fields, config=config)
+    entry = Entry(name=final_name, fields=fields, config=config, policy=source.policy)
     save_entry(entry, is_update=False)
     print(f"Cloned '{source.name}' → '{final_name}' with {len(fields)} field(s)")
 
@@ -570,6 +579,7 @@ def cmd_info(entry: Entry) -> None:
         raise PasskeyError("Entry not found")
 
     print(f"Entry: {entry.name}")
+    print(f"Policy: {entry.policy}")
     print(f"Created: {entry.created or 'unknown'}")
     print(f"Modified: {entry.modified or 'unknown'}")
     print(f"Source: {entry.source or 'unknown'}")
@@ -578,6 +588,27 @@ def cmd_info(entry: Entry) -> None:
     print(f"\nFields ({len(entry.fields)}):")
     for key in sorted(entry.fields.keys()):
         print(f"  {key}")
+
+
+def cmd_policy(entry: Entry, policy_value: str | None = None) -> None:
+    """Show or update an entry's access policy ('allow' or 'prompt')."""
+    if not entry:
+        raise PasskeyError("Entry not found")
+
+    if policy_value is None:
+        print(f"{entry.name}: policy = {entry.policy}")
+        return
+
+    normalized = policy_value.strip().lower()
+    if normalized not in VALID_POLICIES:
+        raise PasskeyError(
+            f"Invalid policy '{policy_value}'. Expected one of: {', '.join(sorted(VALID_POLICIES))}"
+        )
+
+    entry.policy = normalized
+    save_entry(entry, is_update=True)
+    log_operation("policy", entry.name, details={"policy": normalized})
+    print(f"Set policy for '{entry.name}' to '{normalized}'")
 
 
 def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: bool = False) -> None:
@@ -648,6 +679,7 @@ def cmd_inject(
     force: bool = False,
 ) -> None:
     """Resolve {{ passkey://entry/field }} placeholders from in_file into out_file (0o600)."""
+    from .leases import authorize_entry_access
     from .references import render_template
 
     src = Path(in_file).expanduser()
@@ -655,7 +687,7 @@ def cmd_inject(
         raise PasskeyError(f"Template file not found: '{src}'")
 
     template_text = src.read_text(encoding="utf-8")
-    rendered = render_template(template_text)
+    rendered = render_template(template_text, authorize_fn=authorize_entry_access)
 
     if out_file is None or out_file == "-":
         if not to_stdout:

@@ -33,6 +33,10 @@ _KNOWN_COMMANDS = frozenset(
         "info",
         "clone",
         "set-field",
+        "policy",
+        "lease",
+        "plugin",
+        "browser-fill",
         "run",
         "inject",
         "mount",
@@ -142,6 +146,86 @@ def main() -> None:
             _require_auth("modify entries")
             entry = resolve_entry(args.entry, "Select entry to update", fuzzy=False)
             commands.cmd_set_field(entry, args.field, None)
+        elif args.command == "policy":
+            if args.policy_value is not None:
+                _require_auth("update entry policy")
+            entry = resolve_entry(args.entry, "Select entry for policy", fuzzy=False)
+            commands.cmd_policy(entry, args.policy_value)
+        elif args.command == "lease":
+            from ..leases import grant_lease, list_leases, revoke_lease
+
+            if args.lease_command == "grant":
+                rec = grant_lease(
+                    args.entry,
+                    ttl=args.ttl,
+                    max_uses=args.max_uses,
+                    require_biometric=True,
+                )
+                uses_note = (
+                    f", max uses: {rec['max_uses']}" if rec.get("max_uses") is not None else ""
+                )
+                print(
+                    f"Granted lease for '{rec['entry']}' (TTL: {rec['ttl_seconds']}s{uses_note}, "
+                    f"expires {rec['expires_at_iso']})"
+                )
+            elif args.lease_command == "list":
+                active = list_leases()
+                if not active:
+                    print("No active leases")
+                else:
+                    for item in active:
+                        rem_uses = (
+                            f"{item['remaining_uses']}/{item['max_uses']} uses"
+                            if item.get("remaining_uses") is not None
+                            else "unlimited uses"
+                        )
+                        print(
+                            f"  {item['entry']:<20} {item['seconds_remaining']:>5}s remaining  ({rem_uses})"
+                        )
+            elif args.lease_command == "revoke":
+                revoked = revoke_lease(args.entry, revoke_all=args.revoke_all)
+                print(f"Revoked {revoked} lease(s)")
+            else:
+                raise PasskeyError("Usage: passkey lease [grant|list|revoke]")
+        elif args.command == "plugin":
+            from ..plugins import init_plugin, list_plugins, run_plugin
+
+            if args.plugin_command == "list":
+                for p in list_plugins():
+                    env_list = ", ".join(p["env_vars"])
+                    print(f"  {p['cli']:<14} -> {p['entry']:<16} [{p['source']}] ({env_list})")
+            elif args.plugin_command == "init":
+                _require_auth("configure CLI plugin")
+                info = init_plugin(args.cli, entry_name=args.entry, scope=args.scope)
+                if info["scope"] == "session":
+                    print(info["snippet"])
+                else:
+                    print(
+                        f"Configured plugin '{info['cli']}' -> entry '{info['entry']}' ({info['scope']})"
+                    )
+                    print(f"  Config: {info['config_path']}")
+                    print(f"  Shell wrappers: source '{info['shell_path']}'")
+            elif args.plugin_command == "run":
+                extra = list(args.args or [])
+                if extra and extra[0] == "--":
+                    extra = extra[1:]
+                sys.exit(
+                    run_plugin(
+                        args.cli,
+                        extra,
+                        entry_name=args.entry,
+                        no_masking=args.no_masking,
+                    )
+                )
+            else:
+                raise PasskeyError("Usage: passkey plugin [list|init|run]")
+        elif args.command == "browser-fill":
+            from ..browser_broker import cdp_autofill
+
+            res = cdp_autofill(args.entry, args.cdp_url)
+            print(
+                f"Autofilled {', '.join(res['fields_injected'])} on {res['origin']}"
+            )
         elif args.command == "run":
             # Never auth-gated: headless path for MCP servers.
             # Protection comes from the OS keychain's own ACL prompts.

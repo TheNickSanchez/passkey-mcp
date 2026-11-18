@@ -52,6 +52,7 @@ def isolated_data_dir(tmp_path, monkeypatch):
     data_dir = tmp_path / "passkey-data"
     monkeypatch.setenv("PASSKEY_DATA_DIR", str(data_dir))
     monkeypatch.delenv("PASSKEY_AUDIT_LOG", raising=False)
+    monkeypatch.setenv("PASSKEY_DISABLE_LACONTEXT", "1")
     # Never migrate real legacy data into the test dir
     monkeypatch.setattr("passkey.dirs.get_legacy_data_dir", lambda: tmp_path / "no-legacy")
     yield data_dir

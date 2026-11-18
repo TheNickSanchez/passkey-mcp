@@ -123,6 +123,10 @@ def run_with_secrets(
     loaded_count = 0
     secret_values: list[str] = []
     entry_cache: dict[str, Entry | None] = {}
+    if authorize_fn is None:
+        from .leases import authorize_entry_access
+
+        authorize_fn = authorize_entry_access
 
     try:
         for name in entries:
