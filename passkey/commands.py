@@ -1,7 +1,6 @@
 """CLI command handlers for passkey."""
 
 import contextlib
-import getpass
 import json
 import os
 import sys
@@ -19,11 +18,11 @@ from .keychain import (
     list_entries,
     save_entry,
 )
-from .models import RESERVED_NAMES, VALID_POLICIES, Entry
+from .models import ENTRY_NAME_PATTERN, RESERVED_NAMES, VALID_POLICIES, Entry
 
 
 def cmd_get_interactive(entry: Entry) -> None:
-    """Interactive key picker - select fields to copy to clipboard."""
+    """Interactive key picker — auto-copies single fields or uses arrow-key picker."""
     if not entry:
         raise PasskeyError("Entry not found")
 
@@ -32,6 +31,54 @@ def cmd_get_interactive(entry: Entry) -> None:
         return
 
     field_names = list(entry.fields.keys())
+
+    # Single-field shortcut: copy immediately so `passkey -> Enter` is 1 step
+    if len(field_names) == 1:
+        field_name = field_names[0]
+        copy_with_autoclear(entry.fields[field_name], timeout_seconds=30)
+        print(f"Copied '{field_name}' from '{entry.name}' to clipboard (auto-clears in 30s)")
+        return
+
+    from .interactive import PASSKEY_STYLE, format_secret_preview, is_interactive
+
+    if is_interactive():
+        import questionary
+
+        key_w = max(len(k) for k in field_names)
+        choices: list = [
+            questionary.Choice(
+                f"{fname:<{key_w}}  {format_secret_preview(entry.fields[fname])}",
+                value=fname,
+            )
+            for fname in field_names
+        ]
+        choices.extend(
+            [
+                questionary.Separator(),
+                questionary.Choice("Copy all fields (KEY='value')", value="__all__"),
+                questionary.Choice("(cancel)", value=None),
+            ]
+        )
+
+        selected = questionary.select(
+            f"Select field from '{entry.name}'",
+            choices=choices,
+            style=PASSKEY_STYLE,
+            instruction="(Use arrow keys, type to filter)",
+            use_jk_keys=False,
+        ).ask()
+
+        if selected is None:
+            return
+        if selected == "__all__":
+            cmd_get_all(entry)
+            return
+
+        copy_with_autoclear(entry.fields[selected], timeout_seconds=30)
+        print(f"Copied '{selected}' from '{entry.name}' to clipboard (auto-clears in 30s)")
+        return
+
+    # Non-TTY fallback for multi-field entries
     print(f"\nEntry: {entry.name}\n" + "-" * 30)
     for i, name in enumerate(field_names, 1):
         print(f"  {i}. {name}")
@@ -56,6 +103,64 @@ def cmd_get_interactive(entry: Entry) -> None:
             print(f"Enter a number 1-{len(field_names)}, or 'q' to quit")
 
 
+def _print_entry_summary(name: str, fields: dict[str, str]) -> None:
+    """Print entry name and non-sensitive masked previews of all fields."""
+    from .interactive import format_secret_preview
+
+    print(f"\n  entry: {name}")
+    if fields:
+        key_w = max(len(k) for k in fields)
+        for k in sorted(fields):
+            print(f"    {k:<{key_w}}  {format_secret_preview(fields[k])}")
+    else:
+        print("    (no fields — add at least one before saving)")
+    print()
+
+
+def _apply_template_into_fields(template: dict, fields: dict[str, str]) -> None:
+    """Populate fields interactively or via fallback from a template dict."""
+    from .generator import generate_password
+    from .interactive import PASSKEY_STYLE, format_secret_preview, is_interactive, prompt_secret
+
+    if is_interactive():
+        import questionary
+
+        for field_def in template.get("fields", []):
+            fname = field_def["name"]
+            secret = field_def.get("secret", False)
+            generate = field_def.get("generate", False)
+
+            if generate:
+                use_gen = questionary.confirm(
+                    f"Generate random value for {fname}?", default=True, style=PASSKEY_STYLE
+                ).ask()
+                if use_gen:
+                    val = generate_password()
+                    fields[fname] = val
+                    print(f"  + {fname}  {format_secret_preview(val)} (generated)")
+                    continue
+
+            if secret:
+                val = prompt_secret(f"  Value for {fname}")
+            else:
+                val = questionary.text(f"{fname}:", style=PASSKEY_STYLE).ask() or ""
+            if val:
+                fields[fname] = val
+                if secret:
+                    print(f"  + {fname}  {format_secret_preview(val)}")
+    else:
+        print(f"Template '{template['name']}' fields:")
+        for field_def in template.get("fields", []):
+            fname = field_def["name"]
+            secret = field_def.get("secret", False)
+            if secret:
+                val = prompt_secret(f"  Value for {fname}")
+            else:
+                val = input(f"  {fname}: ").strip()
+            if val:
+                fields[fname] = val
+
+
 def _entry_edit_loop(
     name: str,
     fields: dict,
@@ -66,25 +171,28 @@ def _entry_edit_loop(
     original_created: str | None = None,
     original_source: str | None = None,
 ) -> tuple[str, dict, dict] | None:
-    """Shared interactive edit loop used by both --new and --edit.
+    """Shared interactive edit loop used by both new and edit.
 
     Returns (final_name, fields, config) on Save, or None if the user quits.
     """
     import questionary
 
-    from .interactive import PASSKEY_STYLE
+    from .generator import generate_password
+    from .interactive import (
+        PASSKEY_STYLE,
+        format_secret_preview,
+        parse_field_shorthand,
+        prompt_secret,
+    )
+    from .templates import get_template, list_templates
 
     while True:
-        print(f"\n  entry: {name}")
-        if fields:
-            for k in sorted(fields):
-                print(f"    {k}")
-        else:
-            print("    (no fields — add at least one before saving)")
-        print()
+        _print_entry_summary(name, fields)
 
         choices = [
             questionary.Choice("Add field", "add"),
+            questionary.Choice("Generate random value", "generate"),
+            questionary.Choice("Apply template", "template"),
             questionary.Choice("Edit field value", "edit_val"),
             questionary.Choice("Rename field", "rename_field"),
             questionary.Choice("Delete field", "delete_field"),
@@ -109,23 +217,50 @@ def _entry_edit_loop(
             return None
 
         elif action == "add":
-            field_name = questionary.text("Field name:").ask()
-            if field_name:
-                from .interactive import is_interactive
+            lbl = "Field name (or KEY=VALUE; Enter to save):" if fields else "Field name (or KEY=VALUE):"
+            raw_field = questionary.text(lbl, style=PASSKEY_STYLE).ask()
+            if raw_field is None:
+                continue
+            if not raw_field.strip():
+                if fields:
+                    break
+                continue
+            field_name, inline_val = parse_field_shorthand(raw_field)
+            if not field_name:
+                print("  Field name cannot be empty.")
+                continue
+            value = (
+                inline_val
+                if inline_val is not None
+                else prompt_secret(f"  Value for {field_name}")
+            )
+            fields[field_name] = value
+            print(f"  + {field_name}  {format_secret_preview(value)}")
 
-                if is_interactive():
-                    generate = questionary.confirm(
-                        "Generate a secure value?", default=False, style=PASSKEY_STYLE
-                    ).ask()
-                    if generate:
-                        from .generator import generate_password
-
-                        value = generate_password()
-                        fields[field_name] = value
-                        print(f"  Generated value for {field_name}")
-                        continue
-                value = getpass.getpass(f"  Value for {field_name}: ")
+        elif action == "generate":
+            raw_field = questionary.text("Field name:", style=PASSKEY_STYLE).ask()
+            if raw_field and raw_field.strip():
+                field_name = raw_field.strip()
+                value = generate_password()
                 fields[field_name] = value
+                print(f"  + {field_name}  {format_secret_preview(value)} (generated)")
+
+        elif action == "template":
+            templates = list_templates()
+            if not templates:
+                print("  No templates found.")
+                continue
+            tname = questionary.select(
+                "Select template",
+                choices=[t["name"] for t in templates],
+                style=PASSKEY_STYLE,
+                instruction="(Type to filter)",
+                use_jk_keys=False,
+            ).ask()
+            if tname:
+                tpl = get_template(tname)
+                if tpl:
+                    _apply_template_into_fields(tpl, fields)
 
         elif action == "edit_val":
             if not fields:
@@ -135,8 +270,9 @@ def _entry_edit_loop(
                 "Select field", choices=sorted(fields), style=PASSKEY_STYLE, use_jk_keys=False
             ).ask()
             if field_name:
-                value = getpass.getpass(f"  New value for {field_name}: ")
+                value = prompt_secret(f"  New value for {field_name}")
                 fields[field_name] = value
+                print(f"  ~ {field_name}  {format_secret_preview(value)}")
 
         elif action == "rename_field":
             if not fields:
@@ -147,7 +283,7 @@ def _entry_edit_loop(
             ).ask()
             if field_name:
                 new_field = questionary.text(
-                    f"New name for '{field_name}':", default=field_name
+                    f"New name for '{field_name}':", default=field_name, style=PASSKEY_STYLE
                 ).ask()
                 if new_field and new_field != field_name:
                     fields[new_field] = fields.pop(field_name)
@@ -167,7 +303,7 @@ def _entry_edit_loop(
                     del fields[field_name]
 
         elif action == "rename_entry":
-            new_name = questionary.text("New entry name:", default=name).ask()
+            new_name = questionary.text("New entry name:", default=name, style=PASSKEY_STYLE).ask()
             if new_name and new_name != name:
                 name = new_name
 
@@ -180,56 +316,70 @@ def _entry_edit_loop(
     return name, fields, config
 
 
-def cmd_new() -> None:
-    """Create a new entry interactively."""
+def _validate_entry_name(name: str | None) -> str:
+    """Validate and normalize an entry name before prompting for fields."""
+    if not name or not name.strip():
+        raise PasskeyError("Entry name cannot be empty")
+    cleaned = name.strip()
+    if cleaned in RESERVED_NAMES:
+        raise PasskeyError(f"'{cleaned}' is a reserved name")
+    if not ENTRY_NAME_PATTERN.match(cleaned):
+        raise PasskeyError(
+            f"Invalid entry name '{cleaned}'. "
+            "Names must be 1-64 chars: letters, digits, hyphens, underscores, dots."
+        )
+    return cleaned
+
+
+def cmd_new(name: str | None = None, template_name: str | None = None) -> None:
+    """Create a new entry with direct field input and zero default interruptions."""
     import questionary
 
-    from .interactive import is_interactive
+    from .interactive import (
+        PASSKEY_STYLE,
+        format_secret_preview,
+        is_interactive,
+        parse_field_shorthand,
+        prompt_secret,
+    )
+
+    if template_name:
+        from .templates import get_template
+
+        template = get_template(template_name)
+        if not template:
+            raise PasskeyError(
+                f"Template '{template_name}' not found. Run 'passkey template list' to see templates."
+            )
+        target_name = name
+        if not target_name:
+            if is_interactive():
+                target_name = questionary.text(
+                    "Entry name:", default=template["name"], style=PASSKEY_STYLE
+                ).ask()
+            else:
+                target_name = template["name"]
+        validated = _validate_entry_name(target_name)
+        cmd_template_apply(template, validated)
+        return
 
     all_entry_names = list_entries()
 
-    # Template integration: offer template before asking for name
-    if is_interactive():
-        from .templates import get_template, list_templates
-
-        templates = list_templates()
-        if templates:
-            use_template = questionary.confirm(
-                "Start from a template?", default=False
-            ).ask()
-            if use_template:
-                template_names = [t["name"] for t in templates]
-                template_name = questionary.select(
-                    "Select template",
-                    choices=template_names,
-                    instruction="(Type to filter)",
-                    use_jk_keys=False,
-                ).ask()
-                if template_name:
-                    template = get_template(template_name)
-                    if template:
-                        entry_name = questionary.text(
-                            "Entry name:", default=template_name
-                        ).ask()
-                        if entry_name:
-                            cmd_template_apply(template, entry_name)
-                        return
-
-    if is_interactive():
-        name = questionary.text("Entry name:").ask()
+    if name is None:
+        if is_interactive():
+            raw_name = questionary.text("Entry name:", style=PASSKEY_STYLE).ask()
+        else:
+            raw_name = input("Entry name: ").strip()
     else:
-        name = input("Entry name: ").strip()
+        raw_name = name
 
-    if not name:
-        raise PasskeyError("Entry name cannot be empty")
-    if name in RESERVED_NAMES:
-        raise PasskeyError(f"'{name}' is a reserved name")
+    name = _validate_entry_name(raw_name)
 
     is_update = False
     if name in all_entry_names:
         if is_interactive():
             overwrite = questionary.confirm(
-                f"'{name}' already exists. Overwrite?", default=False
+                f"'{name}' already exists. Overwrite?", default=False, style=PASSKEY_STYLE
             ).ask()
         else:
             overwrite = input(f"Entry '{name}' exists. Overwrite? [y/N]: ").strip().lower() == "y"
@@ -239,95 +389,126 @@ def cmd_new() -> None:
         is_update = True
 
     if not is_interactive():
-        # Non-interactive fallback: linear prompt
         fields: dict[str, str] = {}
-        print("Enter fields (empty field name to finish):")
+        print(f"Enter fields for '{name}' (KEY=VALUE or field name; empty name to save):")
         while True:
-            field_name = input("  Field name: ").strip()
-            if not field_name:
+            try:
+                raw_field = input("  Field name: ").strip()
+            except EOFError:
                 break
-            fields[field_name] = getpass.getpass(f"  Value for {field_name}: ")
+            if not raw_field:
+                break
+            field_name, inline_val = parse_field_shorthand(raw_field)
+            if not field_name:
+                print("  Field name cannot be empty.")
+                continue
+            value = (
+                inline_val
+                if inline_val is not None
+                else prompt_secret(f"  Value for {field_name}")
+            )
+            fields[field_name] = value
+            print(f"  + {field_name}  {format_secret_preview(value)}")
         if not fields:
             raise PasskeyError("No fields entered, operation cancelled.")
+        _print_entry_summary(name, fields)
         entry = Entry(name=name, fields=fields)
         save_entry(entry, is_update=is_update)
         print(f"Saved '{name}' with {len(fields)} field(s)")
         return
 
-    result = _entry_edit_loop(name, {}, {}, allow_rename=True)
-    if result is None:
-        return
-    final_name, fields, config = result
+    fields = {}
+    config: dict[str, str] = {}
+    open_editor = False
+    print(f"\n  Adding fields to '{name}' (paste KEY=VALUE or enter field name; '?' for menu)")
+
+    while True:
+        prompt_lbl = (
+            "Field name (Enter to save, '?' for menu):"
+            if fields
+            else "Field name ('?' for menu):"
+        )
+        raw_field = questionary.text(prompt_lbl, style=PASSKEY_STYLE).ask()
+        if raw_field is None:
+            print("Cancelled")
+            return
+        stripped = raw_field.strip()
+        if stripped in ("?", "/menu"):
+            open_editor = True
+            break
+        if not stripped:
+            if fields:
+                # Pressing Enter on an empty Field name after >= 1 field saves & exits cleanly
+                break
+            open_editor = True
+            break
+
+        field_name, inline_val = parse_field_shorthand(stripped)
+        if not field_name:
+            print("  Field name cannot be empty.")
+            continue
+        value = (
+            inline_val
+            if inline_val is not None
+            else prompt_secret(f"  Value for {field_name}")
+        )
+        fields[field_name] = value
+        print(f"  + {field_name}  {format_secret_preview(value)}")
+
+    final_name = name
+    if open_editor:
+        result = _entry_edit_loop(name, fields, config, allow_rename=True)
+        if result is None:
+            return
+        final_name, fields, config = result
+        final_name = _validate_entry_name(final_name)
+    else:
+        _print_entry_summary(final_name, fields)
+
+    if final_name != name and final_name in all_entry_names:
+        raise PasskeyError(f"Entry '{final_name}' already exists.")
+
     entry = Entry(name=final_name, fields=fields, config=config)
-    save_entry(entry, is_update=is_update)
+    save_entry(entry, is_update=(is_update if final_name == name else False))
     print(f"Saved '{final_name}' with {len(fields)} field(s)")
 
 
 def cmd_template_apply(template: dict, entry_name: str) -> None:
     """Create an entry from a template."""
-    from .interactive import is_interactive
+    from .interactive import PASSKEY_STYLE, is_interactive
     from .keychain import list_entries
     from .keychain import save_entry as _save
     from .models import Entry
 
     all_names = list_entries()
 
-    # Check for existing entry
     if entry_name in all_names:
         if is_interactive():
             import questionary
+
             overwrite = questionary.confirm(
-                f"'{entry_name}' already exists. Overwrite?", default=False
+                f"'{entry_name}' already exists. Overwrite?", default=False, style=PASSKEY_STYLE
             ).ask()
         else:
-            overwrite = input(f"Entry '{entry_name}' exists. Overwrite? [y/N]: ").strip().lower() == "y"
+            overwrite = (
+                input(f"Entry '{entry_name}' exists. Overwrite? [y/N]: ").strip().lower() == "y"
+            )
         if not overwrite:
             print("Cancelled")
             return
 
     fields: dict[str, str] = {}
-
-    if is_interactive():
-        import questionary
-
-        from .interactive import PASSKEY_STYLE
-
-        for field_def in template.get("fields", []):
-            name = field_def["name"]
-            secret = field_def.get("secret", False)
-            generate = field_def.get("generate", False)
-
-            if generate:
-                use_gen = questionary.confirm(
-                    f"Generate value for {name}?", default=True, style=PASSKEY_STYLE
-                ).ask()
-                if use_gen:
-                    from .generator import generate_password
-                    fields[name] = generate_password()
-                    print(f"  Generated value for {name}")
-                    continue
-
-            if secret:
-                value = getpass.getpass(f"  {name}: ")
-            else:
-                value = questionary.text(f"{name}:").ask() or ""
-            if value:
-                fields[name] = value
-    else:
-        print(f"Template '{template['name']}' fields:")
-        for field_def in template.get("fields", []):
-            name = field_def["name"]
-            secret = field_def.get("secret", False)
-            value = getpass.getpass(f"  {name}: ") if secret else input(f"  {name}: ").strip()
-            if value:
-                fields[name] = value
+    _apply_template_into_fields(template, fields)
 
     if not fields:
         raise PasskeyError("No fields entered, operation cancelled.")
 
+    _print_entry_summary(entry_name, fields)
     entry = Entry(name=entry_name, fields=fields, source=f"template:{template['name']}")
     _save(entry, is_update=entry_name in all_names)
-    print(f"Created entry '{entry_name}' from template '{template['name']}' with {len(fields)} field(s)")
+    print(
+        f"Created entry '{entry_name}' from template '{template['name']}' with {len(fields)} field(s)"
+    )
 
 
 def cmd_list(names_only: bool = False) -> None:
@@ -403,25 +584,26 @@ def cmd_delete(entry_name: str) -> None:
     if delete_entry(entry_name):
         print(f"Deleted '{entry_name}'")
     else:
-        # This case is now handled by the strict resolver in cli.py
         raise PasskeyError(f"Entry '{entry_name}' could not be deleted.")
 
 
 def cmd_set_field(entry: Entry, field_name: str, value: str | None) -> None:
     """Upsert a single field on an existing entry."""
+    from .interactive import format_secret_preview, prompt_secret
+
     if not entry:
         raise PasskeyError("Entry not found")
     if not field_name:
         raise PasskeyError("Field name cannot be empty")
 
     if value is None:
-        value = getpass.getpass(f"  Value for {field_name}: ")
+        value = prompt_secret(f"  Value for {field_name}")
 
     action = "Updated" if field_name in entry.fields else "Added"
     # Mutate the existing entry so config/created/source are preserved
     entry.fields[field_name] = value
     save_entry(entry, is_update=True)
-    print(f"{action} field '{field_name}' on '{entry.name}'")
+    print(f"{action} field '{field_name}' on '{entry.name}' {format_secret_preview(value)}")
 
 
 def cmd_edit(entry: Entry) -> None:
@@ -446,6 +628,7 @@ def cmd_edit(entry: Entry) -> None:
         return
 
     final_name, fields, config = result
+    final_name = _validate_entry_name(final_name)
     updated = Entry(
         name=final_name,
         fields=fields,
@@ -465,14 +648,29 @@ def cmd_edit(entry: Entry) -> None:
 
 def _cmd_edit_noninteractive(entry: Entry) -> None:
     """Fallback edit for non-TTY: append/overwrite fields only."""
+    from .interactive import format_secret_preview, parse_field_shorthand, prompt_secret
+
     print(f"Editing '{entry.name}' (fields: {', '.join(entry.fields.keys())})")
-    print("Enter fields (empty name to finish):")
+    print("Enter fields (KEY=VALUE or field name; empty name to finish):")
     fields = entry.fields.copy()
     while True:
-        field_name = input("  Field name: ").strip()
-        if not field_name:
+        try:
+            raw_field = input("  Field name: ").strip()
+        except EOFError:
             break
-        fields[field_name] = getpass.getpass(f"  Value for {field_name}: ")
+        if not raw_field:
+            break
+        field_name, inline_val = parse_field_shorthand(raw_field)
+        if not field_name:
+            print("  Field name cannot be empty.")
+            continue
+        value = (
+            inline_val
+            if inline_val is not None
+            else prompt_secret(f"  Value for {field_name}")
+        )
+        fields[field_name] = value
+        print(f"  ~ {field_name}  {format_secret_preview(value)}")
     save_entry(
         Entry(
             name=entry.name,
@@ -492,20 +690,21 @@ def cmd_clone(source: Entry, dest_name: str | None = None) -> None:
     """Clone an entry, optionally under a new name, then open the edit menu."""
     import questionary
 
-    from .interactive import is_interactive
+    from .interactive import PASSKEY_STYLE, is_interactive
 
     existing = list_entries()
 
     if dest_name is None:
         if is_interactive():
-            dest_name = questionary.text("New entry name:", default=f"{source.name}_copy").ask()
+            dest_name = questionary.text(
+                "New entry name:", default=f"{source.name}_copy", style=PASSKEY_STYLE
+            ).ask()
         else:
             dest_name = (
                 input(f"New entry name [{source.name}_copy]: ").strip() or f"{source.name}_copy"
             )
 
-    if not dest_name:
-        raise PasskeyError("Entry name cannot be empty")
+    dest_name = _validate_entry_name(dest_name)
     if dest_name in existing:
         raise PasskeyError(
             f"Entry '{dest_name}' already exists. Delete it first or choose a different name."
@@ -532,6 +731,7 @@ def cmd_clone(source: Entry, dest_name: str | None = None) -> None:
         return
 
     final_name, fields, config = result
+    final_name = _validate_entry_name(final_name)
     if final_name != dest_name and final_name in existing:
         raise PasskeyError(f"Entry '{final_name}' already exists.")
     entry = Entry(name=final_name, fields=fields, config=config, policy=source.policy)
@@ -546,8 +746,6 @@ def cmd_check(entry_name: str, required_fields: list[str], quiet: bool = False) 
         0 if all required fields are present, 1 otherwise
         (the CLI layer owns sys.exit).
     """
-    import sys
-
     entry = get_entry(entry_name)
 
     if entry is None:
@@ -666,7 +864,9 @@ def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: boo
                 f.write(json_str)
             print(f"Exported {len(all_entries)} entry(s) to {path}")
             if not no_secrets:
-                print("Warning: Export contains secrets. File permissions set to 600 (owner only).")
+                print(
+                    "Warning: Export contains secrets. File permissions set to 600 (owner only)."
+                )
         except FileExistsError:
             raise PasskeyError(
                 f"File already exists at '{path}'. Please remove it first."

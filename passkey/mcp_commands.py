@@ -5,12 +5,12 @@ Cursor, OpenCode, Windsurf, Cline, and Zed.
 """
 
 import contextlib
-import getpass
 import json
 import sys
 from pathlib import Path
 
 from .audit import log_operation
+from .interactive import format_secret_preview, parse_field_shorthand, prompt_secret
 from .keychain import PasskeyError, get_entry, list_entries, save_entry
 from .mcp_config import (
     ADAPTERS,
@@ -33,11 +33,47 @@ from .mcp_config import (
 from .models import Entry
 
 
-def _resolve_adapter(tool: str | None = None) -> ToolAdapter:
+def detect_exposed_mcp_servers() -> list[dict]:
+    """Scan all supported MCP tool configs for servers with plaintext secrets.
+
+    Read-only and resilient to malformed config files so FTUE never crashes.
+    """
+    exposed: list[dict] = []
+    for adapter in ADAPTERS.values():
+        for config_path in adapter.get_all_existing_paths():
+            try:
+                config = load_config(config_path)
+            except (FileNotFoundError, MCPConfigError, OSError):
+                continue
+            servers = get_mcp_servers(config, adapter)
+            for server_name, server_config in servers.items():
+                if is_passkey_wrapped(server_config):
+                    continue
+                env = get_env_from_server(server_config, adapter)
+                if not env:
+                    continue
+                secrets, non_secrets = extract_secrets(env)
+                if secrets:
+                    exposed.append(
+                        {
+                            "tool": adapter.name,
+                            "display_name": adapter.display_name,
+                            "config_path": config_path,
+                            "server": server_name,
+                            "secret_keys": list(secrets.keys()),
+                            "non_secret_keys": list(non_secrets.keys()),
+                        }
+                    )
+    return exposed
+
+
+def _resolve_adapter(tool: str | None = None, *, prefer_exposed: bool = False) -> ToolAdapter:
     """Resolve a tool name to its adapter.
 
     Args:
         tool: Tool name (e.g., "claude", "vscode"). If None, prompts user.
+        prefer_exposed: When True and multiple configs exist, auto-select if
+            only one tool actually contains exposed secrets.
 
     Returns:
         The matching ToolAdapter
@@ -53,7 +89,6 @@ def _resolve_adapter(tool: str | None = None) -> ToolAdapter:
             f"Unknown tool '{tool}'. Supported tools: {', '.join(sorted(ADAPTERS.keys()))}"
         )
 
-    # No tool specified — find existing configs and prompt
     from .mcp_config import get_all_config_paths
 
     existing = get_all_config_paths()
@@ -61,27 +96,34 @@ def _resolve_adapter(tool: str | None = None) -> ToolAdapter:
     if not existing:
         raise PasskeyError("No MCP config files found.")
 
-    if len(existing) == 1:
-        tool_name, _ = existing[0]
-        return ADAPTERS[tool_name]
-
-    # Multiple tools found — show selection
-    print("Multiple MCP configs detected:\n")
-    seen = set()
-    choices = []
+    unique_tools: list[tuple[str, ToolAdapter, Path]] = []
+    seen: set[str] = set()
     for tool_name, path in existing:
         if tool_name not in seen:
             seen.add(tool_name)
-            adapter = ADAPTERS[tool_name]
-            choices.append((tool_name, adapter, path))
-            print(f"  {len(choices)}. {adapter.display_name} ({path})")
+            unique_tools.append((tool_name, ADAPTERS[tool_name], path))
+
+    if len(unique_tools) == 1:
+        return unique_tools[0][1]
+
+    if prefer_exposed:
+        exposed_tools = {item["tool"] for item in detect_exposed_mcp_servers()}
+        matching = [t for t in unique_tools if t[0] in exposed_tools]
+        if len(matching) == 1:
+            return matching[0][1]
+        if len(matching) > 1:
+            unique_tools = matching
+
+    print("Multiple MCP configs detected:\n")
+    for idx, (_, adapter, path) in enumerate(unique_tools, 1):
+        print(f"  {idx}. {adapter.display_name} ({path})")
 
     print()
     try:
         choice = input("Select tool [1]: ").strip() or "1"
         idx = int(choice) - 1
-        if 0 <= idx < len(choices):
-            return choices[idx][1]
+        if 0 <= idx < len(unique_tools):
+            return unique_tools[idx][1]
     except (ValueError, IndexError, KeyboardInterrupt, EOFError):
         pass
 
@@ -107,13 +149,24 @@ def cmd_init(
     stores them in the keychain, and rewrites the config to use
     the passkey wrapper.
     """
-    adapter = _resolve_adapter(tool)
+    if config_path and not tool:
+        from .mcp_config import find_adapter_for_path
+
+        inferred = find_adapter_for_path(Path(config_path).expanduser())
+        adapter = inferred if inferred is not None else _resolve_adapter(tool, prefer_exposed=True)
+    else:
+        adapter = _resolve_adapter(tool, prefer_exposed=(tool is None and config_path is None))
 
     if config_path:
         path = Path(config_path)
     else:
-        path = adapter.get_global_path()
-        if not path:
+        global_path = adapter.get_global_path()
+        existing_paths = adapter.get_all_existing_paths()
+        if global_path and (global_path.exists() or not existing_paths):
+            path = global_path
+        elif existing_paths:
+            path = existing_paths[0]
+        else:
             raise PasskeyError(
                 f"No config path for {adapter.display_name} on this platform."
             )
@@ -158,41 +211,47 @@ def cmd_init(
         print("All servers either have no env vars or are already using passkey.")
         return
 
-    # Display summary
-    print(f"Passkey Integration — {adapter.display_name}")
-    print("=" * (25 + len(adapter.display_name)))
+    backup_preview = (
+        backup_path
+        if backup_path
+        else f"{get_backups_dir()}/{path.name}.<timestamp>.backup"
+    )
+    rollback_cmd = f"passkey unwrap --tool {adapter.name}"
+    if config_path and Path(config_path) != adapter.get_global_path():
+        rollback_cmd += f" --config {path}"
+
+    # Display crisp per-server migration preview before touching any files
+    header = f"Passkey MCP Migration — {adapter.display_name}"
+    print(header)
+    print("─" * len(header))
+    print(f"  Config:   {path}")
+    print(f"  Backup:   {backup_preview} (0o600)")
+    print(f"  Rollback: {rollback_cmd}")
     print()
-    print(f"Config: {path}")
-    print(f"Found {len(to_migrate)} server(s) with credentials:")
+    print(f"Preview ({len(to_migrate)} server(s)):")
     print()
 
     for name, info in to_migrate.items():
-        secret_count = len(info["secrets"])
-        print(f"  {name}: {secret_count} secret(s) detected")
-        for key in info["secrets"]:
-            print(f"    - {key}")
-
-    print()
-
-    backup_preview = backup_path if backup_path else f"{get_backups_dir()}/{path.name}.<timestamp>.backup"
+        secrets = info["secrets"]
+        non_secrets = info["non_secrets"]
+        print(f"  {name}  →  OS keychain entry '{name}'")
+        print("    Move to keychain (masked):")
+        key_w = max(len(k) for k in secrets)
+        for key, val in secrets.items():
+            print(f"      • {key:<{key_w}}  {format_secret_preview(val)}")
+        if non_secrets:
+            print("    Keep inline (non-secret):")
+            for key, val in non_secrets.items():
+                print(f"      • {key} = {val}")
+        else:
+            print("    Keep inline (non-secret): (none)")
+        print()
 
     if dry_run:
-        print("[Dry run - no changes will be made]")
-        print()
-        print("This would:")
-        print("  1. Store secrets in system keychain")
-        print("  2. Update config to use passkey wrapper")
-        print(f"  3. Create 0600 backup at {backup_preview}")
+        print("[Dry run — no config files or keychain entries were modified]")
         return
 
-    # Confirm
-    print("This will:")
-    print("  1. Store secrets in system keychain")
-    print("  2. Update config to use passkey wrapper")
-    print(f"  3. Create 0600 backup at {backup_preview}")
-    print()
-
-    confirm = input("Continue? [Y/n]: ").strip().lower()
+    confirm = input("Apply migration now? [Y/n]: ").strip().lower()
     if confirm not in ("", "y", "yes"):
         print("Cancelled.")
         return
@@ -203,7 +262,7 @@ def cmd_init(
     try:
         backup_target = Path(backup_path) if backup_path else None
         actual_backup = backup_config(path, backup_target)
-        print(f"Backup created: {actual_backup}")
+        print(f"Backup saved (0o600): {actual_backup}")
         if backup_target and is_file_exposed_in_git(actual_backup):
             print(
                 f"WARNING: Custom backup '{actual_backup}' is inside a git worktree and not gitignored!",
@@ -231,7 +290,7 @@ def cmd_init(
 
         try:
             entry = Entry(name=name, fields=secrets, source=f"{adapter.name}-init")
-            save_entry(entry)
+            save_entry(entry, is_update=(name in existing_entries))
 
             if name in existing_entries:
                 print(f"  {name}: updated ({len(secrets)} secrets)")
@@ -257,12 +316,12 @@ def cmd_init(
     print()
     print(f"Done! {created} created, {updated} updated, {skipped} skipped")
     print()
-    print("SECURITY NOTE: The backup file may contain plaintext secrets.")
-    print(f"  Consider deleting: rm '{actual_backup}'")
+    print("SECURITY NOTE: The backup file contains your pre-migration config.")
+    print(f"  Once verified, you can delete it: rm '{actual_backup}'")
     print()
     print(f"Restart {adapter.display_name} to apply changes.")
-    print(f"Run 'passkey status --tool {adapter.name}' to verify.")
-    print(f"Changed your mind? 'passkey unwrap --tool {adapter.name}' restores the backup-era config.")
+    print(f"Verify status:  passkey status --tool {adapter.name}")
+    print(f"Undo anytime:   {rollback_cmd}")
 
     log_operation(
         f"{adapter.name}-init",
@@ -740,17 +799,30 @@ def cmd_add(
 
     if fields:
         for field_name in fields:
-            value = getpass.getpass(f"  Value for {field_name}: ")
+            value = prompt_secret(f"  Value for {field_name}")
             new_fields[field_name] = value
+            print(f"  + {field_name}  {format_secret_preview(value)}")
     else:
-        print("Enter fields (leave name blank to finish):")
+        print("Enter fields (paste KEY=VALUE or enter field name; leave blank to finish):")
         print()
         while True:
-            field_name = input("  Field name: ").strip()
-            if not field_name:
+            try:
+                raw_field = input("  Field name: ").strip()
+            except EOFError:
                 break
-            value = getpass.getpass(f"  Value for {field_name}: ")
+            if not raw_field:
+                break
+            field_name, inline_val = parse_field_shorthand(raw_field)
+            if not field_name:
+                print("  Field name cannot be empty.")
+                continue
+            value = (
+                inline_val
+                if inline_val is not None
+                else prompt_secret(f"  Value for {field_name}")
+            )
             new_fields[field_name] = value
+            print(f"  + {field_name}  {format_secret_preview(value)}")
             print()
 
     if not new_fields:

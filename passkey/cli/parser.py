@@ -3,32 +3,78 @@
 import argparse
 from importlib.metadata import version as package_version
 
-SUBPARSER_GROUPS = [
-    ("Entry Management", [
-        "new", "list", "get", "edit", "delete", "info", "clone", "set-field", "policy", "check", "audit",
-    ]),
-    ("Secrets", [
-        "generate", "rotate", "lease",
-    ]),
-    ("Templates", [
-        "template",
-    ]),
-    ("Share & Receive", [
-        "share", "receive",
-    ]),
-    ("Export & Import", [
-        "export", "import",
-    ]),
-    ("Run", [
-        "run", "inject", "mount", "plugin", "browser-fill",
-    ]),
-    ("MCP Integration", [
-        "init", "unwrap", "status", "doctor", "servers", "add", "hook",
-    ]),
-    ("Utilities", [
-        "config", "completion", "mcp-serve",
-    ]),
+SUBPARSER_GROUPS: list[tuple[str, list[str]]] = [
+    (
+        "Core Secret Management",
+        ["new", "get", "list", "edit", "delete", "info", "entry"],
+    ),
+    (
+        "Run & Inject",
+        ["run", "inject", "mount", "plugin", "browser-fill"],
+    ),
+    (
+        "MCP & AI Guardrails",
+        ["init", "status", "doctor", "mcp", "hook", "audit", "policy", "lease"],
+    ),
+    (
+        "Portability & Config",
+        ["export", "import", "share", "receive", "config", "completion"],
+    ),
 ]
+
+EXAMPLES_EPILOG = """\
+Examples:
+  passkey new stripe                        Create 'stripe' and paste secrets safely
+  passkey stripe                            Fuzzy-find and copy fields from 'stripe'
+  passkey run stripe -- python app.py       Run a command with secrets as env vars
+  passkey init                              Migrate plaintext MCP secrets to keychain
+  passkey mcp status                        Audit MCP server security across tools
+  passkey inject -i .env.tpl -o .env        Render passkey:// placeholders into file
+  passkey export backup.passkey --encrypt   Save an encrypted backup bundle
+
+Learn more:
+  Run 'passkey help <command>' or 'passkey <command> --help' for command details.
+"""
+
+
+class GroupedArgumentParser(argparse.ArgumentParser):
+    """Top-level parser rendering categorized gh-style --help sections."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._command_summaries: dict[str, str] = {}
+
+    def register_command_summary(self, name: str, summary: str) -> None:
+        """Record a one-line description for categorized top-level --help."""
+        self._command_summaries[name] = summary
+
+    def format_help(self) -> str:
+        lines: list[str] = [
+            f"usage: {self.prog} <command> [options]",
+            "",
+            self.description or "",
+            "",
+        ]
+
+        col_w = 14
+        for group_title, cmd_names in SUBPARSER_GROUPS:
+            lines.append(f"{group_title}:")
+            for cmd in cmd_names:
+                desc = self._command_summaries.get(cmd, "")
+                lines.append(f"  {cmd:<{col_w}}{desc}")
+            lines.append("")
+
+        lines.extend(
+            [
+                "Flags:",
+                f"  {'-h, --help':<{col_w}}Show this help message and exit",
+                f"  {'-V, --version':<{col_w}}Show program's version number and exit",
+                "",
+                EXAMPLES_EPILOG.rstrip(),
+                "",
+            ]
+        )
+        return "\n".join(lines)
 
 
 def _entry_completer(**kwargs):
@@ -41,132 +87,236 @@ def _entry_completer(**kwargs):
         return []
 
 
-def create_parser() -> argparse.ArgumentParser:
-    """Create and configure the argument parser."""
-    parser = argparse.ArgumentParser(
-        prog="passkey",
-        usage="%(prog)s [-h] [--version] <command> [<args>]",
-        description="Manage secrets in system keychain with MCP integration",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  passkey new                               Create a new entry interactively
-  passkey list                              List all entry names
-  passkey get slack                         Browse and copy fields from an entry
-  passkey get slack --all                   Copy all fields to clipboard
-  passkey edit jamf                         Edit an existing entry
-  passkey delete cortex_xdr                Delete an entry
-  passkey info slack                        Show entry details and field names
-  passkey set-field cortex_xdr api_key      Add or update a field
-  passkey clone slack slack_prod            Clone an entry
-  passkey check github GITHUB_TOKEN         Verify entry has required fields
-  passkey generate --length 64              Generate a random secret
-  passkey run slack -- python app.py        Run app.py with slack secrets as env vars
-  passkey export backup.json                Export all entries to file
-  passkey import backup.json                Import (auto-detects format)
-  passkey share github --output gh.passkey  Share an entry via encrypted bundle
-  passkey init                              Migrate MCP config secrets to keychain
-  passkey init --tool vscode                Migrate VS Code MCP config specifically
-  passkey status                            Show security status across all tools
-  passkey doctor --deep                     Run extended diagnostics
-  passkey servers                           List MCP servers across tools
-  passkey completion --bash                 Print shell completion script
-  passkey slack                             Fuzzy-match and browse entry 'slack'
-        """,
+def _configure_new_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("name", nargs="?", help="Optional entry name (e.g., stripe)")
+    p.add_argument(
+        "-t",
+        "--template",
+        dest="template",
+        help="Populate fields from a template (e.g., github, aws, stripe)",
     )
+    return p
 
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {package_version('passkey-mcp')}",
-    )
 
-    subparsers = parser.add_subparsers(dest="command")
-
-    # new
-    subparsers.add_parser("new", help="Create a new entry interactively")
-
-    # list
-    list_parser = subparsers.add_parser("list", help="List all entries")
-    list_parser.add_argument(
+def _configure_list_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument(
         "-n", "--names-only", action="store_true", help="Print only names, one per line"
     )
+    return p
 
-    # get
-    get_parser = subparsers.add_parser("get", help="Browse and copy fields")
-    get_parser.add_argument("entry", help="Entry name")
-    get_parser.add_argument(
+
+def _configure_get_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("entry", nargs="?", help="Entry name (opens fuzzy selector if omitted)")
+    p.add_argument(
         "--all",
         "-a",
         dest="get_all",
         action="store_true",
         help="Copy all fields as KEY='value' env lines instead of interactive picker",
     )
-    get_parser.completer = _entry_completer
+    p.completer = _entry_completer  # type: ignore[attr-defined]
+    return p
 
-    # edit
-    edit_parser = subparsers.add_parser("edit", help="Edit an existing entry")
-    edit_parser.add_argument("entry", help="Entry name")
-    edit_parser.completer = _entry_completer
 
-    # delete
-    delete_parser = subparsers.add_parser("delete", help="Delete an entry")
-    delete_parser.add_argument("entry", help="Entry name")
-    delete_parser.completer = _entry_completer
+def _configure_edit_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("entry", nargs="?", help="Entry name")
+    p.completer = _entry_completer  # type: ignore[attr-defined]
+    return p
 
-    # info
-    info_parser = subparsers.add_parser("info", help="Show entry details")
-    info_parser.add_argument("entry", help="Entry name")
-    info_parser.completer = _entry_completer
 
-    # clone
-    clone_parser = subparsers.add_parser("clone", help="Clone an entry")
-    clone_parser.add_argument("source", help="Source entry name")
-    clone_parser.add_argument("dest", help="Destination entry name")
-    clone_parser.add_argument(
-        "--fields", nargs="+", help="Specific fields to clone (default: all)"
-    )
-    clone_parser.completer = _entry_completer
+def _configure_delete_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("entry", help="Entry name")
+    p.completer = _entry_completer  # type: ignore[attr-defined]
+    return p
 
-    # set-field
-    set_field_parser = subparsers.add_parser("set-field", help="Add or update a field")
-    set_field_parser.add_argument("entry", help="Entry name")
-    set_field_parser.add_argument("field", help="Field name (prompts securely for value)")
-    set_field_parser.completer = _entry_completer
 
-    # policy
-    policy_parser = subparsers.add_parser(
-        "policy", help="Show or set an entry's access policy (allow or prompt)"
-    )
-    policy_parser.add_argument("entry", help="Entry name")
-    policy_parser.add_argument(
-        "policy_value",
-        nargs="?",
-        choices=["allow", "prompt"],
-        help="Access policy: 'allow' (headless) or 'prompt' (requires Touch ID / lease)",
-    )
-    policy_parser.completer = _entry_completer
+def _configure_info_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("entry", nargs="?", help="Entry name")
+    p.completer = _entry_completer  # type: ignore[attr-defined]
+    return p
 
-    # check
-    check_parser = subparsers.add_parser("check", help="Verify required fields exist")
-    check_parser.add_argument("entry", help="Entry name")
-    check_parser.add_argument("fields", nargs="+", help="Required field names")
-    check_parser.add_argument(
+
+def _configure_clone_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("source", help="Source entry name")
+    p.add_argument("dest", nargs="?", help="Destination entry name")
+    p.add_argument("--fields", nargs="+", help="Specific fields to clone (default: all)")
+    p.completer = _entry_completer  # type: ignore[attr-defined]
+    return p
+
+
+def _configure_set_field_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("entry", help="Entry name")
+    p.add_argument("field", help="Field name (prompts securely for value)")
+    p.completer = _entry_completer  # type: ignore[attr-defined]
+    return p
+
+
+def _configure_check_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("entry", help="Entry name")
+    p.add_argument("fields", nargs="+", help="Required field names")
+    p.add_argument(
         "-q", "--quiet", action="store_true", help="Only exit non-zero if fields missing"
     )
-    check_parser.completer = _entry_completer
+    p.completer = _entry_completer  # type: ignore[attr-defined]
+    return p
 
-    # generate
-    generate_parser = subparsers.add_parser("generate", help="Generate a random secret")
-    generate_parser.add_argument(
+
+def _configure_generate_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument(
         "--length", type=int, default=32, help="Length in characters (default: 32)"
     )
-    generate_parser.add_argument(
+    p.add_argument(
         "--no-copy", action="store_true", help="Print to stdout instead of copying"
     )
+    return p
 
-    # run
-    run_parser = subparsers.add_parser("run", help="Run command with secrets as env vars")
+
+def _configure_rotate_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("entry", help="Entry name")
+    p.add_argument("field", nargs="?", help="Field name (prompts if omitted)")
+    p.completer = _entry_completer  # type: ignore[attr-defined]
+    return p
+
+
+def _configure_template_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    template_sub = p.add_subparsers(dest="template_command")
+    template_sub.add_parser("list", help="List available templates")
+    template_sub.add_parser("show", help="Show template details").add_argument(
+        "template_name", help="Template name"
+    )
+    template_apply = template_sub.add_parser("apply", help="Apply a template to create an entry")
+    template_apply.add_argument("template_name", help="Template name")
+    template_apply.add_argument(
+        "entry_name", nargs="?", help="Entry name (defaults to template name)"
+    )
+    template_sub.add_parser("add", help="Save an existing entry as a custom template")
+    return p
+
+
+def _configure_init_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("--tool", help="Tool name (e.g., claude, vscode)")
+    p.add_argument("--config", help="Config file path")
+    p.add_argument(
+        "--dry-run", action="store_true", help="Show what would be migrated without migrating"
+    )
+    p.add_argument(
+        "--force", action="store_true", help="Overwrite existing entries for the same servers"
+    )
+    p.add_argument(
+        "--include-all",
+        action="store_true",
+        help="Include all env vars (not just detected secrets)",
+    )
+    p.add_argument("--backup", help="Custom backup file path")
+    return p
+
+
+def _configure_status_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("--tool", help="Tool name")
+    p.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON")
+    return p
+
+
+def _configure_servers_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("--tool", help="Tool name")
+    p.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON")
+    return p
+
+
+def _configure_add_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("server", help="Server name")
+    p.add_argument("--tool", help="Tool name")
+    p.add_argument("--fields", nargs="+", help="Field names to add (prompts for values)")
+    return p
+
+
+def _configure_unwrap_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("--tool", help="Tool name (e.g., claude, vscode)")
+    p.add_argument("--server", help="Server name to unwrap")
+    p.add_argument("--config", help="Config file path")
+    p.add_argument(
+        "--restore-secrets",
+        action="store_true",
+        help="Also write secret values back into the config file",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="Show what would be changed without changing it"
+    )
+    return p
+
+
+def _configure_doctor_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument(
+        "--deep", action="store_true", help="Run extended diagnostics including audit checks"
+    )
+    return p
+
+
+def create_parser() -> argparse.ArgumentParser:
+    """Create and configure the argument parser."""
+    parser = GroupedArgumentParser(
+        prog="passkey",
+        usage="%(prog)s <command> [options]",
+        description="Local OS-keychain secret manager and injector for CLIs & MCP servers.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {package_version('passkey-mcp')}",
+    )
+
+    subparsers = parser.add_subparsers(
+        dest="command",
+        metavar="<command>",
+        parser_class=argparse.ArgumentParser,
+    )
+
+    def _add_primary(name: str, summary: str, **kwargs) -> argparse.ArgumentParser:
+        parser.register_command_summary(name, summary)
+        return subparsers.add_parser(name, help=summary, description=summary, **kwargs)
+
+    # ── Core Secret Management ────────────────────────────────────────────
+    _configure_new_parser(_add_primary("new", "Create a new secret entry"))
+    _configure_get_parser(_add_primary("get", "Browse and copy fields from an entry"))
+    _configure_list_parser(_add_primary("list", "List all saved entries"))
+    _configure_edit_parser(_add_primary("edit", "Interactive editor for an existing entry"))
+    _configure_delete_parser(_add_primary("delete", "Delete an entry from the keychain"))
+    _configure_info_parser(_add_primary("info", "Show entry metadata and field names"))
+
+    # Noun-verb group: passkey entry <subcommand>
+    entry_group = _add_primary(
+        "entry",
+        "Advanced entry subcommands (run 'passkey entry --help')",
+    )
+    entry_sub = entry_group.add_subparsers(dest="entry_command", metavar="<subcommand>")
+    _configure_clone_parser(entry_sub.add_parser("clone", help="Clone an entry"))
+    _configure_set_field_parser(
+        entry_sub.add_parser("set-field", help="Add or update a single field")
+    )
+    _configure_rotate_parser(
+        entry_sub.add_parser("rotate", help="Rotate a secret field and timestamp")
+    )
+    _configure_check_parser(
+        entry_sub.add_parser("check", help="Verify required fields exist on an entry")
+    )
+    _configure_template_parser(
+        entry_sub.add_parser("template", help="List, show, apply, or save entry templates")
+    )
+    _configure_generate_parser(
+        entry_sub.add_parser("generate", help="Generate a cryptographically random secret")
+    )
+    _configure_new_parser(entry_sub.add_parser("new", help="Create a new secret entry"))
+    _configure_get_parser(entry_sub.add_parser("get", help="Browse and copy fields"))
+    _configure_list_parser(entry_sub.add_parser("list", help="List all entries"))
+    _configure_edit_parser(entry_sub.add_parser("edit", help="Edit an existing entry"))
+    _configure_delete_parser(entry_sub.add_parser("delete", help="Delete an entry"))
+    _configure_info_parser(entry_sub.add_parser("info", help="Show entry details"))
+
+    # ── Run & Inject ──────────────────────────────────────────────────────
+    run_parser = _add_primary("run", "Run a command with secrets injected as env vars")
     run_parser.add_argument(
         "--no-masking",
         action="store_true",
@@ -187,9 +337,8 @@ Examples:
     )
     run_parser.add_argument("args", nargs=argparse.REMAINDER, help="entries... -- command")
 
-    # inject
-    inject_parser = subparsers.add_parser(
-        "inject", help="Resolve {{ passkey://entry/field }} placeholders in a template"
+    inject_parser = _add_primary(
+        "inject", "Render {{ passkey://entry/field }} placeholders into a file"
     )
     inject_parser.add_argument("-i", "--in-file", required=True, help="Input template file")
     inject_parser.add_argument("-o", "--out-file", help="Output file path (0600 atomic write)")
@@ -202,9 +351,8 @@ Examples:
         "-f", "--force", action="store_true", help="Overwrite output file if it already exists"
     )
 
-    # mount
-    mount_parser = subparsers.add_parser(
-        "mount", help="Mount an ephemeral POSIX FIFO (.env) streaming secrets from keychain"
+    mount_parser = _add_primary(
+        "mount", "Stream secrets via an ephemeral POSIX FIFO (.env)"
     )
     mount_parser.add_argument("entries", nargs="+", help="Entry names to expose via FIFO")
     mount_parser.add_argument(
@@ -225,202 +373,8 @@ Examples:
         "-q", "--quiet", action="store_true", help="Suppress status output on stderr"
     )
 
-    # hook
-    hook_parser = subparsers.add_parser(
-        "hook", help="Install or run pre-execution AI agent secret-protection hooks"
-    )
-    hook_sub = hook_parser.add_subparsers(dest="hook_command")
-    hook_install = hook_sub.add_parser(
-        "install", help="Install non-destructive pre-tool guard hook for an AI tool"
-    )
-    hook_install.add_argument(
-        "--tool",
-        required=True,
-        choices=["claude", "cursor", "gemini"],
-        help="Target AI coding tool",
-    )
-    hook_install.add_argument("--project-dir", help="Project directory (default: current working directory)")
-    hook_check = hook_sub.add_parser("check", help="Evaluate hook payload from stdin")
-    hook_check.add_argument(
-        "--tool",
-        choices=["claude", "cursor", "gemini"],
-        help="Hook caller format",
-    )
-
-    # audit
-    audit_parser = subparsers.add_parser("audit", help="Show recent secret access history")
-    audit_parser.add_argument(
-        "--limit", type=int, default=10, help="Number of entries to show (default: 10)"
-    )
-    audit_parser.add_argument(
-        "--clear", action="store_true", help="Clear the audit log"
-    )
-    audit_parser.add_argument(
-        "--summary", action="store_true", help="Show 30-day summary by entry"
-    )
-    audit_parser.add_argument(
-        "--verify", action="store_true", help="Verify HMAC-SHA256 hash chain integrity"
-    )
-
-    # rotate
-    rotate_parser = subparsers.add_parser("rotate", help="Rotate a secret")
-    rotate_parser.add_argument("entry", help="Entry name")
-    rotate_parser.add_argument("field", nargs="?", help="Field name (prompts if omitted)")
-    rotate_parser.completer = _entry_completer
-
-    # template
-    template_parser = subparsers.add_parser("template", help="Template management")
-    template_sub = template_parser.add_subparsers(dest="template_command")
-    template_sub.add_parser("list", help="List available templates")
-    template_sub.add_parser("show", help="Show template details").add_argument(
-        "template_name", help="Template name"
-    )
-    template_apply = template_sub.add_parser("apply", help="Apply a template to create an entry")
-    template_apply.add_argument("template_name", help="Template name")
-    template_apply.add_argument("entry_name", nargs="?", help="Entry name (defaults to template name)")
-    template_sub.add_parser("add", help="Save an existing entry as a custom template")
-
-    # export
-    export_parser = subparsers.add_parser("export", help="Export entries")
-    export_parser.add_argument("file", help="Output file path")
-    export_parser.add_argument(
-        "--entries", nargs="+", help="Specific entries to export (default: all)"
-    )
-    export_parser.add_argument(
-        "--no-secrets", action="store_true", help="Export field names only, no values"
-    )
-    export_parser.add_argument(
-        "--encrypt", action="store_true", help="Encrypt the export bundle"
-    )
-    export_parser.completer = _entry_completer
-
-    # import
-    import_parser = subparsers.add_parser("import", help="Import entries")
-    import_parser.add_argument("file", help="Input file path")
-    import_parser.add_argument(
-        "--mode",
-        choices=["auto", "passkey", "csv", "chrome"],
-        default="auto",
-        help="Import format (default: auto-detect)",
-    )
-    import_parser.add_argument(
-        "--decrypt", action="store_true", help="Decrypt an encrypted bundle before importing"
-    )
-    import_parser.add_argument(
-        "--dry-run", action="store_true", help="Show what would be imported without importing"
-    )
-    import_parser.add_argument(
-        "--filter", help="Only import entries matching this domain/name prefix"
-    )
-    import_parser.add_argument(
-        "--insecure", action="store_true", help="Allow importing plaintext CSV files"
-    )
-
-    # share
-    share_parser = subparsers.add_parser("share", help="Share an entry via encrypted bundle")
-    share_parser.add_argument("entry", help="Entry name")
-    share_parser.add_argument("--output", "-o", help="Output file path")
-    share_parser.add_argument("--shared-by", help="Identifier for the sharer")
-    share_parser.completer = _entry_completer
-
-    # receive
-    receive_parser = subparsers.add_parser("receive", help="Receive a shared bundle")
-    receive_parser.add_argument("file", help="Bundle file path")
-
-    # unwrap
-    unwrap_parser = subparsers.add_parser("unwrap", help="Restore wrapped MCP config to inline commands")
-    unwrap_parser.add_argument("--tool", help="Tool name (e.g., claude, vscode)")
-    unwrap_parser.add_argument("--server", help="Server name to unwrap")
-    unwrap_parser.add_argument("--config", help="Config file path")
-    unwrap_parser.add_argument(
-        "--restore-secrets",
-        action="store_true",
-        help="Also write secret values back into the config file",
-    )
-    unwrap_parser.add_argument(
-        "--dry-run", action="store_true", help="Show what would be changed without changing it"
-    )
-
-    # config
-    config_parser = subparsers.add_parser("config", help="Manage configuration")
-    config_parser.add_argument("key", nargs="?", help="Setting name")
-    config_parser.add_argument("value", nargs="?", help="New value")
-
-    # init
-    init_parser = subparsers.add_parser("init", help="Migrate MCP config secrets to keychain")
-    init_parser.add_argument("--tool", help="Tool name (e.g., claude, vscode)")
-    init_parser.add_argument("--config", help="Config file path")
-    init_parser.add_argument(
-        "--dry-run", action="store_true", help="Show what would be migrated without migrating"
-    )
-    init_parser.add_argument(
-        "--force", action="store_true", help="Overwrite existing entries for the same servers"
-    )
-    init_parser.add_argument(
-        "--include-all",
-        action="store_true",
-        help="Include all env vars (not just detected secrets)",
-    )
-    init_parser.add_argument("--backup", help="Custom backup file path")
-
-    # status
-    status_parser = subparsers.add_parser("status", help="Show MCP server security status")
-    status_parser.add_argument("--tool", help="Tool name")
-    status_parser.add_argument(
-        "--json", action="store_true", dest="json_output", help="Output as JSON"
-    )
-
-    # servers
-    servers_parser = subparsers.add_parser("servers", help="List MCP servers across tools")
-    servers_parser.add_argument("--tool", help="Tool name")
-    servers_parser.add_argument(
-        "--json", action="store_true", dest="json_output", help="Output as JSON"
-    )
-
-    # add
-    add_parser = subparsers.add_parser("add", help="Add credentials for an MCP server")
-    add_parser.add_argument("server", help="Server name")
-    add_parser.add_argument("--tool", help="Tool name")
-    add_parser.add_argument(
-        "--fields", nargs="+", help="Field names to add (prompts for values)"
-    )
-
-    # doctor
-    doctor_parser = subparsers.add_parser("doctor", help="Run diagnostics")
-    doctor_parser.add_argument(
-        "--deep", action="store_true", help="Run extended diagnostics including network checks"
-    )
-
-    # completion
-    completion_parser = subparsers.add_parser("completion", help="Print shell tab completion scripts")
-    completion_parser.add_argument("--bash", action="store_true", help="Print bash completion script")
-    completion_parser.add_argument("--zsh", action="store_true", help="Print zsh completion script")
-    completion_parser.add_argument("--fish", action="store_true", help="Print fish completion script")
-
-    # mcp-serve
-    subparsers.add_parser("mcp-serve", help="Start the MCP server (usually called internally)")
-
-    # lease
-    lease_parser = subparsers.add_parser(
-        "lease", help="Manage time- and use-scoped leases for 'prompt' policy entries"
-    )
-    lease_sub = lease_parser.add_subparsers(dest="lease_command")
-    lease_grant = lease_sub.add_parser("grant", help="Grant a temporary lease for an entry")
-    lease_grant.add_argument("entry", help="Entry name")
-    lease_grant.add_argument(
-        "--ttl", default="15m", help="Lease duration (e.g., 15m, 30s, 1h; default: 15m)"
-    )
-    lease_grant.add_argument(
-        "--max-uses", type=int, help="Maximum number of injections before automatic expiry"
-    )
-    lease_sub.add_parser("list", help="List active leases")
-    lease_revoke = lease_sub.add_parser("revoke", help="Revoke one or all active leases")
-    lease_revoke.add_argument("entry", nargs="?", help="Entry name to revoke")
-    lease_revoke.add_argument("--all", action="store_true", dest="revoke_all", help="Revoke all leases")
-
-    # plugin
-    plugin_parser = subparsers.add_parser(
-        "plugin", help="Zero-config secret injection wrappers for AI and cloud CLIs"
+    plugin_parser = _add_primary(
+        "plugin", "Zero-config secret wrappers for AI and cloud CLIs"
     )
     plugin_sub = plugin_parser.add_subparsers(dest="plugin_command")
     plugin_sub.add_parser("list", help="List supported CLI plugins and active bindings")
@@ -441,10 +395,8 @@ Examples:
     )
     plugin_run.add_argument("args", nargs=argparse.REMAINDER, help="-- <cli arguments>")
 
-    # browser-fill
-    bf_parser = subparsers.add_parser(
-        "browser-fill",
-        help="Deterministically fill credentials into a local CDP browser tab",
+    bf_parser = _add_primary(
+        "browser-fill", "Fill credentials into a local CDP browser tab"
     )
     bf_parser.add_argument("entry", help="Passkey entry containing ORIGIN and credentials")
     bf_parser.add_argument(
@@ -452,6 +404,195 @@ Examples:
         required=True,
         help="Loopback Chrome DevTools WebSocket URL (e.g., ws://127.0.0.1:9222)",
     )
-    bf_parser.completer = _entry_completer
+    bf_parser.completer = _entry_completer  # type: ignore[attr-defined]
+
+    # ── MCP & AI Guardrails ───────────────────────────────────────────────
+    _configure_init_parser(
+        _add_primary("init", "Migrate plaintext MCP config secrets to keychain")
+    )
+    _configure_status_parser(
+        _add_primary("status", "Show MCP server security status across tools")
+    )
+    _configure_doctor_parser(
+        _add_primary("doctor", "Run keychain and MCP configuration diagnostics")
+    )
+
+    # Noun-verb group: passkey mcp <subcommand>
+    mcp_group = _add_primary(
+        "mcp", "MCP server management subcommands (run 'passkey mcp --help')"
+    )
+    mcp_sub = mcp_group.add_subparsers(dest="mcp_command", metavar="<subcommand>")
+    _configure_init_parser(
+        mcp_sub.add_parser("init", help="Migrate MCP config secrets to keychain")
+    )
+    _configure_status_parser(
+        mcp_sub.add_parser("status", help="Show MCP server security status")
+    )
+    _configure_servers_parser(
+        mcp_sub.add_parser("servers", help="List MCP servers across tools")
+    )
+    _configure_add_parser(
+        mcp_sub.add_parser("add", help="Add credentials for an MCP server")
+    )
+    _configure_unwrap_parser(
+        mcp_sub.add_parser("unwrap", help="Restore wrapped MCP config to inline commands")
+    )
+    _configure_doctor_parser(
+        mcp_sub.add_parser("doctor", help="Run MCP and keychain diagnostics")
+    )
+
+    hook_parser = _add_primary(
+        "hook", "Install pre-execution secret-protection hooks for AI agents"
+    )
+    hook_sub = hook_parser.add_subparsers(dest="hook_command")
+    hook_install = hook_sub.add_parser(
+        "install", help="Install non-destructive pre-tool guard hook for an AI tool"
+    )
+    hook_install.add_argument(
+        "--tool",
+        required=True,
+        choices=["claude", "cursor", "gemini"],
+        help="Target AI coding tool",
+    )
+    hook_install.add_argument(
+        "--project-dir", help="Project directory (default: current working directory)"
+    )
+    hook_check = hook_sub.add_parser("check", help="Evaluate hook payload from stdin")
+    hook_check.add_argument(
+        "--tool",
+        choices=["claude", "cursor", "gemini"],
+        help="Hook caller format",
+    )
+
+    audit_parser = _add_primary(
+        "audit", "View or verify tamper-evident secret access history"
+    )
+    audit_parser.add_argument(
+        "--limit", type=int, default=10, help="Number of entries to show (default: 10)"
+    )
+    audit_parser.add_argument("--clear", action="store_true", help="Clear the audit log")
+    audit_parser.add_argument(
+        "--summary", action="store_true", help="Show 30-day summary by entry"
+    )
+    audit_parser.add_argument(
+        "--verify", action="store_true", help="Verify HMAC-SHA256 hash chain integrity"
+    )
+
+    policy_parser = _add_primary(
+        "policy", "Show or set an entry's access policy (allow or prompt)"
+    )
+    policy_parser.add_argument("entry", help="Entry name")
+    policy_parser.add_argument(
+        "policy_value",
+        nargs="?",
+        choices=["allow", "prompt"],
+        help="Access policy: 'allow' (headless) or 'prompt' (requires Touch ID / lease)",
+    )
+    policy_parser.completer = _entry_completer  # type: ignore[attr-defined]
+
+    lease_parser = _add_primary(
+        "lease", "Grant or revoke temporary leases for prompt-gated entries"
+    )
+    lease_sub = lease_parser.add_subparsers(dest="lease_command")
+    lease_grant = lease_sub.add_parser("grant", help="Grant a temporary lease for an entry")
+    lease_grant.add_argument("entry", help="Entry name")
+    lease_grant.add_argument(
+        "--ttl", default="15m", help="Lease duration (e.g., 15m, 30s, 1h; default: 15m)"
+    )
+    lease_grant.add_argument(
+        "--max-uses", type=int, help="Maximum number of injections before automatic expiry"
+    )
+    lease_sub.add_parser("list", help="List active leases")
+    lease_revoke = lease_sub.add_parser("revoke", help="Revoke one or all active leases")
+    lease_revoke.add_argument("entry", nargs="?", help="Entry name to revoke")
+    lease_revoke.add_argument(
+        "--all", action="store_true", dest="revoke_all", help="Revoke all leases"
+    )
+
+    # ── Portability & Config ──────────────────────────────────────────────
+    export_parser = _add_primary("export", "Export entries to JSON or an encrypted bundle")
+    export_parser.add_argument("file", help="Output file path")
+    export_parser.add_argument(
+        "--entries", nargs="+", help="Specific entries to export (default: all)"
+    )
+    export_parser.add_argument(
+        "--no-secrets", action="store_true", help="Export field names only, no values"
+    )
+    export_parser.add_argument(
+        "--encrypt", action="store_true", help="Encrypt the export bundle"
+    )
+    export_parser.completer = _entry_completer  # type: ignore[attr-defined]
+
+    import_parser = _add_primary(
+        "import", "Import entries from JSON, CSV, Chrome, or bundle"
+    )
+    import_parser.add_argument("file", help="Input file path")
+    import_parser.add_argument(
+        "--mode",
+        choices=["auto", "passkey", "csv", "chrome"],
+        default="auto",
+        help="Import format (default: auto-detect)",
+    )
+    import_parser.add_argument(
+        "--decrypt", action="store_true", help="Decrypt an encrypted bundle before importing"
+    )
+    import_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be imported without importing"
+    )
+    import_parser.add_argument(
+        "--filter", help="Only import entries matching this domain/name prefix"
+    )
+    import_parser.add_argument(
+        "--insecure", action="store_true", help="Allow importing plaintext CSV files"
+    )
+
+    share_parser = _add_primary("share", "Share a single entry via an encrypted bundle")
+    share_parser.add_argument("entry", help="Entry name")
+    share_parser.add_argument("--output", "-o", help="Output file path")
+    share_parser.add_argument("--shared-by", help="Identifier for the sharer")
+    share_parser.completer = _entry_completer  # type: ignore[attr-defined]
+
+    receive_parser = _add_primary("receive", "Import a shared entry bundle")
+    receive_parser.add_argument("file", help="Bundle file path")
+
+    config_parser = _add_primary("config", "View or update passkey settings")
+    config_parser.add_argument("key", nargs="?", help="Setting name")
+    config_parser.add_argument("value", nargs="?", help="New value")
+
+    completion_parser = _add_primary(
+        "completion", "Print shell tab-completion scripts (bash, zsh, fish)"
+    )
+    completion_parser.add_argument(
+        "--bash", action="store_true", help="Print bash completion script"
+    )
+    completion_parser.add_argument(
+        "--zsh", action="store_true", help="Print zsh completion script"
+    )
+    completion_parser.add_argument(
+        "--fish", action="store_true", help="Print fish completion script"
+    )
+
+    # ── Backwards-Compatible Top-Level Aliases & Plumbing (hidden in top --help) ──
+    _configure_clone_parser(subparsers.add_parser("clone"))
+    _configure_set_field_parser(subparsers.add_parser("set-field"))
+    _configure_check_parser(subparsers.add_parser("check"))
+    _configure_generate_parser(subparsers.add_parser("generate"))
+    _configure_rotate_parser(subparsers.add_parser("rotate"))
+    _configure_template_parser(subparsers.add_parser("template"))
+    _configure_unwrap_parser(subparsers.add_parser("unwrap"))
+    _configure_servers_parser(subparsers.add_parser("servers"))
+    _configure_add_parser(subparsers.add_parser("add"))
+    subparsers.add_parser("mcp-serve", description="Start the passkey FastMCP server.")
+    help_parser = subparsers.add_parser(
+        "help", description="Show help for passkey or a specific command."
+    )
+    help_parser.add_argument(
+        "help_topic", nargs="*", metavar="command", help="Command or subcommand to inspect"
+    )
+    subparsers.add_parser("version", description="Show passkey version and exit.")
+
+    # Expose subcommand groups for empty-group help rendering
+    parser._mcp_group_parser = mcp_group  # type: ignore[attr-defined]
+    parser._entry_group_parser = entry_group  # type: ignore[attr-defined]
 
     return parser
