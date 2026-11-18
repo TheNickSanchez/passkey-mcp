@@ -30,6 +30,15 @@
 - Removed unused positional `value` argument from `passkey set-field` so secrets cannot enter process `argv`.
 - Added `mcp-write-tools` setting to lock down `passkey_wrap_server` (`PLAN.md` D3-4) and expanded MCP path validation to block macOS `/private/etc/` and `/private/var/` symlink targets.
 - `passkey doctor` warns on lingering `.backup` files next to MCP configs.
+
+### Fixed
+
+- Explicit `PASSKEY_DATA_DIR` overrides no longer auto-migrate files from legacy `~/.passkey`, and `passkey add` preserves existing entry `config`, `created`, `source`, `last_rotated`, and `policy` metadata on update.
+
+## 0.4.3 (2026-09-14)
+
+### Security
+
 - A locked or empty keychain no longer deletes the matching name from
   `entries.json`.
 - An existing data directory with group/other bits set is tightened to

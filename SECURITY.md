@@ -36,8 +36,10 @@ corporate approval.
 - Multi-tenant vault, SSO, recovery, org admin, or cloud sync
 - Physical access to an unlocked machine, root/admin compromise,
   keyloggers, or memory forensics
-- Remote RCE or a network attack surface (this product has no server and
-  makes no network calls)
+- Remote RCE or an external network attack surface (this product runs no
+  remote server and makes no external network calls; `passkey browser-fill`
+  connects strictly to loopback `127.0.0.1` / `localhost` Chrome DevTools
+  when explicitly invoked)
 - Corporate approval, SOC 2, or OWASP scorecards
 - Windows extra-auth (documented no-op; see the threat model)
 
@@ -50,40 +52,50 @@ Secrets never appear in argv. Interactive input uses `getpass`. Do not
 document `KEY=VALUE` on the command line.
 
 MCP tools (`passkey_list`, `passkey_fields`, `passkey_status`,
-`passkey_doctor`, `passkey_wrap_server`) return names, field names, and
-status only — **never secret values**.
+`passkey_doctor`, `passkey_wrap_server`, `passkey_validate_references`,
+`passkey_audit_recent`, and opt-in `passkey_cdp_autofill`) return names,
+field names, sanitized audit metadata, and status only — **never secret
+values**.
 
-`passkey run` injects env vars into a child process and is **never**
-extra-auth-gated, so headless MCP servers can start. See `cli/__init__.py`
-(`run` branch) and `runner.py`. Extra sudo/pkexec is opt-in
-(`passkey config require-auth on`) and applies only to interactive CLI
-commands. It never applies to `run`.
+`passkey run` injects env vars into a child process, scrubs resolved secret
+values (`len >= 4`, raw UTF-8 and JSON-escaped) from child `stdout` and
+`stderr` with `<concealed by passkey>` unless `--no-masking` is passed, and
+is **never** gated by global `require-auth` so headless MCP servers with
+default `allow` policy can start. See `cli/__init__.py` (`run` branch),
+`runner.py`, and `masking.py`. Global extra auth (`passkey config require-auth on`)
+applies to interactive CLI commands; per-entry `prompt` policy
+(`passkey policy <entry> prompt`) optionally gates specific entries behind
+out-of-band biometric/OS auth or an HMAC-signed lease (`passkey lease`).
 
 Windows extra-auth is a documented no-op (`auth.py`
 `_authenticate_windows` returns True). Protection is Credential Manager
 ACLs alone. Linux extra-auth is `pkexec` with a getpass+sudo fallback.
-macOS extra-auth is `sudo -v` (Touch ID if pam_tid is configured).
+macOS auth uses `LocalAuthentication.framework` (`LAContext` Touch ID /
+Apple Watch / passcode) with a `sudo -v` fallback.
 
-Primary protection is the OS keychain ACL via `keyring`. macOS Keychain
-ACLs (app prompt / login keychain) are the strong case. Linux Secret
-Service and Windows Credential Manager are **best-effort** by comparison;
-Linux also needs a running, unlocked keyring daemon.
+Primary protection is the OS keychain ACL via `keyring` (note: for editable
+source/venv installs on macOS, Keychain ACLs bind to the underlying `python3`
+binary). macOS Keychain ACLs (app prompt / login keychain) are the strong
+case. Linux Secret Service and Windows Credential Manager are **best-effort**
+by comparison; Linux also needs a running, unlocked keyring daemon.
 
-The entry index `entries.json` (data dir) is names only, written atomically
-at `0o600`. Secret payloads are keychain items, not that file.
+The entry index `entries.json`, HMAC-chained `audit.log`, and HMAC-signed
+`leases.json` (data dir) store metadata only, written at `0o600`. Secret
+payloads and HMAC signing keys (`__audit_hmac_key__`, `__lease_hmac_key__`)
+live in the OS keychain, not on disk.
 
 `passkey_wrap_server` rewrites local MCP configs (`.json` / `.jsonc`, user
-paths; it skips a short list of system prefixes). That is in scope as a
-**local config rewrite**, not remote RCE. An optional later control is
-D3-4 (disable write tools) — not this release.
+paths; it skips system prefixes including `/etc/`, `/private/etc/`, and
+`/private/var/`). That is in scope as a **local config rewrite**, not remote
+RCE, and can be disabled via `passkey config mcp-write-tools off` (D3-4).
 
-`passkey run` prints a stderr warning: env vars can be visible to other
-processes on the same machine. That is an accepted, documented risk, not
-a hidden one.
+`passkey run` prints a stderr warning unless `--quiet` is set: env vars can
+be visible to other same-UID processes on the same machine. That is an
+accepted, documented risk, not a hidden one.
 
-There is no network and no telemetry. Supply chain **is** the install
-path. First installable release is PyPI **0.4.0** via Trusted Publishing
-(`pipx install passkey-mcp==0.4.0`). Stay Alpha.
+There is no external network access and no telemetry. Supply chain **is**
+the install path. First installable release is PyPI **0.4.0** via Trusted
+Publishing (`pipx install passkey-mcp==0.4.0`). Stay Alpha.
 
 ## What this file must not say
 

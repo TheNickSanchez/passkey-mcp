@@ -83,6 +83,15 @@ you have entries you want injected.
 uv run passkey
 ```
 
+**Upgrading an existing install (preserves all stored keys):**
+
+Secrets live in your **OS keychain** and metadata lives in `<data_dir>` — never inside the Python virtualenv. Upgrading or reinstalling `passkey-mcp` via `pipx` or `uv tool` leaves every stored entry, policy, and audit log intact:
+
+```bash
+# Upgrade your global pipx install from a local checkout
+pipx install --force .
+```
+
 ### Requirements
 
 - Python 3.10+
@@ -380,16 +389,25 @@ passkey rotate github
 passkey doctor --deep
 ```
 
-## Authentication
+## Authentication & Scoped Leases
 
 The primary protection for your secrets is the **OS keychain's own access
 control** — macOS Keychain, Windows Credential Manager, and Linux Secret
 Service all gate access per application and may show their own unlock
-prompts. Passkey relies on that by default, so wrapped MCP servers can
-start headless (no terminal, no password prompt).
+prompts. Passkey relies on that by default, so wrapped MCP servers with
+default `allow` policy start headless (no terminal, no password prompt).
 
-If you want an **additional** OS-auth prompt for interactive terminal
-commands (`get`, `new`, `edit`, `export`, ...), opt in:
+Passkey provides two optional authentication layers on top of the OS keychain:
+
+1. **Per-entry `prompt` policy + scoped leases (`passkey policy` / `passkey lease`):**
+   Mark high-sensitivity entries (e.g. production cloud or admin credentials)
+   with `passkey policy <entry> prompt`. Reading, injecting, mounting, or
+   browser-filling that entry triggers an out-of-band OS biometric/passcode
+   dialog (native `LocalAuthentication.framework` Touch ID / Apple Watch /
+   passcode on macOS) unless an active HMAC-signed lease exists (`passkey lease grant <entry> --ttl 15m --max-uses 5`). Default `allow` entries remain headless.
+2. **Global interactive CLI gate (`passkey config require-auth on`):**
+   Prompts before interactive terminal commands (`get`, `new`, `edit`,
+   `export`, ...):
 
 ```bash
 passkey config require-auth on
@@ -398,15 +416,15 @@ passkey config require-auth on
 The tradeoff, explicitly:
 
 - **Off (default)**: Anyone with an unlocked session as your user can read
-  secrets via `passkey` — same as any other tool reading your keychain
-  (e.g. `security find-generic-password`). MCP servers work everywhere,
-  including stock macOS with no tty.
-- **On**: Interactive commands first run `sudo -v` (macOS, Touch ID if
-  `pam_tid` is configured) or `pkexec` (Linux). This breaks any
-  non-interactive use of those commands — `passkey run` is **never**
-  gated either way, because MCP servers invoke it headless.
-- **Windows**: the setting is a no-op — UAC cannot authenticate the
-  current process, so protection comes from Credential Manager ACLs alone.
+  `allow`-policy entries via `passkey` — same as any other tool reading your
+  keychain (e.g. `security find-generic-password`). Headless MCP servers work
+  everywhere out of the box.
+- **On**: Interactive commands first authenticate via macOS
+  `LocalAuthentication` (`LAContext` Touch ID / passcode, with `sudo -v`
+  fallback) or Linux `pkexec`. `passkey run` is **never** gated by global
+  `require-auth` (only per-entry `policy = prompt` gates `run`).
+- **Windows**: extra OS auth is a documented no-op — UAC cannot authenticate
+  the current process, so protection comes from Credential Manager ACLs alone.
 
 ## Unwrapping (leaving passkey)
 
@@ -421,8 +439,9 @@ passkey unwrap --restore-secrets    # also write secret values back into the con
 passkey unwrap --dry-run            # preview only
 ```
 
-A `.backup` of each config is written before changes (init does this too),
-so you can also restore by hand.
+Timestamped `0o600` backups of each config are written into `<data_dir>/backups/`
+before `init` and `unwrap` (never left in project workspaces), so you can also
+restore by hand.
 
 ## MCP Config Example
 
@@ -482,20 +501,23 @@ AI assistants can **discover** entry names but never see secret values — secre
 | Linux    | `~/.config/passkey/` (respects `$XDG_CONFIG_HOME`) |
 | Windows  | `%APPDATA%\passkey\` |
 
-Override with `PASSKEY_DATA_DIR`. Secrets themselves are in the **system
-keychain**, not in that directory. On disk you get metadata only: lock file,
-audit log, and `entries.json` (names — not values).
+Override with `PASSKEY_DATA_DIR`. Secrets and internal HMAC keys live in the
+**system keychain**, never in that directory. On disk (`0o700` directory,
+`0o600` files) you get metadata only: `entries.json` (entry names),
+HMAC-chained `audit.log`, `settings.json`, `leases.json` (signed TTL/use
+metadata), `plugins.json` / `plugins.sh`, lock file, and `backups/`.
 
 ## Security
 
 - **Encrypted at rest**: System keychain handles encryption (AES-256-GCM on macOS, DPAPI on Windows)
-- **No secrets logged**: Only entry names and operation types appear in the audit log
-- **Hidden input**: `getpass` used for all secret entry
+- **Real-time stream masking**: `passkey run` and `passkey plugin run` scrub injected secret values (raw UTF-8 and JSON-escaped) across `stdout` and `stderr` with `<concealed by passkey>`
+- **Tamper-evident audit & leases**: `audit.log` and `leases.json` are authenticated with HMAC-SHA256 keys stored in the OS keychain (`passkey audit --verify`)
+- **Zero-disk injection options**: `passkey://entry/field` reference URIs, `passkey mount` ephemeral `0o600` POSIX FIFOs, and `passkey hook install` pre-execution AI agent guardrails
+- **Hidden input & TTY guards**: `getpass` for all secret input; plaintext `passkey export -` requires an interactive TTY
 - **Clipboard auto-clear**: Copied secrets cleared after 30 seconds
-- **Secure export**: Files created with `chmod 600` (owner-only)
-- **Encrypted bundles**: AES-256-GCM + scrypt (N=2^20) for portable transfer
-- **LLM-safe**: AI assistants can list entries but never read values
-- **No network**: no telemetry, no cloud sync; supply chain is the install path
+- **Secure export & bundles**: Files created with `O_EXCL` and `0o600`; AES-256-GCM + scrypt (N=2^20) for portable transfer
+- **LLM-safe MCP boundary**: AI assistants discover entry/field names only — never values. `passkey_wrap_server` can be locked off via `passkey config mcp-write-tools off`
+- **No external network**: no telemetry, no cloud sync (`passkey browser-fill` connects strictly to local `127.0.0.1` / `localhost` Chrome DevTools WebSocket when explicitly invoked); supply chain is the install path
 
 See [SECURITY.md](SECURITY.md) for the disclosure policy and threat model
 (private vulnerability reporting; aim to acknowledge within 7 days).
@@ -505,13 +527,8 @@ See [SECURITY.md](SECURITY.md) for the disclosure policy and threat model
 ### "Failed to access Keychain" (macOS)
 Grant Terminal / Python keychain access in **System Settings → Privacy & Security**.
 
-### Touch ID not working
-Ensure `pam_tid.so` is configured in `/etc/pam.d/sudo`:
-```bash
-sudo sed -i '' '2i\
-auth       sufficient     pam_tid.so
-' /etc/pam.d/sudo
-```
+### Touch ID prompt fallback (macOS)
+Passkey uses macOS `LocalAuthentication.framework` (`LAContext`) natively for Touch ID / Apple Watch / passcode prompts without modifying PAM. If `LAContext` is unavailable in a restricted session, Passkey falls back to `sudo -v` (where Touch ID can optionally be enabled via `pam_tid.so` in `/etc/pam.d/sudo`).
 
 ### Linux headless / no keyring daemon
 Set a backend explicitly:
