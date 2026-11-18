@@ -270,6 +270,66 @@ def passkey_wrap_server(
     }
 
 
+@mcp.tool()
+def passkey_validate_references(file_path: str) -> dict:
+    """Validate passkey://<entry>/<field> secret references in a template or env file.
+
+    Checks whether every referenced entry and field exists in the keychain
+    without exposing any secret values.
+
+    Args:
+        file_path: Path to a template or .env.passkey file containing passkey:// references
+
+    Returns:
+        Dictionary with {"valid": bool, "checked": int, "missing": [...]}
+    """
+    from .references import validate_references_in_file
+
+    _FORBIDDEN_PREFIXES = (
+        "/etc/", "/private/etc/", "/dev/", "/proc/", "/sys/", "/bin/", "/sbin/",
+        "/usr/bin/", "/usr/sbin/", "/usr/lib/", "/lib/", "/boot/",
+        "/var/root/", "/private/var/", "/System/",
+    )
+    expanded = Path(file_path).expanduser()
+    resolved = expanded.resolve()
+    resolved_str = str(resolved)
+    if not resolved_str.startswith("/private/var/folders/") and (
+        str(expanded).startswith(_FORBIDDEN_PREFIXES)
+        or resolved_str.startswith(_FORBIDDEN_PREFIXES)
+    ):
+        return {
+            "valid": False,
+            "checked": 0,
+            "missing": [{"reference": "", "reason": "Access to system path denied"}],
+        }
+
+    try:
+        return validate_references_in_file(resolved)
+    except PasskeyError as e:
+        return {
+            "valid": False,
+            "checked": 0,
+            "missing": [{"reference": "", "reason": str(e)}],
+        }
+
+
+@mcp.tool()
+def passkey_audit_recent(limit: int = 20) -> list[dict]:
+    """Return recent sanitized audit log records with caller attribution.
+
+    Secret values and HMAC key material are never included.
+
+    Args:
+        limit: Maximum number of recent records to return (default: 20, max: 100)
+
+    Returns:
+        List of sanitized audit log entries (most recent first)
+    """
+    from .audit import get_sanitized_recent_logs
+
+    return get_sanitized_recent_logs(limit=limit)
+
+
 def main():
     """Run the MCP server."""
     mcp.run()

@@ -20,10 +20,10 @@ SUBPARSER_GROUPS = [
         "export", "import",
     ]),
     ("Run", [
-        "run",
+        "run", "inject", "mount",
     ]),
     ("MCP Integration", [
-        "init", "unwrap", "status", "doctor", "servers", "add",
+        "init", "unwrap", "status", "doctor", "servers", "add", "hook",
     ]),
     ("Utilities", [
         "config", "completion", "mcp-serve",
@@ -165,7 +165,74 @@ Examples:
         action="store_true",
         help="Suppress passkey warning and status output on stderr",
     )
+    run_parser.add_argument(
+        "--env-file",
+        action="append",
+        default=[],
+        dest="env_files",
+        help="Load KEY=VALUE / passkey:// references from file (repeatable)",
+    )
     run_parser.add_argument("args", nargs=argparse.REMAINDER, help="entries... -- command")
+
+    # inject
+    inject_parser = subparsers.add_parser(
+        "inject", help="Resolve {{ passkey://entry/field }} placeholders in a template"
+    )
+    inject_parser.add_argument("-i", "--in-file", required=True, help="Input template file")
+    inject_parser.add_argument("-o", "--out-file", help="Output file path (0600 atomic write)")
+    inject_parser.add_argument(
+        "--stdout",
+        action="store_true",
+        help="Write rendered output to stdout (interactive TTY required)",
+    )
+    inject_parser.add_argument(
+        "-f", "--force", action="store_true", help="Overwrite output file if it already exists"
+    )
+
+    # mount
+    mount_parser = subparsers.add_parser(
+        "mount", help="Mount an ephemeral POSIX FIFO (.env) streaming secrets from keychain"
+    )
+    mount_parser.add_argument("entries", nargs="+", help="Entry names to expose via FIFO")
+    mount_parser.add_argument(
+        "--path", default=".env", help="FIFO file path to create (default: .env)"
+    )
+    mount_parser.add_argument(
+        "--once", action="store_true", help="Exit automatically after serving one reader"
+    )
+    mount_parser.add_argument(
+        "--max-reads", type=int, help="Exit after serving N readers (default: unlimited)"
+    )
+    mount_parser.add_argument(
+        "--force-git-exposed",
+        action="store_true",
+        help="Allow mounting even if target path is not gitignored",
+    )
+    mount_parser.add_argument(
+        "-q", "--quiet", action="store_true", help="Suppress status output on stderr"
+    )
+
+    # hook
+    hook_parser = subparsers.add_parser(
+        "hook", help="Install or run pre-execution AI agent secret-protection hooks"
+    )
+    hook_sub = hook_parser.add_subparsers(dest="hook_command")
+    hook_install = hook_sub.add_parser(
+        "install", help="Install non-destructive pre-tool guard hook for an AI tool"
+    )
+    hook_install.add_argument(
+        "--tool",
+        required=True,
+        choices=["claude", "cursor", "gemini"],
+        help="Target AI coding tool",
+    )
+    hook_install.add_argument("--project-dir", help="Project directory (default: current working directory)")
+    hook_check = hook_sub.add_parser("check", help="Evaluate hook payload from stdin")
+    hook_check.add_argument(
+        "--tool",
+        choices=["claude", "cursor", "gemini"],
+        help="Hook caller format",
+    )
 
     # audit
     audit_parser = subparsers.add_parser("audit", help="Show recent secret access history")
@@ -177,6 +244,9 @@ Examples:
     )
     audit_parser.add_argument(
         "--summary", action="store_true", help="Show 30-day summary by entry"
+    )
+    audit_parser.add_argument(
+        "--verify", action="store_true", help="Verify HMAC-SHA256 hash chain integrity"
     )
 
     # rotate

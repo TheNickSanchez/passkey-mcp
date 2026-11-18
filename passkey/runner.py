@@ -4,9 +4,14 @@ import os
 import selectors
 import subprocess
 import sys
+from collections.abc import Callable
+from pathlib import Path
 
+from .audit import log_operation
 from .keychain import PasskeyError, get_entry
 from .masking import SecretMasker
+from .models import Entry
+from .references import is_reference, parse_dotenv_file, resolve_reference
 
 _IDLE_FLUSH_SECONDS = 0.005
 _READ_CHUNK_BYTES = 4096
@@ -25,7 +30,9 @@ def _write_stream_bytes(stream, data: bytes) -> None:
         stream.flush()
 
 
-def _run_masked_subprocess(command: list[str], env: dict[str, str], secret_values: list[str]) -> int:
+def _run_masked_subprocess(
+    command: list[str], env: dict[str, str], secret_values: list[str]
+) -> int:
     """Execute command while scrubbing secret_values from child stdout and stderr."""
     stdout_masker = SecretMasker(secret_values)
     stderr_masker = SecretMasker(secret_values)
@@ -53,7 +60,6 @@ def _run_masked_subprocess(command: list[str], env: dict[str, str], secret_value
         while sel.get_map():
             events = sel.select(timeout=_IDLE_FLUSH_SECONDS)
             if not events:
-                # Short idle window: flush held-back partial prefix bytes so prompts/frames never stall.
                 for _, masker, target in stream_map.values():
                     flushed = masker.flush()
                     if flushed:
@@ -95,25 +101,11 @@ def run_with_secrets(
     *,
     no_masking: bool = False,
     quiet: bool = False,
+    env_files: list[str] | None = None,
+    extra_env: dict[str, str] | None = None,
+    authorize_fn: Callable[[Entry], None] | None = None,
 ) -> int:
-    """Run command with secrets and config from entries as environment variables.
-
-    Args:
-        entries: List of entry names to load
-        command: Command and arguments to execute
-        no_masking: Disable real-time secret masking on child stdout/stderr
-        quiet: Suppress passkey status/warning messages on stderr
-
-    Returns:
-        The command's exit code (the CLI layer owns sys.exit).
-
-    Raises:
-        PasskeyError: If entries cannot be loaded or the command fails to start.
-
-    Note:
-        If multiple entries contain the same field name,
-        later entries override earlier ones.
-    """
+    """Run command with secrets, --env-file mappings, and passkey:// references injected."""
     if not quiet:
         warning = (
             "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! SECURITY WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
@@ -125,13 +117,20 @@ def run_with_secrets(
         print(warning, file=sys.stderr)
 
     env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+
     loaded_count = 0
     secret_values: list[str] = []
+    entry_cache: dict[str, Entry | None] = {}
 
     try:
         for name in entries:
             entry = get_entry(name)
+            entry_cache[name] = entry
             if entry:
+                if authorize_fn is not None:
+                    authorize_fn(entry)
                 all_vars = entry.get_all_env_vars()
                 env.update(all_vars)
                 secret_values.extend(entry.fields.values())
@@ -145,14 +144,44 @@ def run_with_secrets(
             else:
                 if not quiet:
                     print(f"Warning: Entry '{name}' not found, skipping", file=sys.stderr)
+
+        for ef in env_files or []:
+            parsed_env = parse_dotenv_file(Path(ef))
+            env.update(parsed_env)
+
+        # Resolve any passkey://<entry>/<field> references in env (from inherited env, MCP config, or --env-file)
+        resolved_references = 0
+        for key, val in list(env.items()):
+            if is_reference(val):
+                resolved_val, is_sec = resolve_reference(
+                    val,
+                    env=env,
+                    entry_cache=entry_cache,
+                    authorize_fn=authorize_fn,
+                    log_read=True,
+                )
+                env[key] = resolved_val
+                if is_sec:
+                    secret_values.append(resolved_val)
+                resolved_references += 1
     except PasskeyError as e:
         raise PasskeyError(f"Failed to load secrets: {e}") from e
 
-    if loaded_count == 0:
+    if loaded_count == 0 and resolved_references == 0 and not env_files:
         raise PasskeyError("No entries loaded, aborting command.")
 
     if not command:
         raise PasskeyError("No command specified to run.")
+
+    log_operation(
+        "run",
+        entry_name=entries[0] if len(entries) == 1 else None,
+        details={
+            "entries": entries,
+            "resolved_references": resolved_references,
+        },
+        argv0=command[0],
+    )
 
     try:
         if no_masking:

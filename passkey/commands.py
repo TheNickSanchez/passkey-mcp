@@ -1,13 +1,15 @@
 """CLI command handlers for passkey."""
 
+import contextlib
 import getpass
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from .audit import clear_logs, get_recent_logs, log_operation
+from .audit import clear_logs, get_recent_logs, log_operation, verify_audit_log
 from .clipboard import copy_with_autoclear
 from .keychain import (
     PasskeyError,
@@ -638,8 +640,75 @@ def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: boo
     log_operation("export", details={"count": len(all_entries), "no_secrets": no_secrets})
 
 
-def cmd_audit(limit: int = 20, clear: bool = False) -> None:
-    """View or clear audit log."""
+def cmd_inject(
+    in_file: str,
+    out_file: str | None = None,
+    *,
+    to_stdout: bool = False,
+    force: bool = False,
+) -> None:
+    """Resolve {{ passkey://entry/field }} placeholders from in_file into out_file (0o600)."""
+    from .references import render_template
+
+    src = Path(in_file).expanduser()
+    if not src.exists() or not src.is_file():
+        raise PasskeyError(f"Template file not found: '{src}'")
+
+    template_text = src.read_text(encoding="utf-8")
+    rendered = render_template(template_text)
+
+    if out_file is None or out_file == "-":
+        if not to_stdout:
+            raise PasskeyError(
+                "Refusing to write resolved secrets to stdout without --stdout. "
+                "Specify -o <outfile> or pass --stdout in an interactive terminal."
+            )
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            raise PasskeyError(
+                "Writing resolved secrets with --stdout requires an interactive terminal (TTY)."
+            )
+        sys.stdout.write(rendered)
+        if not rendered.endswith("\n"):
+            sys.stdout.write("\n")
+        log_operation("inject", details={"mode": "stdout"})
+        return
+
+    dest = Path(out_file).expanduser()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if dest.exists() and not force:
+        raise PasskeyError(
+            f"Output file '{dest}' already exists. Pass --force to overwrite atomically."
+        )
+
+    fd, tmp_path = tempfile.mkstemp(
+        dir=dest.parent,
+        prefix=".passkey-inject-",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(rendered)
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, dest)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
+
+    print(f"Injected secrets into {dest} (permissions 0600)")
+    log_operation("inject", details={"mode": "file"})
+
+
+def cmd_audit(limit: int = 20, clear: bool = False, verify: bool = False) -> None:
+    """View, verify, or clear audit log."""
+    if verify:
+        result = verify_audit_log()
+        if not result["valid"]:
+            raise PasskeyError(f"Audit log verification FAILED: {result['error']}")
+        print(f"Audit log verified OK ({result['checked']} record(s) intact)")
+        return
+
     if clear:
         confirm = input("Clear audit log? [y/N]: ").strip().lower()
         if confirm == "y":
@@ -661,10 +730,14 @@ def cmd_audit(limit: int = 20, clear: bool = False) -> None:
         op = log.get("operation", "?")
         entry = log.get("entry", "")
         success = "OK" if log.get("success", True) else "FAIL"
+        actor = log.get("actor")
+        actor_str = ""
+        if isinstance(actor, dict):
+            actor_str = f" [{actor.get('type', '?')}:{actor.get('client', '?')}]"
         details_str = ", ".join(
             f"{k}={v}" for k, v in log.get("details", {}).items() if k != "error"
         )
-        line = f"[{ts}] {op.upper():8s} {success:4s} {entry}"
+        line = f"[{ts}] {op.upper():8s} {success:4s} {entry}{actor_str}"
         if details_str:
             line += f" ({details_str})"
         print(line)

@@ -47,25 +47,50 @@ def handle_run_command(parser, args):
 
     no_masking = bool(getattr(args, "no_masking", False))
     quiet = bool(getattr(args, "quiet", False))
+    env_files: list[str] = list(getattr(args, "env_files", None) or [])
     entries: list[str] = []
-    for token in pre_sep:
+    idx = 0
+    while idx < len(pre_sep):
+        token = pre_sep[idx]
         if token == "--no-masking":
             no_masking = True
         elif token in ("-q", "--quiet"):
             quiet = True
+        elif token == "--env-file":
+            if idx + 1 >= len(pre_sep):
+                raise PasskeyError("--env-file requires a path argument")
+            env_files.append(pre_sep[idx + 1])
+            idx += 2
+            continue
+        elif token.startswith("--env-file="):
+            env_files.append(token.split("=", 1)[1])
         else:
             entries.append(token)
+        idx += 1
 
-    if not entries:
-        if is_interactive():
-            entries = select_multiple_entries("Select entries to load secrets from")
-        else:
-            raise PasskeyError("No entries specified for 'run' in non-interactive mode.")
+    if not entries and not env_files:
+        # Also allow inherited passkey:// references without positional entries
+        import os as _os
+
+        from ..references import is_reference
+
+        has_inherited_refs = any(is_reference(v) for v in _os.environ.values())
+        if not has_inherited_refs:
+            if is_interactive():
+                entries = select_multiple_entries("Select entries to load secrets from")
+            else:
+                raise PasskeyError("No entries specified for 'run' in non-interactive mode.")
 
     if not cmd:
         raise PasskeyError("No command specified after --")
 
-    rc = runner.run_with_secrets(entries, cmd, no_masking=no_masking, quiet=quiet)
+    rc = runner.run_with_secrets(
+        entries,
+        cmd,
+        no_masking=no_masking,
+        quiet=quiet,
+        env_files=env_files,
+    )
     sys.exit(rc)
 
 

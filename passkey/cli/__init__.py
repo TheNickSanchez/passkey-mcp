@@ -34,6 +34,9 @@ _KNOWN_COMMANDS = frozenset(
         "clone",
         "set-field",
         "run",
+        "inject",
+        "mount",
+        "hook",
         "export",
         "import",
         "check",
@@ -143,6 +146,39 @@ def main() -> None:
             # Never auth-gated: headless path for MCP servers.
             # Protection comes from the OS keychain's own ACL prompts.
             handle_run_command(parser, args)
+        elif args.command == "inject":
+            _require_auth("inject secrets into file")
+            commands.cmd_inject(
+                args.in_file,
+                args.out_file,
+                to_stdout=args.stdout,
+                force=args.force,
+            )
+        elif args.command == "mount":
+            _require_auth("mount ephemeral secret FIFO")
+            from ..mount import mount_env_fifo
+
+            max_reads = 1 if args.once else args.max_reads
+            mount_env_fifo(
+                args.entries,
+                path=args.path,
+                max_reads=max_reads,
+                force_git_exposed=args.force_git_exposed,
+                quiet=args.quiet,
+            )
+        elif args.command == "hook":
+            from pathlib import Path as _Path
+
+            from ..hooks import install_hook, run_hook_check
+
+            if args.hook_command == "install":
+                proj = _Path(args.project_dir) if args.project_dir else None
+                target = install_hook(args.tool, project_dir=proj)
+                print(f"Installed passkey guard hook for {args.tool} at {target}")
+            elif args.hook_command == "check":
+                sys.exit(run_hook_check(tool=args.tool))
+            else:
+                raise PasskeyError("Usage: passkey hook [install|check]")
         elif args.command == "export":
             _require_auth("export secrets")
             if args.encrypt:
@@ -174,7 +210,9 @@ def main() -> None:
         elif args.command == "check":
             sys.exit(commands.cmd_check(args.entry, args.fields, quiet=args.quiet))
         elif args.command == "audit":
-            if args.clear:
+            if getattr(args, "verify", False):
+                commands.cmd_audit(verify=True)
+            elif args.clear:
                 commands.cmd_audit(clear=True)
             elif args.summary:
                 from ..health import cmd_audit_summary

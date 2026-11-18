@@ -208,3 +208,24 @@ def _deep_checks(checks: list[dict], issues: list[str], recommendations: list[st
             "status": "pass",
             "message": "No insecure bundle files detected",
         })
+
+    # Audit log HMAC chain integrity
+    from .audit import verify_audit_log
+
+    audit_check = verify_audit_log()
+    if audit_check["valid"]:
+        checks.append({
+            "name": "audit_integrity",
+            "status": "pass",
+            "message": f"Audit log HMAC chain valid ({audit_check['checked']} records verified)",
+        })
+    else:
+        checks.append({
+            "name": "audit_integrity",
+            "status": "fail",
+            "message": f"Audit log integrity check failed: {audit_check['error']}",
+        })
+        issues.append(f"Audit log tampering or corruption detected: {audit_check['error']}")
+        recommendations.append(
+            "Inspect audit log with 'passkey audit --verify' or reset with 'passkey audit --clear'"
+        )
