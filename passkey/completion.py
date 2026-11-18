@@ -33,7 +33,7 @@ _passkey_completions() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    commands="new list get edit delete info clone set-field policy run inject mount hook export import check audit mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill"
+    commands="new list get edit delete info entry clone set-field policy run inject mount hook export import check audit mcp mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill"
 
     # First argument: complete subcommands or entry names
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -99,7 +99,7 @@ _ZSH_SCRIPT = '''\
 
 _passkey() {
     local commands entries
-    commands=(new list get edit delete info clone set-field policy run inject mount hook export import check audit mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill)
+    commands=(new list get edit delete info entry clone set-field policy run inject mount hook export import check audit mcp mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill)
 
     if (( CURRENT == 2 )); then
         entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
@@ -154,6 +154,8 @@ complete -c passkey -n '__fish_use_subcommand' -a get -d 'Browse and copy fields
 complete -c passkey -n '__fish_use_subcommand' -a edit -d 'Edit an entry'
 complete -c passkey -n '__fish_use_subcommand' -a delete -d 'Delete an entry'
 complete -c passkey -n '__fish_use_subcommand' -a info -d 'Show entry details'
+complete -c passkey -n '__fish_use_subcommand' -a entry -d 'Advanced entry operations'
+complete -c passkey -n '__fish_use_subcommand' -a mcp -d 'Manage MCP server integrations'
 complete -c passkey -n '__fish_use_subcommand' -a clone -d 'Clone an entry'
 complete -c passkey -n '__fish_use_subcommand' -a set-field -d 'Upsert a field'
 complete -c passkey -n '__fish_use_subcommand' -a policy -d 'Show or set entry access policy'

@@ -2,7 +2,7 @@
 
 import sys
 
-from .. import commands, runner
+from .. import commands, mcp_commands, runner
 from ..keychain import PasskeyError
 
 
@@ -69,7 +69,6 @@ def handle_run_command(parser, args):
         idx += 1
 
     if not entries and not env_files:
-        # Also allow inherited passkey:// references without positional entries
         import os as _os
 
         from ..references import is_reference
@@ -108,7 +107,9 @@ def handle_template_command(args):
         name_w = max(len(t["name"]) for t in templates)
         for t in templates:
             field_count = len(t.get("fields", []))
-            print(f"  {t['name']:<{name_w}}  {field_count} field{'s' if field_count != 1 else ''}  {t.get('description', '')}")
+            print(
+                f"  {t['name']:<{name_w}}  {field_count} field{'s' if field_count != 1 else ''}  {t.get('description', '')}"
+            )
 
     elif args.template_command == "show":
         template = get_template(args.template_name)
@@ -143,25 +144,31 @@ def handle_template_command(args):
 
 def _save_entry_as_template() -> None:
     """Save an existing entry as a custom template."""
-    from ..interactive import is_interactive, select_entry
+    from ..interactive import PASSKEY_STYLE, is_interactive
     from ..templates import save_custom_template
 
-    entry = select_entry("Select entry to save as template")
+    entry = resolve_entry(None, "Select entry to save as template")
     if not entry:
         return
 
     if is_interactive():
         import questionary
-        name = questionary.text("Template name:", default=entry.name).ask()
+
+        name = questionary.text(
+            "Template name:", default=entry.name, style=PASSKEY_STYLE
+        ).ask()
     else:
         name = input(f"Template name [{entry.name}]: ").strip() or entry.name
 
     if not name:
         raise PasskeyError("Template name cannot be empty")
 
-    description = input("Description (optional): ").strip() if not is_interactive() else ""
     if is_interactive():
-        description = questionary.text("Description:", default="").ask() or ""
+        import questionary
+
+        description = questionary.text("Description:", default="", style=PASSKEY_STYLE).ask() or ""
+    else:
+        description = input("Description (optional): ").strip()
 
     template = {
         "name": name,
@@ -180,8 +187,22 @@ def _save_entry_as_template() -> None:
     print(f"Saved template '{name}' with {len(template['fields'])} field(s)")
 
 
-def handle_onboarding_or_help(parser):
-    """Handle first-time use or show help."""
+def _print_quickstart_examples() -> None:
+    """Print concise quickstart examples for new users."""
+    print()
+    print("  Quickstart Examples:")
+    print("    passkey new stripe                        Create an entry and paste secrets")
+    print("    passkey stripe                            Browse and copy fields to clipboard")
+    print("    passkey run stripe -- python app.py       Inject secrets as env vars at runtime")
+    print("    passkey init                              Migrate plaintext MCP server configs")
+    print("    passkey inject -i .env.tpl -o .env        Render {{ passkey://... }} templates")
+    print("    passkey --help                            View all commands and categories")
+    print()
+
+
+def handle_onboarding_or_help(parser) -> None:
+    """Context-aware bare ``passkey`` router across States A, B, and C."""
+    from ..interactive import PASSKEY_STYLE, is_interactive
     from ..keychain import list_entries
 
     try:
@@ -190,68 +211,110 @@ def handle_onboarding_or_help(parser):
         parser.print_help()
         return
 
-    if not entries:
-        _show_onboarding()
-    else:
-        parser.print_help()
+    # State C: Entries already exist -> fuzzy entry browser on TTY, help on non-TTY
+    if entries:
+        if not is_interactive():
+            parser.print_help()
+            return
+        _require_auth = _get_require_auth()
+        _require_auth("access secrets")
+        entry = resolve_entry(None, "Select entry to browse")
+        commands.cmd_get_interactive(entry)
+        return
 
-
-def _show_onboarding():
-    """Interactive onboarding flow for first-time users."""
-    from ..interactive import is_interactive
-
-    print()
-    print("  ┌─────────────────────────────────────────────┐")
-    print("  │           Welcome to passkey                 │")
-    print("  │  Secrets in your keychain. Not in config.    │")
-    print("  └─────────────────────────────────────────────┘")
-    print()
-    print("  Passkey stores API keys, tokens, and passwords")
-    print("  in your system keychain and injects them as")
-    print("  environment variables when you need them.")
-    print()
+    # 0 entries: check for exposed MCP configs on disk
+    exposed = mcp_commands.detect_exposed_mcp_servers()
 
     if not is_interactive():
-        print("  Run 'passkey new' to create your first entry.")
+        print()
+        print("  passkey — Secrets in your OS keychain, not in config files")
+        if exposed:
+            print(
+                f"  Detected {len(exposed)} MCP server(s) with plaintext secrets. "
+                "Run 'passkey init' to migrate them."
+            )
+        else:
+            print("  Run 'passkey new' to create your first secret, or 'passkey --help'.")
+        print()
         return
 
-    print("  Things you can do:")
-    print("    passkey new           Save your first secret")
-    print("    passkey list          List all saved entries")
-    print("    passkey run X -- cmd  Run a command with secrets")
-    print("    passkey completion    Set up tab completion")
-    print("    passkey --help        See all commands")
+    import questionary
+
+    _require_auth = _get_require_auth()
+
+    # State A: 0 entries + exposed MCP servers detected
+    if exposed:
+        print()
+        print("  passkey — Secrets in your OS keychain, not in config files")
+        print("  ──────────────────────────────────────────────────────────")
+        print(f"  Found {len(exposed)} MCP server(s) with plaintext credentials:")
+        for item in exposed:
+            keys = ", ".join(item["secret_keys"][:3])
+            if len(item["secret_keys"]) > 3:
+                keys += f" (+{len(item['secret_keys']) - 3} more)"
+            print(f"    • {item['display_name']} ({item['config_path']}): {item['server']} [{keys}]")
+        print()
+
+        action = questionary.select(
+            "Migrate these secrets into your OS keychain now? [Y/n]",
+            choices=[
+                questionary.Choice(
+                    "Migrate exposed MCP secrets now (passkey init)", "init"
+                ),
+                questionary.Choice("Create a new entry manually (passkey new)", "new"),
+                questionary.Choice("Skip for now", "skip"),
+            ],
+            style=PASSKEY_STYLE,
+            use_jk_keys=False,
+        ).ask()
+
+        if action == "init":
+            print()
+            _require_auth("migrate secrets to keychain")
+            tools = list(dict.fromkeys(item["tool"] for item in exposed))
+            paths = list(dict.fromkeys(item["config_path"] for item in exposed))
+            tool_arg = tools[0] if len(tools) == 1 else None
+            cfg_arg = str(paths[0]) if len(paths) == 1 else None
+            mcp_commands.cmd_init(tool=tool_arg, config_path=cfg_arg)
+        elif action == "new":
+            print()
+            _require_auth("create entries")
+            commands.cmd_new()
+        else:
+            print("\n  Run 'passkey init' or 'passkey new' whenever you're ready.\n")
+        return
+
+    # State B: 0 entries + no exposed MCP servers
+    print()
+    print("  passkey — Secrets in your OS keychain, not in config files")
+    print("  ──────────────────────────────────────────────────────────")
+    print("  Store API keys and tokens in your OS keychain and inject them")
+    print("  into CLIs and MCP servers on demand.")
     print()
 
-    try:
-        choice = input("  Create your first entry now? [Y/n] ").strip().lower()
-    except (KeyboardInterrupt, EOFError):
-        print("\n")
-        return
+    action = questionary.select(
+        "What would you like to do?",
+        choices=[
+            questionary.Choice("Create your first secret (passkey new)", "new"),
+            questionary.Choice("Show quickstart examples", "examples"),
+            questionary.Choice("Exit", "quit"),
+        ],
+        style=PASSKEY_STYLE,
+        use_jk_keys=False,
+    ).ask()
 
-    if choice in ("", "y", "yes"):
+    if action == "new":
         print()
-        try:
-            commands.cmd_new()
-        except (PasskeyError, KeyboardInterrupt, EOFError):
-            print("\n  No worries. Run 'passkey new' when you're ready.\n")
-            return
-
-        print()
-        print("  Nice! Your first entry is saved.")
-        print("  Try these next:")
-        print()
-        print("    passkey list              See your entries")
-        print("    passkey get <name>        Browse and copy a field")
-        print("    passkey run <name> -- cmd Run something with secrets")
-        print("    passkey completion        Set up tab completion")
-        print()
+        _require_auth("create entries")
+        commands.cmd_new()
+    elif action == "examples":
+        _print_quickstart_examples()
     else:
-        print()
-        print("  No worries. Run 'passkey new' when you're ready.\n")
+        print("\n  Run 'passkey new' when you're ready.\n")
 
 
 def _get_require_auth():
     """Lazily import _require_auth to avoid circular imports at module load."""
     from ..cli import _require_auth
+
     return _require_auth

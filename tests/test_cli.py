@@ -260,3 +260,25 @@ class TestParserSubcommands:
         args = parser.parse_args(["delete", "myentry"])
         assert args.command == "delete"
         assert args.entry == "myentry"
+
+    def test_new_parses_optional_name_and_template(self):
+        """new subcommand accepts optional positional name and --template."""
+        parser = create_parser()
+        args = parser.parse_args(["new", "stripe", "--template", "stripe"])
+        assert args.command == "new"
+        assert args.name == "stripe"
+        assert args.template == "stripe"
+
+    def test_mcp_and_entry_group_subcommands_parse(self):
+        """passkey mcp and passkey entry noun-verb groups parse cleanly."""
+        parser = create_parser()
+        mcp_args = parser.parse_args(["mcp", "status", "--json"])
+        assert mcp_args.command == "mcp"
+        assert mcp_args.mcp_command == "status"
+        assert mcp_args.json_output is True
+
+        entry_args = parser.parse_args(["entry", "set-field", "stripe", "API_KEY"])
+        assert entry_args.command == "entry"
+        assert entry_args.entry_command == "set-field"
+        assert entry_args.entry == "stripe"
+        assert entry_args.field == "API_KEY"
