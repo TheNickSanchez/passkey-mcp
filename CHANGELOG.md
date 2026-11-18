@@ -10,6 +10,20 @@
 
 ### Added
 
+- **Real-time masked secret input (`prompt_secret`)**: `passkey new`, `edit`, `set-field`, `rotate`, and `add` now echo `•` bullets alongside a live character counter, with `Backspace`/`Delete`, `Ctrl+U` clear, and `Ctrl+R`/`Tab` temporary reveal (auto-remasked on `Enter` so terminal scrollback never retains secrets).
+- **Noun-verb subcommand groups (`passkey mcp`, `passkey entry`)**: organized MCP and advanced entry commands under scannable hierarchies while keeping all existing top-level commands as backwards-compatible aliases.
+- **Positional name, `--template`, and `KEY=VALUE` shorthand in `passkey new`**: run `passkey new stripe` (or `--template <name>`) to jump straight to field entry, paste `KEY=VALUE` at the field prompt in a single step, verify lengths via non-sensitive previews (`(36 chars, sk-…9a2)`), and press `Enter` on an empty field name to save and exit.
+
+### Changed
+
+- **Categorized `passkey --help` output**: replaced the 34-command flat dump and 22-line epilog with four `gh`-style groups (`Core Secret Management`, `Run & Inject`, `MCP & AI Guardrails`, `Portability & Config`) and 7 high-signal examples while hiding internal plumbing (`mcp-serve`) and secondary aliases.
+- **Context-aware bare `passkey` FTUE & `passkey get` picker**: bare `passkey` now detects exposed MCP server credentials for 1-step keychain migration (State A), offers quickstart onboarding on clean machines (State B), or opens the fuzzy entry browser when entries exist (State C), auto-copying 1-field entries immediately and using an arrow-key filterable field picker for multi-field entries.
+- **Clearer `passkey init` pre-flight preview**: displays per-server masked secret previews, inline non-secret env vars, the `0o600` `<data_dir>/backups/` location, and the exact `passkey unwrap` rollback command before modifying any config file.
+
+## 0.5.0 (2026-11-18)
+
+### Added
+
 - **Real-time `stdout`/`stderr` secret masking** (`passkey/masking.py`): `passkey run` and `passkey plugin run` scrub injected secret values (`len >= 4`, raw UTF-8 and JSON-escaped variants, across OS chunk boundaries) with `<concealed by passkey>`. Added `--no-masking` and `-q`/`--quiet` to `passkey run`.
 - **Structured secret reference URIs & template injection** (`passkey/references.py`): `passkey://<entry>/<field>` with `$VAR`/`${VAR}` interpolation strictly inside `<entry>`, `passkey run --env-file`, `passkey inject`, and `passkey_validate_references` MCP tool.
 - **Ephemeral POSIX FIFO `.env` mounts** (`passkey/mount.py`): `passkey mount` streams secrets through a `0o600` named pipe that refuses git-tracked non-ignored paths and unlinks on exit/`SIGINT`/`SIGTERM`.
