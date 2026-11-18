@@ -33,7 +33,7 @@ _passkey_completions() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    commands="new list get edit delete info clone set-field run export import check audit mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate"
+    commands="new list get edit delete info clone set-field policy run inject mount hook export import check audit mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill"
 
     # First argument: complete subcommands or entry names
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -53,7 +53,7 @@ _passkey_completions() {
 
     # Subcommand-specific completions
     case "$prev" in
-        get|edit|delete|info|set-field|check)
+        get|edit|delete|info|set-field|policy|check|browser-fill)
             entries=$(passkey list --names-only 2>/dev/null)
             COMPREPLY=( $(compgen -W "$entries" -- "$cur") )
             return 0
@@ -99,7 +99,7 @@ _ZSH_SCRIPT = '''\
 
 _passkey() {
     local commands entries
-    commands=(new list get edit delete info clone set-field run export import check audit mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate)
+    commands=(new list get edit delete info clone set-field policy run inject mount hook export import check audit mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill)
 
     if (( CURRENT == 2 )); then
         entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
@@ -107,7 +107,7 @@ _passkey() {
         _describe 'entry' entries
     else
         case ${words[2]} in
-            get|edit|delete|info|set-field|check)
+            get|edit|delete|info|set-field|policy|check|browser-fill)
                 entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
                 _describe 'entry' entries
                 ;;
@@ -156,7 +156,11 @@ complete -c passkey -n '__fish_use_subcommand' -a delete -d 'Delete an entry'
 complete -c passkey -n '__fish_use_subcommand' -a info -d 'Show entry details'
 complete -c passkey -n '__fish_use_subcommand' -a clone -d 'Clone an entry'
 complete -c passkey -n '__fish_use_subcommand' -a set-field -d 'Upsert a field'
+complete -c passkey -n '__fish_use_subcommand' -a policy -d 'Show or set entry access policy'
 complete -c passkey -n '__fish_use_subcommand' -a run -d 'Run command with secrets'
+complete -c passkey -n '__fish_use_subcommand' -a inject -d 'Render passkey:// template placeholders'
+complete -c passkey -n '__fish_use_subcommand' -a mount -d 'Mount ephemeral FIFO .env'
+complete -c passkey -n '__fish_use_subcommand' -a hook -d 'Install AI agent pre-execution hooks'
 complete -c passkey -n '__fish_use_subcommand' -a export -d 'Export entries'
 complete -c passkey -n '__fish_use_subcommand' -a import -d 'Import entries'
 complete -c passkey -n '__fish_use_subcommand' -a check -d 'Verify entry fields'
@@ -173,10 +177,13 @@ complete -c passkey -n '__fish_use_subcommand' -a template -d 'Manage credential
 complete -c passkey -n '__fish_use_subcommand' -a share -d 'Share an entry with someone'
 complete -c passkey -n '__fish_use_subcommand' -a receive -d 'Receive a shared entry'
 complete -c passkey -n '__fish_use_subcommand' -a rotate -d 'Rotate an entry value'
+complete -c passkey -n '__fish_use_subcommand' -a lease -d 'Manage scoped entry leases'
+complete -c passkey -n '__fish_use_subcommand' -a plugin -d 'Zero-config CLI secret wrappers'
+complete -c passkey -n '__fish_use_subcommand' -a browser-fill -d 'Deterministic CDP browser autofill'
 complete -c passkey -n '__fish_use_subcommand' -a completion -d 'Shell completion setup'
 
 # Entry completions for subcommands that take entry names
-complete -c passkey -n '__fish_seen_subcommand_from get edit delete info set-field check' -a '(__passkey_entries)' -d 'Entry'
+complete -c passkey -n '__fish_seen_subcommand_from get edit delete info set-field policy check browser-fill' -a '(__passkey_entries)' -d 'Entry'
 complete -c passkey -n '__fish_seen_subcommand_from clone' -a '(__passkey_entries)' -d 'Source entry'
 complete -c passkey -n '__fish_seen_subcommand_from run' -a '(__passkey_entries)' -d 'Entry'
 

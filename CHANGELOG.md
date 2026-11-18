@@ -8,8 +8,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Real-time `stdout`/`stderr` secret masking** (`passkey/masking.py`): `passkey run` and `passkey plugin run` scrub injected secret values (`len >= 4`, raw UTF-8 and JSON-escaped variants, across OS chunk boundaries) with `<concealed by passkey>`. Added `--no-masking` and `-q`/`--quiet` to `passkey run`.
+- **Structured secret reference URIs & template injection** (`passkey/references.py`): `passkey://<entry>/<field>` with `$VAR`/`${VAR}` interpolation strictly inside `<entry>`, `passkey run --env-file`, `passkey inject`, and `passkey_validate_references` MCP tool.
+- **Ephemeral POSIX FIFO `.env` mounts** (`passkey/mount.py`): `passkey mount` streams secrets through a `0o600` named pipe that refuses git-tracked non-ignored paths and unlinks on exit/`SIGINT`/`SIGTERM`.
+- **Pre-execution AI agent hooks** (`passkey/hooks.py`): `passkey hook install --tool claude|cursor|gemini` and `passkey hook check` block agent file/shell reads of `.env`, `*.backup`, `*.enc`, and plaintext `passkey export`.
+- **Tamper-evident HMAC-SHA256 audit chain & caller attribution** (`passkey/audit.py`): `prev_hmac`/`hmac` hash chain keyed by `__audit_hmac_key__` in the OS keychain, parent-PID caller attribution (`actor`), `passkey audit --verify`, `audit_integrity` in `passkey doctor --deep`, and `passkey_audit_recent` MCP tool.
+- **Native macOS Touch ID (`LAContext`), entry policies & scoped leases** (`passkey/auth.py`, `passkey/leases.py`): `LocalAuthentication.framework` biometric prompt via `ctypes` (`sudo -v` fallback), `passkey policy <entry> allow|prompt`, and HMAC-signed time/use-scoped `passkey lease grant|list|revoke`.
+- **Zero-config CLI plugin wrappers** (`passkey/plugins.py`, `passkey/templates.py`): `passkey plugin init|list|run` and `<data_dir>/plugins.sh` for `claude`, `codex`, `openai`, `gemini`, `cursor-agent`, `gh`, `aws`, `wrangler`, `vercel`, and `stripe`, plus built-in templates.
+- **Deterministic CDP browser credential broker** (`passkey/browser_broker.py`): `passkey browser-fill` and opt-in `passkey_cdp_autofill` MCP tool (`mcp-browser-broker`) verify exact `scheme + hostname + port` origin over loopback RFC-6455 WebSocket before injecting `USERNAME`/`EMAIL`/`PASSWORD`/`SESSION_COOKIE`.
+
+### Changed
+
+- `passkey init` wraps servers with `passkey run --quiet ...`, stores `0o600` timestamped backups in `<data_dir>/backups/` instead of adjacent `<config>.backup` files, and accurately reports `"secured"` status for array-command clients (OpenCode).
+- `extract_secrets` scans values for embedded URI credentials (`://user:pass@`) and known token prefixes (`ghp_`, `github_pat_`, `sk-`, `xoxb-`, `AKIA`, JWT `eyJ...`) even under generic variable names.
+
 ### Security
 
+- Plaintext `passkey export -` requires an interactive TTY (`sys.stdin.isatty()`) and fails closed when piped.
+- Removed unused positional `value` argument from `passkey set-field` so secrets cannot enter process `argv`.
+- Added `mcp-write-tools` setting to lock down `passkey_wrap_server` (`PLAN.md` D3-4) and expanded MCP path validation to block macOS `/private/etc/` and `/private/var/` symlink targets.
+- `passkey doctor` warns on lingering `.backup` files next to MCP configs.
 - A locked or empty keychain no longer deletes the matching name from
   `entries.json`.
 - An existing data directory with group/other bits set is tightened to

@@ -21,15 +21,18 @@ comparison (Linux also needs a running, unlocked keyring daemon).
 1. You store named entries (one or more fields per entry) in the OS keychain.
    Values never go in `mcp.json` or in argv. Interactive input uses `getpass`.
 2. `passkey init` (opt-in) rewrites existing MCP configs so the editor starts
-   `passkey run ENTRY -- <original command>` instead of a command with
+   `passkey run --quiet ENTRY -- <original command>` instead of a command with
    tokens in `env`. **Install does not scan Claude, Cursor, or other tools.**
    First `passkey` with no args is onboarding (`new`), not a wrap.
-3. At start, `passkey run` reads the keychain and injects env vars into **that
-   child process only**. MCP tools (`passkey_list`, `passkey_fields`,
-   `passkey_status`, `passkey_doctor`, `passkey_wrap_server`) return names,
-   field names, and status — **never secret values**.
-4. `passkey unwrap` restores the original commands. A `.backup` is written
-   before `init` and `unwrap`.
+3. At start, `passkey run` reads the keychain, injects env vars into **that
+   child process only**, and masks resolved secret values (`<concealed by passkey>`)
+   across child `stdout` and `stderr`. MCP tools (`passkey_list`, `passkey_fields`,
+   `passkey_status`, `passkey_doctor`, `passkey_wrap_server`,
+   `passkey_validate_references`, `passkey_audit_recent`, `passkey_cdp_autofill`)
+   return names, field names, and status — **never secret values**.
+4. `passkey unwrap` restores the original commands. Timestamped `0o600` backups
+   are stored in `<data_dir>/backups/` before `init` and `unwrap` (never left in
+   workspace directories).
 
 Diagram source: [`docs/architecture.mmd`](docs/architecture.mmd). Disclosure
 and threat model: [SECURITY.md](SECURITY.md).
@@ -42,12 +45,17 @@ and threat model: [SECURITY.md](SECURITY.md).
 - Interactive fuzzy-search entry picker (arrow keys + type-to-filter)
 - **Tab completion** for bash, zsh, and fish
 - **Generate** cryptographically secure random secrets (configurable length, guaranteed character diversity)
-- **Templates** for popular services (GitHub, AWS, Slack, OpenAI, Stripe, Vercel, PostgreSQL, MySQL)
+- **Templates** for popular services and AI CLIs (GitHub, AWS, Slack, OpenAI, Claude, Codex, Gemini, Cursor Agent, Cloudflare Wrangler, Stripe, Vercel, PostgreSQL, MySQL)
+- **Real-time `stdout`/`stderr` secret masking** (`<concealed by passkey>`) in `passkey run` and `passkey plugin run`
+- **Secret reference URIs & ephemeral `.env` FIFO mounts** (`passkey://entry/field`, `passkey inject`, `passkey mount`)
+- **Pre-execution AI agent hooks** (`passkey hook install`) for Claude Code, Cursor, and Gemini CLI
+- **Per-entry biometric policies & HMAC-signed leases** (`passkey policy`, `passkey lease`, native macOS Touch ID via `LAContext`)
+- **Zero-config CLI wrappers & deterministic CDP browser autofill** (`passkey plugin`, `passkey browser-fill`)
 - **Share & receive** entries via encrypted file + passphrase (no key exchange needed)
 - **Lifecycle tracking** — `last_rotated` timestamps, `passkey rotate`, `passkey doctor --deep`
 - Import from Chrome password exports, existing MCP configs, or passkey backups
 - Encrypted bundle export/import for safe machine-to-machine transfer
-- Full audit logging with `passkey audit --summary`
+- **Tamper-evident HMAC-SHA256 audit hash chain** with caller attribution (`passkey audit --verify`)
 - **OS keychain ACL** protection, with optional **Touch ID** / sudo prompt for interactive terminal commands (opt-in, off by default; never on `passkey run`)
 - Cross-platform: macOS (strong Keychain ACLs); Linux and Windows are best-effort vs that
 
@@ -173,7 +181,8 @@ $ passkey github
 | `passkey delete [entry]` | Delete an entry (exact match required) |
 | `passkey info [entry]` | Show entry metadata and field names |
 | `passkey clone SOURCE [DEST]` | Clone an entry under a new name |
-| `passkey set-field ENTRY FIELD [VALUE]` | Upsert a single field |
+| `passkey set-field ENTRY FIELD` | Upsert a single field interactively via `getpass` |
+| `passkey policy ENTRY [allow\|prompt]` | Show or set an entry's access policy |
 
 ### Retrieving Secrets
 
@@ -183,17 +192,54 @@ $ passkey github
 | `passkey get [entry] --all` | Copy all fields to clipboard |
 | `passkey <entry>` | Shortcut: same as `passkey get <entry>` |
 
-### Running Commands
+### Running Commands, Reference URIs & Ephemeral Mounts
 
 ```bash
-# Run with secrets from one entry
+# Run with secrets from one entry (stdout/stderr secrets masked automatically)
 passkey run github -- python app.py
+
+# Quiet mode (suppress informational status banner; used by wrapped MCP configs)
+passkey run --quiet github -- python -m github.server
+
+# Opt out of stream masking only when raw binary output requires it
+passkey run --no-masking github -- ./binary-tool
+
+# Resolve passkey://entry/field references from a secret-free dotenv file
+passkey run --env-file .env.passkey -- python app.py
 
 # Run with secrets from multiple entries (later entries override)
 passkey run aws github -- python deploy.py
 
-# Secrets injected as env vars
-passkey run myapi -- curl -H "Authorization: Bearer $API_TOKEN" https://api.example.com/v1/data
+# Render {{ passkey://entry/field }} placeholders to an 0o600 file
+passkey inject -i config.tmpl -o config.rendered.json
+
+# Mount an ephemeral POSIX FIFO (.env) backed by keychain (never touches disk)
+passkey mount github --path .env --once
+```
+
+### AI Agent Guardrails, Policies, Leases, Plugins & Browser Broker
+
+```bash
+# Install pre-execution hooks blocking AI reads of .env / *.backup / *.enc
+passkey hook install --tool claude   # also supports: cursor, gemini
+
+# Gate high-sensitivity entries behind native Touch ID (LAContext) + scoped leases
+passkey policy prod_aws prompt
+passkey lease grant prod_aws --ttl 15m --max-uses 5
+passkey lease list
+passkey lease revoke prod_aws
+
+# Zero-config CLI secret wrappers (session > .passkey.toml > global > auto)
+passkey plugin init gh
+passkey plugin list
+passkey plugin run gh -- repo list
+
+# Deterministically fill credentials into a local Chrome DevTools tab (exact origin verified)
+passkey browser-fill portal_login --cdp-url ws://127.0.0.1:9222
+
+# Lock down MCP write tools or opt in to MCP browser autofill
+passkey config mcp-write-tools off
+passkey config mcp-browser-broker on
 ```
 
 ### Tool Integration
@@ -271,7 +317,8 @@ passkey import claude_desktop_config.json
 ### Audit Log
 
 ```bash
-passkey audit              # View recent operations
+passkey audit              # View recent operations (includes actor attribution)
+passkey audit --verify     # Verify HMAC-SHA256 hash chain integrity
 passkey audit --limit 50   # Show more entries
 passkey audit --clear      # Clear the log
 passkey audit --summary    # Aggregate statistics
@@ -403,7 +450,7 @@ so you can also restore by hand.
   "mcpServers": {
     "github": {
       "command": "passkey",
-      "args": ["run", "github", "--", "python", "-m", "github.server"]
+      "args": ["run", "--quiet", "github", "--", "python", "-m", "github.server"]
     }
   }
 }
@@ -423,7 +470,7 @@ Passkey can run as an MCP server itself, letting AI assistants invoke passkey to
 }
 ```
 
-Available tools: `passkey_list`, `passkey_fields`, `passkey_status`, `passkey_doctor`, `passkey_wrap_server`.
+Available tools: `passkey_list`, `passkey_fields`, `passkey_status`, `passkey_doctor`, `passkey_wrap_server` (disable with `passkey config mcp-write-tools off`), `passkey_validate_references`, `passkey_audit_recent`, and `passkey_cdp_autofill` (opt-in via `passkey config mcp-browser-broker on`).
 
 AI assistants can **discover** entry names but never see secret values — secrets only flow out via `passkey run`.
 

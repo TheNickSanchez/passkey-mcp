@@ -11,8 +11,8 @@ from .models import Entry, is_valid_name
 REFERENCE_SCHEME = "passkey://"
 _ENV_INTERP_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 _FIELD_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$")
-_TEMPLATE_PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(passkey://[^\s\}]+)\s*\}\}")
-_BARE_REFERENCE_PATTERN = re.compile(r"passkey://[^\s\"'\}]+")
+_TEMPLATE_PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(passkey://(?:(?!\}\})\S)+)\s*\}\}")
+_BARE_REFERENCE_PATTERN = re.compile(r"passkey://(?:(?!\}\})[^\s\"'])+")
 
 
 def is_reference(value: object) -> bool:

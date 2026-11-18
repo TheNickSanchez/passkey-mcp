@@ -35,7 +35,20 @@ class TestPrintCompletion:
     def test_all_scripts_contain_new_commands(self):
         from passkey.completion import _BASH_SCRIPT, _FISH_SCRIPT, _ZSH_SCRIPT
         for script in [_BASH_SCRIPT, _FISH_SCRIPT, _ZSH_SCRIPT]:
-            for cmd in ["generate", "template", "share", "receive", "rotate"]:
+            for cmd in [
+                "generate",
+                "template",
+                "share",
+                "receive",
+                "rotate",
+                "policy",
+                "inject",
+                "mount",
+                "hook",
+                "lease",
+                "plugin",
+                "browser-fill",
+            ]:
                 assert cmd in script, f"'{cmd}' missing from script"
 
 

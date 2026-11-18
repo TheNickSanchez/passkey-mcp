@@ -613,6 +613,12 @@ def cmd_policy(entry: Entry, policy_value: str | None = None) -> None:
 
 def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: bool = False) -> None:
     """Export entries to JSON file."""
+    if file_path == "-" and not no_secrets and not sys.stdin.isatty():
+        raise PasskeyError(
+            "Plaintext export to stdout requires an interactive terminal (TTY). "
+            "Use a file path, --encrypt, or --no-secrets instead."
+        )
+
     all_entries = get_all_entries()
     if not all_entries:
         print("No entries to export")
