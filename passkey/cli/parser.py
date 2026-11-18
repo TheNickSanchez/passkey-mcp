@@ -33,7 +33,7 @@ Examples:
   passkey export backup.passkey --encrypt   Save an encrypted backup bundle
 
 Learn more:
-  Run 'passkey <command> --help' for flags and usage of any command.
+  Run 'passkey help <command>' or 'passkey <command> --help' for command details.
 """
 
 
@@ -68,7 +68,7 @@ class GroupedArgumentParser(argparse.ArgumentParser):
             [
                 "Flags:",
                 f"  {'-h, --help':<{col_w}}Show this help message and exit",
-                f"  {'--version':<{col_w}}Show program's version number and exit",
+                f"  {'-V, --version':<{col_w}}Show program's version number and exit",
                 "",
                 EXAMPLES_EPILOG.rstrip(),
                 "",
@@ -262,6 +262,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "-V",
         "--version",
         action="version",
         version=f"%(prog)s {package_version('passkey-mcp')}",
@@ -582,6 +583,13 @@ def create_parser() -> argparse.ArgumentParser:
     _configure_servers_parser(subparsers.add_parser("servers"))
     _configure_add_parser(subparsers.add_parser("add"))
     subparsers.add_parser("mcp-serve", description="Start the passkey FastMCP server.")
+    help_parser = subparsers.add_parser(
+        "help", description="Show help for passkey or a specific command."
+    )
+    help_parser.add_argument(
+        "help_topic", nargs="*", metavar="command", help="Command or subcommand to inspect"
+    )
+    subparsers.add_parser("version", description="Show passkey version and exit.")
 
     # Expose subcommand groups for empty-group help rendering
     parser._mcp_group_parser = mcp_group  # type: ignore[attr-defined]

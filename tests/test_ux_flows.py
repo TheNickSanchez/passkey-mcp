@@ -420,6 +420,38 @@ class TestHelpGroupingAndBackwardsCompat:
                 main()
             capsys.readouterr()
 
+    def test_help_and_version_subcommands_and_short_flag(self, capsys):
+        # 1. `passkey help` (no --) prints categorized top-level help
+        with patch.object(sys, "argv", ["passkey", "help"]):
+            main()
+        help_out = capsys.readouterr().out
+        assert "Core Secret Management:" in help_out
+
+        # 2. `passkey help new` and `passkey help mcp init` print subcommand help
+        with patch.object(sys, "argv", ["passkey", "help", "new"]), pytest.raises(SystemExit) as e1:
+            main()
+        assert e1.value.code == 0
+        assert "--template" in capsys.readouterr().out
+
+        with (
+            patch.object(sys, "argv", ["passkey", "help", "mcp", "init"]),
+            pytest.raises(SystemExit) as e2,
+        ):
+            main()
+        assert e2.value.code == 0
+        assert "--dry-run" in capsys.readouterr().out
+
+        # 3. `passkey version` and `passkey -V` both print version
+        with patch.object(sys, "argv", ["passkey", "version"]):
+            main()
+        ver_sub = capsys.readouterr().out.strip()
+        assert ver_sub.startswith("passkey ")
+
+        with patch.object(sys, "argv", ["passkey", "-V"]), pytest.raises(SystemExit) as e3:
+            main()
+        assert e3.value.code == 0
+        assert capsys.readouterr().out.strip() == ver_sub
+
 
 class TestBarePasskeyFTUEAndInitPreview:
     """Tests for bare passkey States A, B, C and clearer passkey init preview."""

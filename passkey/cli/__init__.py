@@ -61,6 +61,8 @@ _KNOWN_COMMANDS = frozenset(
         "servers",
         "add",
         "completion",
+        "help",
+        "version",
     }
 )
 
@@ -85,6 +87,20 @@ def _require_auth(operation: str) -> None:
 
 def _dispatch_command(command: str | None, parser, args) -> None:
     """Dispatch a parsed top-level or noun-verb subcommand."""
+    if command == "help":
+        topics = list(getattr(args, "help_topic", None) or [])
+        if not topics:
+            parser.print_help()
+            return
+        parser.parse_args([*topics, "--help"])
+        return
+
+    if command == "version":
+        from importlib.metadata import version as package_version
+
+        print(f"passkey {package_version('passkey-mcp')}")
+        return
+
     if command == "mcp":
         sub = getattr(args, "mcp_command", None)
         if not sub:

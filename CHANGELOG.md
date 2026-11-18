@@ -11,7 +11,7 @@
 ### Added
 
 - **Real-time masked secret input (`prompt_secret`)**: `passkey new`, `edit`, `set-field`, `rotate`, and `add` now echo `•` bullets alongside a live character counter, with `Backspace`/`Delete`, `Ctrl+U` clear, and `Ctrl+R`/`Tab` temporary reveal (auto-remasked on `Enter` so terminal scrollback never retains secrets).
-- **Noun-verb subcommand groups (`passkey mcp`, `passkey entry`)**: organized MCP and advanced entry commands under scannable hierarchies while keeping all existing top-level commands as backwards-compatible aliases.
+- **Noun-verb subcommand groups (`passkey mcp`, `passkey entry`) and `help` / `version` subcommands**: organized MCP and advanced entry commands under scannable hierarchies, added `passkey help [command]` and `passkey version` (`-V`) alongside `-h`/`--help`/`--version`, and preserved all existing top-level commands as backwards-compatible aliases.
 - **Positional name, `--template`, and `KEY=VALUE` shorthand in `passkey new`**: run `passkey new stripe` (or `--template <name>`) to jump straight to field entry, paste `KEY=VALUE` at the field prompt in a single step, verify lengths via non-sensitive previews (`(36 chars, sk-…9a2)`), and press `Enter` on an empty field name to save and exit.
 
 ### Changed
