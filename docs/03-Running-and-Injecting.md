@@ -126,7 +126,7 @@ passkey plugin init gh
 
 # Add the generated shell wrapper functions once to ~/.zshrc or ~/.bashrc
 echo 'source "$HOME/Library/Application Support/passkey/plugins.sh"' >> ~/.zshrc
-# (On Linux: source "$HOME/.local/share/passkey/plugins.sh")
+# (On Linux: source "$HOME/.config/passkey/plugins.sh")
 ```
 
 Supported built-in CLI plugins (`passkey plugin list --json`):
