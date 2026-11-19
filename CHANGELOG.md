@@ -8,18 +8,21 @@
 
 ## [Unreleased]
 
+## 0.8.0 (2026-11-19)
+
 ### Added
 
 - **Structured error codes & `PASSKEY_OUTPUT=json` envelopes**: `PasskeyError` and `InteractiveRequiredError` now carry structured `error_code`, `entry`, `missing_fields`, and `remediation_command` metadata, emitting deterministic `{"ok": false, "error_code": ..., ...}` JSON envelopes whenever `--json` or `PASSKEY_OUTPUT=json` is active (routing to `stderr` on child-wrapping commands `run`, `exec`, and `plugin run` so child `stdout` pipelines stay pristine).
 - **Reverse env-var lookup (`passkey find` & MCP `passkey_find`)**: locate which keychain entry owns one or more environment variables (`passkey find RESEND_API_KEY GH_TOKEN --json` or `passkey find --from-file .env.example --json`) via 3-tier matching across exact keys, service-specific aliases, and entry-scoped generic names without reading or exposing secret values.
 - **Zero-config repo manifests, HMAC trust guard & `passkey exec` (`passkey/project.py`)**: added `passkey project init|status|trust`, `passkey exec -- <command>`, and MCP `passkey_project_status` to auto-discover `.env.passkey` / `.passkey.toml` up to the enclosing git root, verify SHA-256 digests against HMAC-signed `<data_dir>/trusted_projects.json` (`__trust_hmac_key__`), prompt Touch ID once on untrusted/modified manifests, and inject secrets with `SecretMasker` enabled.
 - **Session-scoped Touch ID policy (`policy = session`)**: added `"session"` alongside `"allow"` and `"prompt"`, prompting Touch ID once per AI agent or terminal session (`"Passkey: unlock '<entry>' for <agent> (10m session)"`) and minting an HMAC-signed lease bound to `(ancestor_pid, process_start_time)` (configurable via `passkey config agent-session-lease-ttl`, default `600s`), while keeping `policy = prompt` strictly per-invocation.
-- **Out-of-band native OS secret capture (`passkey request` & MCP `passkey_request_secret`)**: agents can trigger a native OS hidden password dialog (`osascript -` StandardAdditions `display dialog ... with hidden answer` via `system attribute` env vars on macOS; `zenity --password` on Linux) that saves secrets directly into the OS keychain and returns only field metadata, with idempotent field merging and popup cooldown rate-limiting.
+- **Out-of-band native OS secret capture & rotation (`passkey request` & MCP `passkey_request_secret`)**: agents can trigger a native OS hidden password dialog (`osascript -` StandardAdditions `display dialog ... with hidden answer` via 7-bit ASCII `system attribute` env vars on macOS; `zenity --password` on Linux) that saves secrets directly into the OS keychain and returns only field metadata, with `--reason` expired-token Notification Center alerts (`Passkey - Rotate Secret` + automatic `last_rotated` stamping), idempotent field merging, and popup cooldown rate-limiting.
+- **Multi-tool hook onboarding (`passkey hook install --tool all`) & `ANTIGRAVITY_AGENT` detection**: added `--tool all` to `passkey hook install` (pairing with `--with-skill`) and registered `ANTIGRAVITY_AGENT` in `_HEADLESS_AGENT_ENV_VARS` / `_AGENT_ENV_MARKERS`.
 
 ### Security
 
 - **Seatbelt-compatible kernel process lineage (`proc_pidinfo` / `/proc/<pid>/stat`)**: replaced `/bin/ps` subprocess calls in `passkey/audit.py` with direct `libSystem.proc_pidinfo` (`PROC_PIDTBSDINFO`) on macOS and `/proc/<pid>/stat` on Linux, eliminating restricted-binary failures inside macOS Seatbelt sandboxes and providing microsecond-resolution start timestamps for PID-reuse defense.
-- **Directory-level system path blocking in MCP tools**: hardened `_is_forbidden_system_path` so bare protected directory paths (e.g., `/etc`) are blocked alongside file paths (`/etc/passwd`).
+- **Keychain-vs-tampering error precision & MCP directory path blocking**: `trusted_projects.json` and `leases.json` now raise `KeychainAccessError` (`KEYCHAIN_ACCESS_ERROR`) instead of minting a mismatched fallback key when Keychain IPC is blocked (e.g., macOS Seatbelt `-50`), and `_is_forbidden_system_path` blocks bare protected system directories (`/etc`) alongside file paths (`/etc/passwd`).
 
 ## 0.7.0 (2026-11-18)
 
