@@ -94,8 +94,8 @@ be visible to other same-UID processes on the same machine. That is an
 accepted, documented risk, not a hidden one.
 
 There is no external network access and no telemetry. Supply chain **is**
-the install path. First installable release is PyPI **0.4.0** via Trusted
-Publishing (`pipx install passkey-mcp==0.4.0`). Stay Alpha.
+the install path, published to PyPI via Trusted Publishing
+(`uv tool install passkey-mcp` / `pipx install passkey-mcp`). Stay Alpha.
 
 ## What this file must not say
 

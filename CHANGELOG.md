@@ -15,7 +15,7 @@
 ### Changed
 
 - Revamped `README.md` with a concise before/after `mcp.json` diff, visual feature showcases (`SecretMasker`, `passkey request`, `policy = session`, `passkey exec`), ASCII security boundary diagram, and Wiki navigation hub.
-- Unpinned install recommendation in `README.md`, `passkey doctor`, and `AGENTS.md` from `pipx install passkey-mcp==0.4.0` to `pipx install passkey-mcp` / `uv tool install passkey-mcp` now that `0.8.0` is live on PyPI with digital provenance attestations.
+- Unpinned PyPI install recommendations (`uv tool install passkey-mcp` / `pipx install passkey-mcp`) across `README.md`, `docs/`, `SECURITY.md`, and `passkey doctor`, and retired Landmine #8 in `AGENTS.md` now that `0.8.0` is live on PyPI with digital provenance attestations.
 
 ### Fixed
 
