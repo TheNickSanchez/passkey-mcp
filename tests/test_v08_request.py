@@ -141,7 +141,7 @@ class TestOutOfBandSecretRequest:
 
     def test_redteam_applescript_injection_and_no_system_events_tcc(self, monkeypatch):
         monkeypatch.setattr("passkey.request_secret.sys.platform", "darwin")
-        hostile_hint = 'Click OK" & do shell script "touch /tmp/pwned" & "\x00\nNext line'
+        hostile_hint = 'Stripe — Developers → Keys " & do shell script "touch /tmp/pwned" & "\x00\nNext'
         mock_proc = MagicMock(returncode=0, stdout="sec_val_safe_123\n", stderr="")
 
         with patch("passkey.request_secret.subprocess.run", return_value=mock_proc) as mock_run:
@@ -162,8 +162,12 @@ class TestOutOfBandSecretRequest:
         assert "do shell script" not in script_stdin
         assert "pwned" not in script_stdin
 
-        # Hostile hint lives strictly inside environment variable with control chars stripped
+        # Title & prompt attributes must be pure 7-bit ASCII (preventing MacRoman `,Äî` mojibake)
         passed_env = call_kwargs["env"]
+        assert passed_env["PASSKEY_REQ_TITLE"] == "Passkey - Secret Request"
+        assert passed_env["PASSKEY_REQ_TITLE"].isascii()
+        assert passed_env["PASSKEY_REQ_PROMPT"].isascii()
+        assert "Stripe - Developers -> Keys" in passed_env["PASSKEY_REQ_PROMPT"]
         assert "do shell script" in passed_env["PASSKEY_REQ_PROMPT"]
         assert "\x00" not in passed_env["PASSKEY_REQ_PROMPT"]
 

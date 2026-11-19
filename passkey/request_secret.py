@@ -122,6 +122,35 @@ def _parse_and_validate_fields(raw_fields: list[str] | str) -> list[str]:
     return deduped
 
 
+_UNICODE_ASCII_TRANSLATION = str.maketrans(
+    {
+        "\u2014": "-",   # em dash
+        "\u2013": "-",   # en dash
+        "\u2192": "->",  # right arrow
+        "\u2190": "<-",  # left arrow
+        "\u2026": "...", # ellipsis
+        "\u2018": "'",   # left single quote
+        "\u2019": "'",   # right single quote
+        "\u201c": '"',   # left double quote
+        "\u201d": '"',   # right double quote
+        "\u2022": "*",   # bullet
+        "\u00a0": " ",   # non-breaking space
+    }
+)
+
+
+def _to_applescript_attr_ascii(text: str) -> str:
+    """Normalize text to 7-bit ASCII for AppleScript `system attribute`.
+
+    macOS StandardAdditions `system attribute` decodes environment variables
+    using legacy MacRoman rather than UTF-8 (which turns UTF-8 '—' into ',Äî').
+    Restricting dialog title/prompt attributes to 7-bit ASCII keeps UTF-8 and
+    MacRoman byte-for-byte identical.
+    """
+    translated = text.translate(_UNICODE_ASCII_TRANSLATION)
+    return translated.encode("ascii", "replace").decode("ascii")
+
+
 def _sanitize_hint(hint: str | None) -> str:
     if not hint:
         return ""
@@ -152,14 +181,14 @@ def _prompt_macos_hidden_dialog(
 ) -> str:
     """Capture a single secret value via macOS StandardAdditions hidden dialog."""
     step_str = f" ({field_index}/{field_total})" if field_total > 1 else ""
-    title = f"Passkey — Secret Request{step_str}"
+    title = _to_applescript_attr_ascii(f"Passkey - Secret Request{step_str}")
     prompt_lines = [
         f"Enter '{field_name}' for keychain entry '{entry_name}'.",
         f"Requested by: {client_label} (saved directly to OS Keychain; never shown to AI).",
     ]
     if hint:
         prompt_lines.append(f"Hint: {hint}")
-    prompt_text = "\n\n".join(prompt_lines)
+    prompt_text = _to_applescript_attr_ascii("\n\n".join(prompt_lines))
 
     env = os.environ.copy()
     env["PASSKEY_REQ_TITLE"] = title
