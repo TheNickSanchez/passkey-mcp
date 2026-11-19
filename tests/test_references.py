@@ -126,7 +126,13 @@ class TestRunEnvFileAndInject:
         valid_file = tmp_path / ".env.passkey"
         valid_file.write_text("PAYMENTS_KEY=passkey://payments/API_KEY\n")
         ok_res = passkey_validate_references(str(valid_file))
-        assert ok_res == {"valid": True, "checked": 1, "missing": []}
+        assert ok_res == {
+            "valid": True,
+            "checked": 1,
+            "missing": [],
+            "prompt_entries_without_lease": [],
+            "will_prompt_biometric": False,
+        }
         assert secret_value not in str(ok_res)
 
         broken_file = tmp_path / "broken.tpl"

@@ -11,11 +11,12 @@ RESERVED_NAMES = frozenset(
         "__entries__",
         "__audit_hmac_key__",
         "__lease_hmac_key__",
+        "__trust_hmac_key__",
         "help",
         "version",
     }
 )
-VALID_POLICIES = frozenset({"allow", "prompt"})
+VALID_POLICIES = frozenset({"allow", "session", "prompt"})
 
 
 def is_valid_name(name) -> bool:

@@ -1,53 +1,132 @@
 """CLI command handlers — all sys.exit lives in the outermost main() layer."""
 
+import json
 import sys
 
 from .. import commands, mcp_commands, runner
 from ..keychain import PasskeyError
 
 
-def resolve_entry(entry_arg: str | None, prompt: str = "Select an entry", fuzzy: bool = True):
+def resolve_entry(
+    entry_arg: str | None,
+    prompt: str = "Select an entry",
+    fuzzy: bool = True,
+    *,
+    log_read: bool = True,
+):
     """Resolve entry argument, falling back to interactive selector if needed."""
-    from ..interactive import is_interactive, select_entry
-    from ..keychain import get_entry
+    from ..interactive import (
+        InteractiveRequiredError,
+        can_prompt_interactively,
+        select_entry,
+    )
+    from ..keychain import _get_entry, get_entry
 
+    fetch = get_entry if log_read else (lambda n: _get_entry(n, log_read=False))
     resolved_name = None
 
     if entry_arg:
-        entry = get_entry(entry_arg)
+        entry = fetch(entry_arg)
         if entry:
             return entry
-        if not fuzzy:
-            raise PasskeyError(f"Entry '{entry_arg}' not found.")
+        if not fuzzy or not can_prompt_interactively():
+            raise PasskeyError(
+                f"Entry '{entry_arg}' not found. "
+                f"Ask the user to run 'passkey new {entry_arg}' in their terminal "
+                "(never ask them to paste secrets into chat).",
+                error_code="ENTRY_NOT_FOUND",
+                entry=entry_arg,
+                remediation_command=f"passkey new {entry_arg}",
+            )
         resolved_name = entry_arg
-
-    if is_interactive():
-        resolved_name = select_entry(prompt, filter_prefix=resolved_name if fuzzy else "")
     else:
-        raise PasskeyError(f"Entry '{entry_arg}' not found in non-interactive session.")
+        if not can_prompt_interactively():
+            raise InteractiveRequiredError(
+                "No entry name specified in non-interactive mode.\n"
+                "  Pass an explicit <entry> name, or run 'passkey list --json' to discover entries.",
+                error_code="INTERACTIVE_REQUIRED",
+                remediation_command="passkey list --json",
+            )
 
-    final_entry = get_entry(resolved_name)
+    resolved_name = select_entry(prompt, filter_prefix=resolved_name if fuzzy else "")
+
+    final_entry = fetch(resolved_name)
     if not final_entry:
-        raise PasskeyError(f"Failed to fetch details for entry '{resolved_name}'.")
+        raise PasskeyError(
+            f"Entry '{resolved_name}' not found. "
+            f"Ask the user to run 'passkey new {resolved_name}' in their terminal "
+            "(never ask them to paste secrets into chat).",
+            error_code="ENTRY_NOT_FOUND",
+            entry=resolved_name,
+            remediation_command=f"passkey new {resolved_name}",
+        )
 
     return final_entry
 
 
+def _print_preflight_report(report: dict) -> None:
+    """Render a human-readable preflight summary for ``passkey run --dry-run``."""
+    status_label = "READY" if report["ready"] else "NOT READY"
+    print(f"Preflight status: {status_label}")
+    if report["entries_found"]:
+        found_str = ", ".join(
+            f"{e['name']} (policy={e['policy']})" for e in report["entries_found"]
+        )
+        print(f"Entries found:    {found_str}")
+    if report["entries_missing"]:
+        print(f"Entries missing:  {', '.join(report['entries_missing'])}")
+    if report["env_files"]:
+        print(f"Env files:        {', '.join(report['env_files'])}")
+    if report["env_files_missing"]:
+        print(f"Missing files:    {', '.join(report['env_files_missing'])}")
+    if report["references_checked"]:
+        print(
+            f"References:       {len(report['references_valid'])} valid, "
+            f"{len(report['references_invalid'])} invalid"
+        )
+    if report["injected_env_vars"]:
+        print(f"Injected vars:    {', '.join(report['injected_env_vars'])}")
+    if report["will_prompt_biometric"]:
+        print(
+            "Biometric prompt: YES "
+            f"({', '.join(report['prompt_entries_without_lease'])} — no active lease)"
+        )
+    else:
+        print("Biometric prompt: no")
+    if report["command"]:
+        cmd_ok = "found" if report["command_executable_found"] else "NOT FOUND"
+        print(f"Command:          {' '.join(report['command'])} ({cmd_ok})")
+    if report["remediation"]:
+        print("\nRemediation:")
+        for item in report["remediation"]:
+            print(f"  - {item}")
+
+
 def handle_run_command(parser, args):
     """Handler for the 'run' subcommand."""
-    from ..interactive import is_interactive, select_multiple_entries
+    from ..interactive import can_prompt_interactively, select_multiple_entries, set_no_input
 
     run_args = list(args.args)
-    if "--" not in run_args:
-        parser.error("Usage: passkey run [-q|--quiet] [--no-masking] <entries...> -- <command>")
-
-    sep_idx = run_args.index("--")
-    pre_sep = run_args[:sep_idx]
-    cmd = run_args[sep_idx + 1 :]
-
     no_masking = bool(getattr(args, "no_masking", False))
     quiet = bool(getattr(args, "quiet", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+    json_output = bool(getattr(args, "json_output", False))
+    strict = bool(getattr(args, "strict", False))
     env_files: list[str] = list(getattr(args, "env_files", None) or [])
+
+    if "--" in run_args:
+        sep_idx = run_args.index("--")
+        pre_sep = run_args[:sep_idx]
+        cmd = run_args[sep_idx + 1 :]
+    elif dry_run or "--dry-run" in run_args:
+        pre_sep = run_args
+        cmd = []
+    else:
+        parser.error(
+            "Usage: passkey run [-q|--quiet] [--strict] [--dry-run [--json]] "
+            "[--no-masking] <entries...> -- <command>"
+        )
+
     entries: list[str] = []
     idx = 0
     while idx < len(pre_sep):
@@ -56,6 +135,14 @@ def handle_run_command(parser, args):
             no_masking = True
         elif token in ("-q", "--quiet"):
             quiet = True
+        elif token == "--dry-run":
+            dry_run = True
+        elif token == "--json":
+            json_output = True
+        elif token == "--strict":
+            strict = True
+        elif token == "--no-input":
+            set_no_input(True)
         elif token == "--env-file":
             if idx + 1 >= len(pre_sep):
                 raise PasskeyError("--env-file requires a path argument")
@@ -64,9 +151,27 @@ def handle_run_command(parser, args):
             continue
         elif token.startswith("--env-file="):
             env_files.append(token.split("=", 1)[1])
+        elif token.startswith("-"):
+            raise PasskeyError(f"Unknown option '{token}' for 'passkey run'")
         else:
             entries.append(token)
         idx += 1
+
+    if json_output and not dry_run:
+        raise PasskeyError(
+            "'--json' on 'passkey run' requires '--dry-run' "
+            "(child command stdout is never wrapped in JSON)."
+        )
+
+    if dry_run:
+        from ..interactive import is_json_output_env
+
+        report = runner.preflight_run(entries, cmd or None, env_files=env_files)
+        if json_output or is_json_output_env():
+            print(json.dumps(report, indent=2))
+        else:
+            _print_preflight_report(report)
+        sys.exit(0 if report["ready"] else 1)
 
     if not entries and not env_files:
         import os as _os
@@ -75,10 +180,13 @@ def handle_run_command(parser, args):
 
         has_inherited_refs = any(is_reference(v) for v in _os.environ.values())
         if not has_inherited_refs:
-            if is_interactive():
+            if can_prompt_interactively():
                 entries = select_multiple_entries("Select entries to load secrets from")
             else:
-                raise PasskeyError("No entries specified for 'run' in non-interactive mode.")
+                raise PasskeyError(
+                    "No entries specified for 'run' in non-interactive mode. "
+                    "Usage: passkey run -q <entry> -- <command>"
+                )
 
     if not cmd:
         raise PasskeyError("No command specified after --")
@@ -88,9 +196,159 @@ def handle_run_command(parser, args):
         cmd,
         no_masking=no_masking,
         quiet=quiet,
+        strict=strict,
         env_files=env_files,
     )
     sys.exit(rc)
+
+
+def print_project_status(status: dict) -> None:
+    """Render a human-readable summary for ``passkey project status`` / ``exec --dry-run``."""
+    if not status.get("manifest_found"):
+        print(f"Project root:     {status['project_root']}")
+        print("Manifest status:  NOT FOUND")
+        if status.get("detected_templates"):
+            print(f"Templates found:  {', '.join(status['detected_templates'])}")
+        for item in status.get("remediation", []):
+            print(f"  -> {item}")
+        return
+
+    ready_label = "READY" if status["ready"] else "NOT READY"
+    trust_label = "TRUSTED" if status["trusted"] else f"UNTRUSTED ({status['trust_status']})"
+    print(f"Project root:     {status['project_root']}")
+    print(f"Manifests:        {', '.join(status['manifests'])}")
+    print(f"Trust status:     {trust_label}")
+    print(f"Readiness:        {ready_label}")
+    if status.get("entries"):
+        print(f"Entries:          {', '.join(status['entries'])}")
+    if status.get("injected_env_vars"):
+        print(f"Injected vars:    {', '.join(status['injected_env_vars'])}")
+    if status.get("entries_missing"):
+        print(f"Entries missing:  {', '.join(status['entries_missing'])}")
+    if status.get("missing_required_vars"):
+        print(f"Missing required: {', '.join(status['missing_required_vars'])}")
+    if status.get("will_prompt_biometric"):
+        print("Biometric prompt: YES")
+    else:
+        print("Biometric prompt: no")
+    if status.get("remediation"):
+        print("\nRemediation:")
+        for item in status["remediation"]:
+            print(f"  - {item}")
+
+
+def handle_exec_command(parser, args):
+    """Handler for the zero-config ``passkey exec`` subcommand."""
+    from ..interactive import is_json_output_env, set_no_input
+    from ..project import exec_with_project
+
+    exec_args = list(args.args)
+    no_masking = bool(getattr(args, "no_masking", False))
+    quiet = bool(getattr(args, "quiet", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+    json_output = bool(getattr(args, "json_output", False))
+    no_strict = bool(getattr(args, "no_strict", False))
+    project_dir = getattr(args, "project_dir", None)
+
+    if "--" in exec_args:
+        sep_idx = exec_args.index("--")
+        pre_sep = exec_args[:sep_idx]
+        cmd = exec_args[sep_idx + 1 :]
+    else:
+        pre_sep = []
+        cmd = []
+        idx = 0
+        while idx < len(exec_args):
+            tok = exec_args[idx]
+            if tok in (
+                "--no-masking",
+                "-q",
+                "--quiet",
+                "--dry-run",
+                "--json",
+                "--no-strict",
+                "--no-input",
+            ):
+                pre_sep.append(tok)
+                idx += 1
+            elif tok == "--project-dir" and idx + 1 < len(exec_args):
+                pre_sep.extend([tok, exec_args[idx + 1]])
+                idx += 2
+            elif tok.startswith("--project-dir="):
+                pre_sep.append(tok)
+                idx += 1
+            elif tok.startswith("-"):
+                raise PasskeyError(
+                    f"Unknown option '{tok}' for 'passkey exec'. "
+                    "Place '--' before command arguments: passkey exec -- <command>",
+                    error_code="INVALID_USAGE",
+                    remediation_command="passkey exec -- <command>",
+                )
+            else:
+                cmd = exec_args[idx:]
+                break
+
+    idx = 0
+    while idx < len(pre_sep):
+        token = pre_sep[idx]
+        if token == "--no-masking":
+            no_masking = True
+        elif token in ("-q", "--quiet"):
+            quiet = True
+        elif token == "--dry-run":
+            dry_run = True
+        elif token == "--json":
+            json_output = True
+        elif token == "--no-strict":
+            no_strict = True
+        elif token == "--no-input":
+            set_no_input(True)
+        elif token == "--project-dir":
+            if idx + 1 >= len(pre_sep):
+                raise PasskeyError(
+                    "--project-dir requires a path argument",
+                    error_code="INVALID_USAGE",
+                )
+            project_dir = pre_sep[idx + 1]
+            idx += 2
+            continue
+        elif token.startswith("--project-dir="):
+            project_dir = token.split("=", 1)[1]
+        else:
+            raise PasskeyError(
+                f"Unexpected argument '{token}' before '--' in 'passkey exec'. "
+                "Usage: passkey exec [-q] [--dry-run [--json]] -- <command>",
+                error_code="INVALID_USAGE",
+                remediation_command="passkey exec -- <command>",
+            )
+        idx += 1
+
+    if json_output and not dry_run:
+        raise PasskeyError(
+            "'--json' on 'passkey exec' requires '--dry-run' "
+            "(child command stdout is never wrapped in JSON).",
+            error_code="INVALID_USAGE",
+        )
+
+    result = exec_with_project(
+        cmd or None,
+        project_dir=project_dir,
+        quiet=quiet,
+        no_masking=no_masking,
+        dry_run=dry_run,
+        strict=not no_strict,
+    )
+
+    if dry_run:
+        assert isinstance(result, dict)
+        if json_output or is_json_output_env():
+            print(json.dumps(result, indent=2))
+        else:
+            print_project_status(result)
+        sys.exit(0 if (result["ready"] and result["trusted"]) else 1)
+
+    assert isinstance(result, int)
+    sys.exit(result)
 
 
 def handle_template_command(args):
@@ -127,6 +385,12 @@ def handle_template_command(args):
                 print(f"    {desc}")
 
     elif args.template_command == "apply":
+        from ..interactive import require_interactive
+
+        human_cmd = f"passkey entry template apply {args.template_name}"
+        if args.entry_name:
+            human_cmd += f" {args.entry_name}"
+        require_interactive("passkey template apply", human_command=human_cmd)
         _require_auth("create entries from template")
         template = get_template(args.template_name)
         if not template:
@@ -135,6 +399,12 @@ def handle_template_command(args):
         commands.cmd_template_apply(template, entry_name)
 
     elif args.template_command == "add":
+        from ..interactive import require_interactive
+
+        require_interactive(
+            "passkey template add",
+            human_command="passkey entry template add",
+        )
         _require_auth("save template")
         _save_entry_as_template()
 
@@ -202,20 +472,40 @@ def _print_quickstart_examples() -> None:
 
 def handle_onboarding_or_help(parser) -> None:
     """Context-aware bare ``passkey`` router across States A, B, and C."""
-    from ..interactive import PASSKEY_STYLE, is_interactive
+    from ..interactive import (
+        PASSKEY_STYLE,
+        InteractiveRequiredError,
+        can_prompt_interactively,
+    )
     from ..keychain import list_entries
 
     try:
         entries = list_entries()
     except PasskeyError:
-        parser.print_help()
-        return
+        entries = []
 
-    # State C: Entries already exist -> fuzzy entry browser on TTY, help on non-TTY
+    if not can_prompt_interactively():
+        exposed = mcp_commands.detect_exposed_mcp_servers()
+        human_cmd = "passkey init" if exposed else "passkey new <name>"
+        alt = (
+            "passkey list --json | passkey info <entry> --json | "
+            "passkey status --json | passkey doctor --json | "
+            "passkey run -q <entry> -- <command>"
+        )
+        summary = f"{len(entries)} entry(s) in keychain"
+        if exposed:
+            summary += f", {len(exposed)} MCP server(s) with plaintext secrets"
+        raise InteractiveRequiredError(
+            f"Bare 'passkey' launches an interactive TUI ({summary}) and cannot run headlessly.\n"
+            f"  Headless commands: {alt}\n"
+            f"  Ask the user to run in their terminal: {human_cmd}\n"
+            "  Security rule: Never ask the user to paste secret values into chat.",
+            error_code="INTERACTIVE_REQUIRED",
+            remediation_command="passkey list --json",
+        )
+
+    # State C: Entries already exist -> fuzzy entry browser on TTY
     if entries:
-        if not is_interactive():
-            parser.print_help()
-            return
         _require_auth = _get_require_auth()
         _require_auth("access secrets")
         entry = resolve_entry(None, "Select entry to browse")
@@ -224,19 +514,6 @@ def handle_onboarding_or_help(parser) -> None:
 
     # 0 entries: check for exposed MCP configs on disk
     exposed = mcp_commands.detect_exposed_mcp_servers()
-
-    if not is_interactive():
-        print()
-        print("  passkey — Secrets in your OS keychain, not in config files")
-        if exposed:
-            print(
-                f"  Detected {len(exposed)} MCP server(s) with plaintext secrets. "
-                "Run 'passkey init' to migrate them."
-            )
-        else:
-            print("  Run 'passkey new' to create your first secret, or 'passkey --help'.")
-        print()
-        return
 
     import questionary
 

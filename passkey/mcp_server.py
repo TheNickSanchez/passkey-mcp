@@ -9,8 +9,9 @@ import re as _re
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
-from .keychain import PasskeyError, get_entry, list_entries
+from .keychain import PasskeyError, _get_entry, get_entry, list_entries
 from .mcp_config import (
     ADAPTERS,
     MCPConfigError,
@@ -23,11 +24,79 @@ from .mcp_config import (
     save_config,
 )
 
+MCP_INSTRUCTIONS = (
+    "passkey manages developer secrets in the OS keychain so secret VALUES never enter "
+    "AI context, stdout, or plaintext files. "
+    "Golden rules for AI agents: "
+    "(1) Reverse-lookup env vars with passkey_find, check repo manifests with passkey_project_status, "
+    "and inspect metadata with passkey_entry_info or passkey_preflight_run to verify field names, "
+    "config_keys, policy ('allow', 'session', or 'prompt'), and has_active_lease. "
+    "(2) Run commands zero-config via 'passkey exec -q -- <command>' (when .env.passkey / .passkey.toml "
+    "exists) or 'passkey run -q <entry> -- <command>' (set PASSKEY_OUTPUT=json for structured error_code JSON). "
+    "(3) Never run interactive commands ('passkey', 'passkey get', 'passkey new', 'passkey edit') "
+    "and NEVER ask the human user to paste raw API keys or tokens into chat—capture missing secrets "
+    "out-of-band via passkey_request_secret (or 'passkey request <entry> --fields <VAR>'), or ask the user "
+    "to run 'passkey new <name>' / 'passkey lease grant <name> --ttl 15m' in their terminal."
+)
+
+_READ_ONLY_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+_CONFIG_MUTATING_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+_BROWSER_MUTATING_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=False,
+    openWorldHint=True,
+)
+
+_FORBIDDEN_SYSTEM_PREFIXES = (
+    "/etc/",
+    "/private/etc/",
+    "/dev/",
+    "/proc/",
+    "/sys/",
+    "/bin/",
+    "/sbin/",
+    "/usr/bin/",
+    "/usr/sbin/",
+    "/usr/lib/",
+    "/lib/",
+    "/boot/",
+    "/var/root/",
+    "/private/var/",
+    "/System/",
+)
+
 # Initialize MCP server
-mcp = FastMCP(name="passkey")
+mcp = FastMCP(name="passkey", instructions=MCP_INSTRUCTIONS)
 
 
-@mcp.tool()
+def _is_forbidden_system_path(raw_path: str) -> tuple[bool, Path]:
+    """Return (is_forbidden, resolved_path) blocking sensitive OS paths."""
+    expanded = Path(raw_path).expanduser()
+    resolved = expanded.resolve()
+    resolved_str = str(resolved)
+    if resolved_str.startswith("/private/var/folders/"):
+        return False, resolved
+    exp_check = str(expanded).rstrip("/") + "/"
+    res_check = resolved_str.rstrip("/") + "/"
+    if exp_check.startswith(_FORBIDDEN_SYSTEM_PREFIXES) or res_check.startswith(
+        _FORBIDDEN_SYSTEM_PREFIXES
+    ):
+        return True, resolved
+    return False, resolved
+
+
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
 def passkey_list() -> list[str]:
     """List all available passkey entries.
 
@@ -43,13 +112,13 @@ def passkey_list() -> list[str]:
         raise Exception(f"Failed to access keychain: {e}") from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
 def passkey_fields(entry_name: str) -> list[str]:
-    """List field names in a passkey entry (without revealing values).
+    """List field names in a passkey entry (without revealing values or logging a secret read).
 
     Returns the names of secret fields stored in the specified entry.
-    This allows discovering what secrets are available without exposing
-    the actual secret values.
+    Prefer ``passkey_entry_info`` when you also need ``config_keys``, ``policy``,
+    and ``has_active_lease``.
 
     Args:
         entry_name: Name of the passkey entry (e.g., "slack")
@@ -61,15 +130,214 @@ def passkey_fields(entry_name: str) -> list[str]:
         Exception: If entry not found or keychain access fails
     """
     try:
-        entry = get_entry(entry_name)
+        entry = _get_entry(entry_name, log_read=False)
         if entry is None:
-            raise Exception(f"Entry '{_sanitize(entry_name)}' not found")
+            safe = _sanitize(entry_name)
+            raise Exception(
+                f"Entry '{safe}' not found. Ask the user to run 'passkey new {safe}' "
+                "in their terminal (never ask them to paste secrets into chat)."
+            )
         return list(entry.fields.keys())
     except PasskeyError as e:
         raise Exception(f"Failed to access keychain: {e}") from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
+def passkey_entry_info(entry_name: str) -> dict:
+    """Inspect complete non-sensitive metadata for a passkey entry without exposing values.
+
+    Read-only: never triggers Touch ID, never decrements active lease uses,
+    and never exposes secret or config values.
+
+    Args:
+        entry_name: Name of the passkey entry (e.g., "stripe")
+
+    Returns:
+        Dictionary with exists, policy ('allow' or 'prompt'), has_active_lease,
+        will_prompt_biometric, fields (secret key names), config_keys, and timestamps.
+    """
+    from .leases import peek_lease
+
+    safe = _sanitize(entry_name)
+    try:
+        entry = _get_entry(entry_name, log_read=False)
+    except PasskeyError as e:
+        raise Exception(f"Failed to access keychain: {e}") from e
+
+    if entry is None:
+        return {
+            "exists": False,
+            "name": safe,
+            "remediation": (
+                f"Ask the user to run 'passkey new {safe}' in their terminal "
+                "(never ask them to paste secrets into chat)."
+            ),
+        }
+
+    lease = peek_lease(entry.name, allow_session=(entry.policy != "prompt"))
+    has_lease = lease is not None
+    secret_keys = sorted(entry.fields.keys())
+    config_keys = sorted(entry.config.keys())
+
+    return {
+        "exists": True,
+        "name": entry.name,
+        "policy": entry.policy,
+        "has_active_lease": has_lease,
+        "lease_seconds_remaining": lease["seconds_remaining"] if lease else None,
+        "lease_remaining_uses": lease.get("remaining_uses") if lease else None,
+        "will_prompt_biometric": entry.policy in ("prompt", "session") and not has_lease,
+        "fields": secret_keys,
+        "config_keys": config_keys,
+        "field_count": len(secret_keys),
+        "config_count": len(config_keys),
+        "created": entry.created,
+        "modified": entry.modified,
+        "last_rotated": entry.last_rotated,
+        "source": entry.source,
+    }
+
+
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
+def passkey_find(
+    vars: list[str] | None = None,
+    from_file: str | None = None,
+) -> dict:
+    """Reverse-lookup which passkey entries store given environment variable names.
+
+    Matches exact names, service-specific aliases (e.g., GH_TOKEN <-> GITHUB_TOKEN),
+    and entry-scoped generic fields (e.g., RESEND_API_KEY -> resend/API_KEY) across
+    both secret fields and config keys without reading or exposing values.
+
+    Args:
+        vars: Environment variable names to find (e.g., ["RESEND_API_KEY", "GH_TOKEN"])
+        from_file: Optional path to a safe template file (e.g., ".env.example")
+
+    Returns:
+        Dictionary with matches, results, resolved_entries, missing_vars, and suggested_run_command.
+    """
+    from .find import find_env_vars
+    from .hooks import is_sensitive_secret_path
+
+    safe_file: Path | None = None
+    if from_file is not None:
+        if is_sensitive_secret_path(from_file):
+            return {
+                "ok": False,
+                "error_code": "SENSITIVE_FILE_REFUSED",
+                "message": (
+                    f"Refusing to read sensitive secret file '{_sanitize(from_file)}'. "
+                    "Pass '.env.example' or '.env.template' instead."
+                ),
+                "missing_vars": [],
+            }
+        forbidden, resolved = _is_forbidden_system_path(from_file)
+        if forbidden:
+            return {
+                "ok": False,
+                "error_code": "FORBIDDEN_PATH",
+                "message": "Access to system path denied.",
+                "missing_vars": [],
+            }
+        safe_file = resolved
+
+    try:
+        return find_env_vars(vars, from_file=safe_file)
+    except PasskeyError as e:
+        return e.to_error_dict()
+
+
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
+def passkey_preflight_run(
+    entries: list[str],
+    env_files: list[str] | None = None,
+    command: list[str] | None = None,
+) -> dict:
+    """Dry-run preflight for ``passkey run`` without spawning a process or exposing values.
+
+    Validates that all requested entries, ``--env-file`` mappings, ``passkey://``
+    references, active leases, and optional command executable are ready.
+
+    Args:
+        entries: Entry names to inject (e.g., ["stripe", "github"])
+        env_files: Optional dotenv/reference files to validate
+        command: Optional command argv to verify executable availability
+
+    Returns:
+        Secret-free preflight dictionary with ready, injected_env_vars,
+        entries_missing, will_prompt_biometric, and remediation steps.
+    """
+    from .runner import preflight_run
+
+    safe_env_files: list[str] = []
+    for ef in env_files or []:
+        forbidden, resolved = _is_forbidden_system_path(ef)
+        if forbidden:
+            return {
+                "ready": False,
+                "entries_requested": list(entries),
+                "entries_found": [],
+                "entries_missing": [],
+                "env_files": list(env_files or []),
+                "env_files_missing": [ef],
+                "references_checked": 0,
+                "references_valid": [],
+                "references_invalid": [],
+                "injected_env_vars": [],
+                "prompt_entries_without_lease": [],
+                "will_prompt_biometric": False,
+                "command": list(command) if command else None,
+                "command_executable_found": None,
+                "remediation": ["Access to system path denied."],
+            }
+        safe_env_files.append(str(resolved))
+
+    try:
+        return preflight_run(entries, command=command, env_files=safe_env_files)
+    except PasskeyError as e:
+        raise Exception(f"Preflight check failed: {e}") from e
+
+
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
+def passkey_project_status(
+    project_dir: str = ".",
+    command: list[str] | None = None,
+) -> dict:
+    """Inspect repo secret manifest (.env.passkey / .passkey.toml), HMAC trust, and readiness.
+
+    Auto-discovers the project manifest up to the enclosing git root, verifies
+    whether its SHA-256 digest is trusted in ``trusted_projects.json``, and
+    preflights all referenced entries and ``passkey://`` URIs without exposing
+    any secret values.
+
+    Args:
+        project_dir: Project directory to inspect (default: current directory)
+        command: Optional command argv to verify executable availability
+
+    Returns:
+        Secret-free dictionary with manifest_found, trusted, trust_status,
+        ready, injected_env_vars, will_prompt_biometric, and remediation steps.
+    """
+    from .project import get_project_status
+
+    forbidden, resolved = _is_forbidden_system_path(project_dir)
+    if forbidden:
+        return {
+            "ok": False,
+            "error_code": "FORBIDDEN_PATH",
+            "message": "Access to system path denied.",
+            "manifest_found": False,
+            "trusted": False,
+            "ready": False,
+        }
+
+    try:
+        return get_project_status(resolved, command=command)
+    except PasskeyError as e:
+        return e.to_error_dict()
+
+
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
 def passkey_status() -> dict:
     """Show security status of MCP servers across all detected tools.
 
@@ -115,7 +383,7 @@ def passkey_status() -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
 def passkey_doctor(deep: bool = False) -> dict:
     """Run diagnostics on passkey and MCP configurations.
 
@@ -145,26 +413,10 @@ def _validate_config_paths(paths: list[str]) -> list[Path]:
     system-protected directories. Nonexistent paths are passed through
     so the caller can produce appropriate error messages.
     """
-    _FORBIDDEN_PREFIXES = (
-        "/etc/", "/private/etc/", "/dev/", "/proc/", "/sys/", "/bin/", "/sbin/",
-        "/usr/bin/", "/usr/sbin/", "/usr/lib/", "/lib/", "/boot/",
-        "/var/root/", "/private/var/", "/System/",
-    )
     resolved = []
     for p in paths:
-        expanded = Path(p).expanduser()
-        pp = expanded.resolve()
-        if pp.suffix not in (".json", ".jsonc"):
-            continue
-        expanded_str = str(expanded)
-        resolved_str = str(pp)
-        # Allow macOS per-user temporary directories (/private/var/folders/...)
-        if resolved_str.startswith("/private/var/folders/"):
-            resolved.append(pp)
-            continue
-        if expanded_str.startswith(_FORBIDDEN_PREFIXES) or resolved_str.startswith(
-            _FORBIDDEN_PREFIXES
-        ):
+        forbidden, pp = _is_forbidden_system_path(p)
+        if forbidden or pp.suffix not in (".json", ".jsonc"):
             continue
         resolved.append(pp)
     return resolved
@@ -178,7 +430,67 @@ def _sanitize(s: str) -> str:
     return _SAFE_NAME.sub("", s)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_CONFIG_MUTATING_ANNOTATIONS)
+def passkey_request_secret(
+    entry_name: str,
+    fields: list[str],
+    policy: str | None = None,
+    hint: str | None = None,
+    reason: str | None = None,
+    timeout: int = 120,
+    overwrite: bool = False,
+) -> dict:
+    """Prompt the human user via an out-of-band native OS hidden dialog to save or rotate secrets.
+
+    Opens a secure macOS/Linux password dialog directly on the user's desktop,
+    stores the entered value(s) straight into the OS keychain, and returns only
+    field names and status — secret values NEVER enter AI context or tool output.
+    Automatically skips fields that already exist unless ``overwrite=True`` or
+    an error/expiry ``reason`` is provided (which triggers a native rotation
+    notification + ``Passkey - Rotate Secret`` prompt and stamps ``last_rotated``).
+
+    Args:
+        entry_name: Keychain entry name to create or update (e.g., "stripe_dev")
+        fields: Environment variable / field names to capture (max 10)
+        policy: Optional access policy ('allow', 'session', or 'prompt')
+        hint: Optional short hint shown in the dialog (e.g., where to find the key)
+        reason: Optional error/expiry reason (e.g., "401 Unauthorized: token expired")
+        timeout: Seconds to wait before timing out (5-300, default: 120)
+        overwrite: Re-prompt even if requested fields already exist
+
+    Returns:
+        Secret-free dictionary with ok, status ('created'|'updated'|'already_exists'),
+        entry, fields_saved, fields_present, policy, and optional rotated/last_rotated.
+    """
+    from .request_secret import request_secret
+    from .settings import mcp_write_tools_enabled
+
+    if not mcp_write_tools_enabled():
+        return {
+            "ok": False,
+            "error_code": "MCP_WRITE_DISABLED",
+            "message": (
+                "MCP write tools are disabled by policy (mcp-write-tools = False). "
+                "Enable with 'passkey config mcp-write-tools on' or ask the user to run "
+                f"'passkey new {_sanitize(entry_name)}' in their terminal."
+            ),
+        }
+
+    try:
+        return request_secret(
+            entry_name,
+            fields,
+            policy=policy,
+            hint=hint,
+            reason=reason,
+            timeout=timeout,
+            overwrite=overwrite,
+        )
+    except PasskeyError as e:
+        return e.to_error_dict()
+
+
+@mcp.tool(annotations=_CONFIG_MUTATING_ANNOTATIONS)
 def passkey_wrap_server(
     server_name: str,
     config_paths: list[str] | None = None,
@@ -270,37 +582,29 @@ def passkey_wrap_server(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
 def passkey_validate_references(file_path: str) -> dict:
     """Validate passkey://<entry>/<field> secret references in a template or env file.
 
     Checks whether every referenced entry and field exists in the keychain
-    without exposing any secret values.
+    without exposing any secret values, and reports prompt-gated entries lacking a lease.
 
     Args:
         file_path: Path to a template or .env.passkey file containing passkey:// references
 
     Returns:
-        Dictionary with {"valid": bool, "checked": int, "missing": [...]}
+        Dictionary with {"valid": bool, "checked": int, "missing": [...], "prompt_entries_without_lease": [...]}
     """
     from .references import validate_references_in_file
 
-    _FORBIDDEN_PREFIXES = (
-        "/etc/", "/private/etc/", "/dev/", "/proc/", "/sys/", "/bin/", "/sbin/",
-        "/usr/bin/", "/usr/sbin/", "/usr/lib/", "/lib/", "/boot/",
-        "/var/root/", "/private/var/", "/System/",
-    )
-    expanded = Path(file_path).expanduser()
-    resolved = expanded.resolve()
-    resolved_str = str(resolved)
-    if not resolved_str.startswith("/private/var/folders/") and (
-        str(expanded).startswith(_FORBIDDEN_PREFIXES)
-        or resolved_str.startswith(_FORBIDDEN_PREFIXES)
-    ):
+    forbidden, resolved = _is_forbidden_system_path(file_path)
+    if forbidden:
         return {
             "valid": False,
             "checked": 0,
             "missing": [{"reference": "", "reason": "Access to system path denied"}],
+            "prompt_entries_without_lease": [],
+            "will_prompt_biometric": False,
         }
 
     try:
@@ -310,10 +614,12 @@ def passkey_validate_references(file_path: str) -> dict:
             "valid": False,
             "checked": 0,
             "missing": [{"reference": "", "reason": str(e)}],
+            "prompt_entries_without_lease": [],
+            "will_prompt_biometric": False,
         }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
 def passkey_audit_recent(limit: int = 20) -> list[dict]:
     """Return recent sanitized audit log records with caller attribution.
 
@@ -330,7 +636,7 @@ def passkey_audit_recent(limit: int = 20) -> list[dict]:
     return get_sanitized_recent_logs(limit=limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_BROWSER_MUTATING_ANNOTATIONS)
 def passkey_cdp_autofill(entry_name: str, cdp_url: str) -> dict:
     """Deterministically fill credentials into a local Chrome DevTools browser tab.
 
@@ -364,6 +670,68 @@ def passkey_cdp_autofill(entry_name: str, cdp_url: str) -> dict:
             "filled": False,
             "message": str(e),
         }
+
+
+@mcp.prompt(
+    name="setup-project-secrets",
+    description="Inspect project secret requirements and configure safe passkey runtime injection.",
+)
+def setup_project_secrets(project_dir: str = ".") -> str:
+    """Guided workflow for wiring project credentials via passkey without exposing secrets."""
+    safe_dir = _sanitize(project_dir) or "."
+    return (
+        f"Set up passkey secret injection for project directory '{safe_dir}' following these steps:\n"
+        "1. Call `passkey_project_status` and inspect safe templates in the repo (.env.example, "
+        ".env.template, .env.passkey, .passkey.toml) — NEVER read .env, *.backup, or *.enc files.\n"
+        "2. Call `passkey_find(from_file='.env.example')` (or `passkey_list` + `passkey_entry_info` / "
+        "`passkey_validate_references`) to map required environment variables to keychain entries.\n"
+        "3. For any missing entry or field, NEVER ask the user to paste secret values in chat. "
+        "Capture them directly via `passkey_request_secret(entry_name=..., fields=[...], policy='session')` "
+        "or give the user the terminal command `passkey new <entry>`.\n"
+        "4. Bootstrap a committable `.env.passkey` with `passkey project init`, then call "
+        "`passkey_preflight_run` or `passkey_project_status` to verify `ready == true` and `will_prompt_biometric`.\n"
+        "5. Execute commands zero-config via `passkey exec -q -- <command>` "
+        "(or `passkey run -q --strict <entry> -- <command>`)."
+    )
+
+
+@mcp.prompt(
+    name="debug-missing-credential",
+    description="Diagnose missing entries, missing fields, or Touch ID policy blocks for a passkey entry.",
+)
+def debug_missing_credential(entry_name: str, command: str = "") -> str:
+    """Guided diagnostic playbook when a command fails due to missing or blocked secrets."""
+    safe_entry = _sanitize(entry_name)
+    safe_cmd = _sanitize(command)
+    cmd_hint = f" for command `{safe_cmd}`" if safe_cmd else ""
+    return (
+        f"Diagnose credential availability for passkey entry '{safe_entry}'{cmd_hint}:\n"
+        f"1. Call `passkey_entry_info(entry_name='{safe_entry}')` (or `passkey_find` if only the env var is known).\n"
+        f"   - If `exists` is false or fields are missing, call `passkey_request_secret` to open a native OS "
+        f"hidden input dialog, or instruct the user to run `passkey new {safe_entry}` in their terminal.\n"
+        "   - Inspect `fields` and `config_keys` to verify all expected environment variable names exist.\n"
+        f"   - If `will_prompt_biometric` is true: `policy == 'session'` will prompt Touch ID once for this "
+        f"agent session; for `policy == 'prompt'`, ask the user to run `passkey lease grant {safe_entry} --ttl 15m`.\n"
+        f"2. Call `passkey_preflight_run(entries=['{safe_entry}'])` to verify end-to-end injection readiness.\n"
+        "3. Call `passkey_doctor()` if keychain access or PATH resolution is failing.\n"
+        "4. Security invariant: never request or echo raw secret values."
+    )
+
+
+@mcp.prompt(
+    name="migrate-exposed-mcp-configs",
+    description="Audit MCP client configs for plaintext secrets and guide migration to the OS keychain.",
+)
+def migrate_exposed_mcp_configs() -> str:
+    """Guided workflow for auditing and securing plaintext MCP server configurations."""
+    return (
+        "Audit and secure MCP server configurations across installed AI tools:\n"
+        "1. Call `passkey_status()` and `passkey_doctor()` to identify servers with `status == 'exposed'`, "
+        "`'partial'`, or `'broken'`.\n"
+        "2. Summarize exposed server names and secret key names (never secret values) by tool.\n"
+        "3. Preview migration safely with `passkey init --dry-run --tool <tool>`, then instruct the user "
+        "to run `passkey init --tool <tool>` (or use `passkey_wrap_server` once entries exist in the keychain)."
+    )
 
 
 def main():

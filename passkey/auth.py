@@ -266,5 +266,6 @@ def require_auth(operation: str = "access secrets") -> None:
     """Require authentication or raise PasskeyError."""
     if not authenticate(f"Passkey: {operation}"):
         raise PasskeyError(
-            f"Authentication required to {operation}. Authentication failed or was cancelled."
+            f"Authentication required to {operation}. Authentication failed or was cancelled.",
+            error_code="BIOMETRIC_DENIED",
         )

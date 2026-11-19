@@ -116,7 +116,15 @@ def resolve_reference(
             entry_cache[entry_name] = entry
 
     if entry is None:
-        raise PasskeyError(f"Referenced entry '{entry_name}' not found")
+        raise PasskeyError(
+            f"Referenced entry '{entry_name}' not found. "
+            f"Ask the user to run 'passkey new {entry_name}' in their terminal "
+            "(never paste secrets into chat).",
+            error_code="ENTRY_NOT_FOUND",
+            entry=entry_name,
+            missing_fields=[field_name],
+            remediation_command=f"passkey new {entry_name}",
+        )
 
     if authorize_fn is not None:
         authorize_fn(entry)
@@ -126,7 +134,14 @@ def resolve_reference(
     if field_name in entry.config:
         return entry.config[field_name], False
 
-    raise PasskeyError(f"Field '{field_name}' not found in entry '{entry_name}'")
+    raise PasskeyError(
+        f"Field '{field_name}' not found in entry '{entry_name}'. "
+        f"Ask the user to run 'passkey entry set-field {entry_name} {field_name}' in their terminal.",
+        error_code="MISSING_FIELD",
+        entry=entry_name,
+        missing_fields=[field_name],
+        remediation_command=f"passkey entry set-field {entry_name} {field_name}",
+    )
 
 
 def parse_dotenv_file(path: Path) -> dict[str, str]:
@@ -215,10 +230,14 @@ def validate_references_in_file(
     if not path.exists() or not path.is_file():
         raise PasskeyError(f"Reference template file not found: '{path}'")
 
+    from .leases import peek_all_leases
+
+    active_leases = peek_all_leases()
     content = path.read_text(encoding="utf-8")
     uris = extract_references_from_text(content)
     cache: dict[str, Entry | None] = {}
     missing: list[dict[str, str]] = []
+    prompt_without_lease: set[str] = set()
 
     for uri in uris:
         try:
@@ -239,9 +258,19 @@ def validate_references_in_file(
                     "reason": f"field '{field_name}' not found in entry '{entry_name}'",
                 }
             )
+        elif getattr(entry, "policy", "allow") in ("prompt", "session") and (
+            entry_name not in active_leases
+            or (
+                getattr(entry, "policy", "allow") == "prompt"
+                and active_leases[entry_name].get("lease_kind") == "session"
+            )
+        ):
+            prompt_without_lease.add(entry_name)
 
     return {
         "valid": len(missing) == 0,
         "checked": len(uris),
         "missing": missing,
+        "prompt_entries_without_lease": sorted(prompt_without_lease),
+        "will_prompt_biometric": bool(prompt_without_lease),
     }

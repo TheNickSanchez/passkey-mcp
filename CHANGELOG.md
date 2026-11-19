@@ -8,6 +8,49 @@
 
 ## [Unreleased]
 
+## 0.8.0 (2026-11-19)
+
+### Added
+
+- **Structured error codes & `PASSKEY_OUTPUT=json` envelopes**: `PasskeyError` and `InteractiveRequiredError` now carry structured `error_code`, `entry`, `missing_fields`, and `remediation_command` metadata, emitting deterministic `{"ok": false, "error_code": ..., ...}` JSON envelopes whenever `--json` or `PASSKEY_OUTPUT=json` is active (routing to `stderr` on child-wrapping commands `run`, `exec`, and `plugin run` so child `stdout` pipelines stay pristine).
+- **Reverse env-var lookup (`passkey find` & MCP `passkey_find`)**: locate which keychain entry owns one or more environment variables (`passkey find RESEND_API_KEY GH_TOKEN --json` or `passkey find --from-file .env.example --json`) via 3-tier matching across exact keys, service-specific aliases, and entry-scoped generic names without reading or exposing secret values.
+- **Zero-config repo manifests, HMAC trust guard & `passkey exec` (`passkey/project.py`)**: added `passkey project init|status|trust`, `passkey exec -- <command>`, and MCP `passkey_project_status` to auto-discover `.env.passkey` / `.passkey.toml` up to the enclosing git root, verify SHA-256 digests against HMAC-signed `<data_dir>/trusted_projects.json` (`__trust_hmac_key__`), prompt Touch ID once on untrusted/modified manifests, and inject secrets with `SecretMasker` enabled.
+- **Session-scoped Touch ID policy (`policy = session`)**: added `"session"` alongside `"allow"` and `"prompt"`, prompting Touch ID once per AI agent or terminal session (`"Passkey: unlock '<entry>' for <agent> (10m session)"`) and minting an HMAC-signed lease bound to `(ancestor_pid, process_start_time)` (configurable via `passkey config agent-session-lease-ttl`, default `600s`), while keeping `policy = prompt` strictly per-invocation.
+- **Out-of-band native OS secret capture & rotation (`passkey request` & MCP `passkey_request_secret`)**: agents can trigger a native OS hidden password dialog (`osascript -` StandardAdditions `display dialog ... with hidden answer` via 7-bit ASCII `system attribute` env vars on macOS; `zenity --password` on Linux) that saves secrets directly into the OS keychain and returns only field metadata, with `--reason` expired-token Notification Center alerts (`Passkey - Rotate Secret` + automatic `last_rotated` stamping), idempotent field merging, and popup cooldown rate-limiting.
+- **Multi-tool hook onboarding (`passkey hook install --tool all`) & `ANTIGRAVITY_AGENT` detection**: added `--tool all` to `passkey hook install` (pairing with `--with-skill`) and registered `ANTIGRAVITY_AGENT` in `_HEADLESS_AGENT_ENV_VARS` / `_AGENT_ENV_MARKERS`.
+
+### Security
+
+- **Seatbelt-compatible kernel process lineage (`proc_pidinfo` / `/proc/<pid>/stat`)**: replaced `/bin/ps` subprocess calls in `passkey/audit.py` with direct `libSystem.proc_pidinfo` (`PROC_PIDTBSDINFO`) on macOS and `/proc/<pid>/stat` on Linux, eliminating restricted-binary failures inside macOS Seatbelt sandboxes and providing microsecond-resolution start timestamps for PID-reuse defense.
+- **Keychain-vs-tampering error precision & MCP directory path blocking**: `trusted_projects.json` and `leases.json` now raise `KeychainAccessError` (`KEYCHAIN_ACCESS_ERROR`) instead of minting a mismatched fallback key when Keychain IPC is blocked (e.g., macOS Seatbelt `-50`), and `_is_forbidden_system_path` blocks bare protected system directories (`/etc`) alongside file paths (`/etc/passwd`).
+
+## 0.7.0 (2026-11-18)
+
+### Added
+
+- **Non-TTY & PTY AI agent fail-fast (`--no-input`, exit code `2`)**: interactive commands (`passkey`, `new`, `edit`, `get`, `delete`, `set-field`, `rotate`, `init`, `add`, `share`, `receive`, `export --encrypt`, `import --decrypt`, `audit --clear`, `template apply|add`, and positional `passkey <entry>`) now fail fast with exit code `2` and actionable remediation hints when `--no-input` is set, stdin/stdout is not a TTY, or a headless AI agent environment variable (`CLAUDECODE`, `CURSOR_AGENT`, `GEMINI_CLI`, `CODEX_ENV`, `OPENAI_CODEX`, `AIDER`) is detected (`PASSKEY_ALLOW_INTERACTIVE=1` overrides).
+- **Headless confirmation & rotation flags (`--yes`, `--touch-only`)**: added `-y`/`--yes` to `passkey delete`, `passkey init`, and `passkey audit --clear`, and `--touch-only` to `passkey rotate`.
+- **Deterministic secret-free `--json` across CLI read & diagnostic commands**: added `--json` to `list`, `info`, `check`, `doctor`, `audit` (including `--summary` and `--verify`), `lease list`, `plugin list` (with `entry_exists`), `policy`, `config`, and `skill install`, and ensured empty `status --json` and `servers --json` emit `[]` instead of human text.
+- **Preflight `passkey run --dry-run [--json]` & `--strict`**: validates entries, `--env-file` mappings, `passkey://` references, `prompt` policy / active leases (`peek_lease`), and target command executables without spawning a child process or exposing secret values; `--strict` exits `1` immediately when any requested entry is missing.
+- **Richer MCP discovery, preflight & prompts (`passkey/mcp_server.py`)**: added `passkey_entry_info` and `passkey_preflight_run`, enriched `passkey_validate_references` with `prompt_entries_without_lease` and `will_prompt_biometric`, added `FastMCP` server `instructions`, `ToolAnnotations` (`readOnlyHint` / `destructiveHint`) on all 10 tools, and 3 `@mcp.prompt()` workflows (`setup-project-secrets`, `debug-missing-credential`, `migrate-exposed-mcp-configs`).
+- **Agent skill & rules installer (`passkey/skills.py`)**: added `passkey skill install --tool claude|cursor|gemini|agents|all` and `passkey hook install --with-skill` to atomically install concise golden-rule instructions into `.claude/skills/passkey/SKILL.md`, `.cursor/rules/passkey.mdc`, `.gemini/skills/passkey/SKILL.md`, and bounded `AGENTS.md` markers.
+- **Bounded `passkey mount --timeout` & stale-FIFO diagnostics**: added `--timeout <seconds>` (non-blocking `O_WRONLY | O_NONBLOCK` polling without `signal.alarm`), fast-fail guard for unbounded headless `mount`, and specific `rm '<path>'` guidance when a stale FIFO exists.
+
+### Changed
+
+- **Lazy `FastMCP` import & read-only lease inspection**: `passkey.cli` now lazy-imports `passkey.mcp_server` only on `mcp-serve` (avoiding startup overhead and `.env` FIFO consumption by `FastMCP`'s Pydantic BaseSettings), and `peek_lease()` / `peek_all_leases()` inspect active leases without decrementing `remaining_uses` or writing `read` audit entries during metadata checks.
+- **Actionable agent remediation hints & banner suppression**: missing entry/field errors across `runner`, `references`, `commands`, `hooks`, and `mcp_server` instruct agents to ask the human user to run `passkey new <entry>` or `passkey lease grant <entry> --ttl 15m` rather than pasting secrets in chat, and `passkey run` automatically suppresses the multi-line `SECURITY WARNING` banner inside detected AI agent subprocesses.
+
+### Security
+
+- **Hardened `passkey hook check` & `passkey inject` git-exposure guard**: pre-execution hooks now strip `--no-input` before subcommand matching and additionally block `passkey get` / `entry get`, `passkey generate --no-copy`, and `passkey inject --stdout` / `-o -`; `passkey inject` refuses writing to non-gitignored paths inside git repositories unless `--force-git-exposed` is passed.
+
+### Fixed
+
+- `passkey rotate` and non-interactive `edit` no longer stamp `last_rotated` or re-save unchanged entries when `prompt_secret` raises `EOFError` or receives empty input.
+
+## 0.6.0 (2026-11-18)
+
 ### Added
 
 - **Real-time masked secret input (`prompt_secret`)**: `passkey new`, `edit`, `set-field`, `rotate`, and `add` now echo `•` bullets alongside a live character counter, with `Backspace`/`Delete`, `Ctrl+U` clear, and `Ctrl+R`/`Tab` temporary reveal (auto-remasked on `Enter` so terminal scrollback never retains secrets).

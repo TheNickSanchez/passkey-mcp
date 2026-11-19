@@ -1,6 +1,7 @@
 """Tamper-evident HMAC hash-chained audit logging with caller attribution."""
 
 import contextlib
+import ctypes
 import hashlib
 import hmac
 import json
@@ -29,6 +30,7 @@ _AGENT_ENV_MARKERS: tuple[tuple[str, str], ...] = (
     ("CURSOR_TRACE_ID", "cursor"),
     ("CURSOR_AGENT", "cursor"),
     ("GEMINI_CLI", "gemini-cli"),
+    ("ANTIGRAVITY_AGENT", "antigravity"),
     ("CODEX_ENV", "codex"),
     ("OPENAI_CODEX", "codex"),
     ("VSCODE_PID", "vscode"),
@@ -39,6 +41,8 @@ _KNOWN_AGENT_PROCS = (
     "cursor",
     "gemini",
     "codex",
+    "agy",
+    "antigravity",
     "opencode",
     "windsurf",
     "zed",
@@ -58,6 +62,7 @@ _SAFE_DETAIL_KEYS = frozenset(
         "fields_injected",
         "format",
         "issues",
+        "manifests",
         "max_uses",
         "mode",
         "new_name",
@@ -67,8 +72,11 @@ _SAFE_DETAIL_KEYS = frozenset(
         "read_count",
         "reads_served",
         "resolved_references",
+        "scope",
+        "session_pid",
         "skipped",
         "source",
+        "trust_status",
         "ttl_seconds",
         "updated",
     }
@@ -122,7 +130,106 @@ def _compute_hmac(key: bytes, record: dict) -> str:
     return hmac.new(key, _canonical_record_bytes(record), hashlib.sha256).hexdigest()
 
 
-def _walk_ppid_chain(max_depth: int = 6) -> list[dict[str, object]]:
+_EPHEMERAL_SHELL_NAMES = frozenset(
+    {"sh", "bash", "zsh", "dash", "fish", "ksh", "csh", "tcsh", "login"}
+)
+
+
+class _MacProcBsdInfo(ctypes.Structure):
+    """macOS XNU proc_bsdinfo layout for PROC_PIDTBSDINFO (flavor 3)."""
+
+    _fields_ = [
+        ("pbi_flags", ctypes.c_uint32),
+        ("pbi_status", ctypes.c_uint32),
+        ("pbi_xstatus", ctypes.c_uint32),
+        ("pbi_pid", ctypes.c_uint32),
+        ("pbi_ppid", ctypes.c_uint32),
+        ("pbi_uid", ctypes.c_uint32),
+        ("pbi_gid", ctypes.c_uint32),
+        ("pbi_ruid", ctypes.c_uint32),
+        ("pbi_rgid", ctypes.c_uint32),
+        ("pbi_svuid", ctypes.c_uint32),
+        ("pbi_svgid", ctypes.c_uint32),
+        ("rfu_1", ctypes.c_uint32),
+        ("pbi_comm", ctypes.c_char * 16),
+        ("pbi_name", ctypes.c_char * 32),
+        ("pbi_nfiles", ctypes.c_uint32),
+        ("pbi_pgid", ctypes.c_uint32),
+        ("pbi_pjobc", ctypes.c_uint32),
+        ("e_tdev", ctypes.c_uint32),
+        ("e_tpgid", ctypes.c_uint32),
+        ("pbi_nice", ctypes.c_int32),
+        ("pbi_start_tvsec", ctypes.c_uint64),
+        ("pbi_start_tvusec", ctypes.c_uint64),
+    ]
+
+
+_MAC_LIBSYSTEM = None
+
+
+def _query_pid_info(pid: int) -> tuple[int, str, str] | None:
+    """Return (ppid, comm, start_token) for pid without spawning restricted /bin/ps when possible."""
+    global _MAC_LIBSYSTEM
+    if pid <= 0:
+        return None
+
+    if sys.platform == "darwin":
+        try:
+            if _MAC_LIBSYSTEM is None:
+                _MAC_LIBSYSTEM = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            info = _MacProcBsdInfo()
+            ret = _MAC_LIBSYSTEM.proc_pidinfo(
+                int(pid), 3, 0, ctypes.byref(info), ctypes.sizeof(info)
+            )
+            if ret > 0:
+                name_str = info.pbi_name.decode("utf-8", errors="replace").strip()
+                comm_str = info.pbi_comm.decode("utf-8", errors="replace").strip()
+                comm = name_str or comm_str or "unknown"
+                start_tok = f"{info.pbi_start_tvsec}.{info.pbi_start_tvusec}"
+                return int(info.pbi_ppid), comm, start_tok
+        except Exception:
+            pass
+
+    if sys.platform.startswith("linux"):
+        try:
+            stat_text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+            lpar = stat_text.find("(")
+            rpar = stat_text.rfind(")")
+            if lpar != -1 and rpar > lpar:
+                comm = stat_text[lpar + 1 : rpar].strip() or "unknown"
+                rest = stat_text[rpar + 2 :].split()
+                # rest[0]=state, rest[1]=ppid, ..., rest[19]=starttime
+                if len(rest) >= 20:
+                    return int(rest[1]), comm, f"linux:{rest[19]}"
+        except (OSError, ValueError):
+            pass
+
+    if sys.platform == "win32":
+        return (0, "unknown", f"win32:{pid}")
+
+    # POSIX fallback via ps if non-sandboxed
+    try:
+        proc = subprocess.run(
+            ["ps", "-o", "ppid=,lstart=,comm=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=0.5,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            tokens = proc.stdout.strip().split()
+            # ppid (1) + lstart (5 tokens: Day Mon DD HH:MM:SS YYYY) + comm (rest)
+            if len(tokens) >= 7:
+                ppid_val = int(tokens[0])
+                start_tok = " ".join(tokens[1:6])
+                comm = Path(" ".join(tokens[6:])).name or "unknown"
+                return ppid_val, comm, start_tok
+    except (ValueError, OSError, subprocess.SubprocessError):
+        pass
+
+    return None
+
+
+def _walk_ppid_chain(max_depth: int = 10) -> list[dict[str, object]]:
     """Walk parent PIDs on POSIX to identify invoking CLI/IDE processes."""
     pid = os.getpid()
     ppid = os.getppid()
@@ -143,22 +250,12 @@ def _walk_ppid_chain(max_depth: int = 6) -> list[dict[str, object]]:
         if curr <= 1 or curr in visited:
             break
         visited.add(curr)
-        try:
-            proc = subprocess.run(
-                ["ps", "-o", "ppid=,comm=", "-p", str(curr)],
-                capture_output=True,
-                text=True,
-                timeout=0.5,
-            )
-            if proc.returncode != 0 or not proc.stdout.strip():
-                break
-            parts = proc.stdout.strip().split(None, 1)
-            next_ppid = int(parts[0])
-            comm = Path(parts[1].strip()).name if len(parts) > 1 else "unknown"
-            chain.append({"pid": curr, "comm": comm})
-            curr = next_ppid
-        except (ValueError, OSError, subprocess.SubprocessError):
+        queried = _query_pid_info(curr)
+        if queried is None:
             break
+        next_ppid, comm, _ = queried
+        chain.append({"pid": curr, "comm": Path(comm).name or "unknown"})
+        curr = next_ppid
 
     _PPID_CACHE[cache_key] = chain
     return list(chain)
@@ -190,6 +287,80 @@ def detect_actor() -> dict:
         "client": detected_client or "terminal",
         "pid": os.getpid(),
         "ppid_chain": ppid_chain,
+    }
+
+
+def get_process_start_token(pid: int) -> str | None:
+    """Return a deterministic OS process start-time token for PID-reuse defense."""
+    queried = _query_pid_info(pid)
+    return queried[2] if queried is not None else None
+
+
+def get_caller_ancestor_pids() -> set[int]:
+    """Return the set of PIDs in the current process's lineage (self + ancestors)."""
+    pids: set[int] = {os.getpid()}
+    ppid = os.getppid()
+    if ppid > 0:
+        pids.add(ppid)
+    for item in _walk_ppid_chain():
+        anc_pid = item.get("pid")
+        if isinstance(anc_pid, int) and anc_pid > 0:
+            pids.add(anc_pid)
+    return pids
+
+
+def get_session_anchor() -> dict | None:
+    """Identify the stable ancestor process anchoring the current agent or terminal session."""
+    actor = detect_actor()
+    ppid_chain = actor["ppid_chain"]
+    anchor_pid: int | None = None
+
+    # 1. Prefer an explicit known AI agent process in the ancestor chain
+    for item in ppid_chain:
+        comm_lower = str(item.get("comm", "")).lower().lstrip("-")
+        if any(agent_name in comm_lower for agent_name in _KNOWN_AGENT_PROCS):
+            cand = item.get("pid")
+            if isinstance(cand, int) and cand > 1:
+                anchor_pid = cand
+                break
+
+    # 2. If running in an env-marked agent session (e.g. node/python runner spawning sh -c),
+    #    step past ephemeral wrapper shells to bind to the persistent runner process.
+    if anchor_pid is None and actor["type"] == "agent":
+        vscode_pid_raw = os.environ.get("VSCODE_PID", "")
+        if vscode_pid_raw.isdigit():
+            vpid = int(vscode_pid_raw)
+            if vpid in get_caller_ancestor_pids():
+                anchor_pid = vpid
+        if anchor_pid is None:
+            for item in ppid_chain:
+                comm_base = Path(str(item.get("comm", ""))).name.lower().lstrip("-")
+                cand = item.get("pid")
+                if (
+                    isinstance(cand, int)
+                    and cand > 1
+                    and comm_base not in _EPHEMERAL_SHELL_NAMES
+                ):
+                    anchor_pid = cand
+                    break
+
+    # 3. Fallback to immediate parent (interactive terminal shell) or current PID
+    if anchor_pid is None:
+        if ppid_chain and isinstance(ppid_chain[0].get("pid"), int):
+            anchor_pid = int(ppid_chain[0]["pid"])
+        elif os.getppid() > 1:
+            anchor_pid = os.getppid()
+        else:
+            anchor_pid = os.getpid()
+
+    start_time = get_process_start_token(anchor_pid)
+    if not start_time:
+        return None
+
+    return {
+        "pid": anchor_pid,
+        "start_time": start_time,
+        "client": str(actor.get("client") or "terminal"),
     }
 
 

@@ -29,15 +29,18 @@ _BASH_SCRIPT = '''\
 # Add to ~/.bashrc: eval "$(passkey completion --bash)"
 
 _passkey_completions() {
-    local cur prev commands entries
+    local cur prev commands entries global_flags
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    commands="new list get edit delete info entry clone set-field policy run inject mount hook export import check audit mcp mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill help version"
+    commands="new request list find get edit delete info entry clone set-field policy run exec project inject mount hook skill export import check audit mcp mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill help version"
+    global_flags="--no-input --help --version"
 
-    # First argument: complete subcommands or entry names
+    # First argument: complete subcommands, global flags, or entry names
     if [[ ${COMP_CWORD} -eq 1 ]]; then
-        if [[ -z "$cur" ]]; then
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=( $(compgen -W "$global_flags" -- "$cur") )
+        elif [[ -z "$cur" ]]; then
             COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
         else
             # Try matching entries first, fall back to commands
@@ -53,19 +56,87 @@ _passkey_completions() {
 
     # Subcommand-specific completions
     case "$prev" in
-        get|edit|delete|info|set-field|policy|check|browser-fill)
+        get|edit|set-field|browser-fill)
             entries=$(passkey list --names-only 2>/dev/null)
-            COMPREPLY=( $(compgen -W "$entries" -- "$cur") )
+            COMPREPLY=( $(compgen -W "$entries --no-input" -- "$cur") )
+            return 0
+            ;;
+        delete)
+            entries=$(passkey list --names-only 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$entries --yes --no-input" -- "$cur") )
+            return 0
+            ;;
+        info|check)
+            entries=$(passkey list --names-only 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$entries --json --no-input" -- "$cur") )
+            return 0
+            ;;
+        policy)
+            entries=$(passkey list --names-only 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$entries allow session prompt --json --no-input" -- "$cur") )
+            return 0
+            ;;
+        find)
+            COMPREPLY=( $(compgen -W "--from-file --json --no-input" -- "$cur") )
+            return 0
+            ;;
+        request)
+            entries=$(passkey list --names-only 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$entries --fields --policy --hint --reason --timeout --overwrite --json --no-input" -- "$cur") )
+            return 0
+            ;;
+        exec)
+            COMPREPLY=( $(compgen -W "--quiet --dry-run --json --no-strict --no-masking --project-dir --no-input --" -- "$cur") )
+            return 0
+            ;;
+        project)
+            COMPREPLY=( $(compgen -W "init status trust --from-file --project-dir --entries --force --no-trust --revoke --json" -- "$cur") )
+            return 0
+            ;;
+        list|status|servers)
+            COMPREPLY=( $(compgen -W "--json --no-input" -- "$cur") )
+            return 0
+            ;;
+        doctor)
+            COMPREPLY=( $(compgen -W "--deep --json --no-input" -- "$cur") )
+            return 0
+            ;;
+        audit)
+            COMPREPLY=( $(compgen -W "--limit --clear --yes --summary --verify --json --no-input" -- "$cur") )
+            return 0
+            ;;
+        rotate)
+            entries=$(passkey list --names-only 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$entries --touch-only --no-input" -- "$cur") )
             return 0
             ;;
         run)
-            # Complete entry names, then -- after
+            # Complete entry names and run flags, then -- after
             entries=$(passkey list --names-only 2>/dev/null)
             if [[ "$cur" == "--" ]]; then
                 COMPREPLY=("--")
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--quiet --dry-run --json --strict --no-masking --env-file --no-input --" -- "$cur") )
             else
                 COMPREPLY=( $(compgen -W "$entries" -- "$cur") )
             fi
+            return 0
+            ;;
+        inject)
+            COMPREPLY=( $(compgen -W "-i --in-file -o --out-file --stdout --force --force-git-exposed --no-input" -- "$cur") )
+            return 0
+            ;;
+        mount)
+            entries=$(passkey list --names-only 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$entries --path --once --max-reads --timeout --force-git-exposed --quiet --no-input" -- "$cur") )
+            return 0
+            ;;
+        hook)
+            COMPREPLY=( $(compgen -W "install check --with-skill --tool --project-dir" -- "$cur") )
+            return 0
+            ;;
+        skill)
+            COMPREPLY=( $(compgen -W "install --tool --project-dir --json" -- "$cur") )
             return 0
             ;;
         clone)
@@ -74,7 +145,11 @@ _passkey_completions() {
             return 0
             ;;
         init)
-            COMPREPLY=( $(compgen -W "claude gemini vscode cursor opencode windsurf cline zed" -- "$cur") )
+            COMPREPLY=( $(compgen -W "claude gemini vscode cursor opencode windsurf cline zed --dry-run --yes --force --tool --no-input" -- "$cur") )
+            return 0
+            ;;
+        config)
+            COMPREPLY=( $(compgen -W "require-auth mcp-write-tools mcp-browser-broker agent-session-lease-ttl --json" -- "$cur") )
             return 0
             ;;
         completion)
@@ -99,28 +174,104 @@ _ZSH_SCRIPT = '''\
 
 _passkey() {
     local commands entries
-    commands=(new list get edit delete info entry clone set-field policy run inject mount hook export import check audit mcp mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill help version)
+    commands=(new request list find get edit delete info entry clone set-field policy run exec project inject mount hook skill export import check audit mcp mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill help version)
 
     if (( CURRENT == 2 )); then
+        local global_opts=(--no-input --help --version)
         entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
         _describe 'command' commands
+        _describe 'option' global_opts
         _describe 'entry' entries
     else
         case ${words[2]} in
-            get|edit|delete|info|set-field|policy|check|browser-fill)
+            get|edit|set-field|browser-fill)
                 entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
                 _describe 'entry' entries
                 ;;
-            run)
+            delete)
+                local opts=(--yes --no-input)
                 entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
                 _describe 'entry' entries
+                _describe 'option' opts
+                ;;
+            info|check)
+                local opts=(--json --no-input)
+                entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
+                _describe 'entry' entries
+                _describe 'option' opts
+                ;;
+            policy)
+                local opts=(allow session prompt --json --no-input)
+                entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
+                _describe 'entry' entries
+                _describe 'option' opts
+                ;;
+            find)
+                local opts=(--from-file --json --no-input)
+                _describe 'option' opts
+                ;;
+            request)
+                local opts=(--fields --policy --hint --reason --timeout --overwrite --json --no-input)
+                entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
+                _describe 'entry' entries
+                _describe 'option' opts
+                ;;
+            exec)
+                local opts=(--quiet --dry-run --json --no-strict --no-masking --project-dir --no-input)
+                _describe 'option' opts
+                ;;
+            project)
+                local opts=(init status trust --from-file --project-dir --entries --force --no-trust --revoke --json)
+                _describe 'option' opts
+                ;;
+            config)
+                local opts=(require-auth mcp-write-tools mcp-browser-broker agent-session-lease-ttl --json)
+                _describe 'option' opts
+                ;;
+            list|status|servers|doctor)
+                local opts=(--json --deep --no-input)
+                _describe 'option' opts
+                ;;
+            audit)
+                local opts=(--limit --clear --yes --summary --verify --json --no-input)
+                _describe 'option' opts
+                ;;
+            rotate)
+                local opts=(--touch-only --no-input)
+                entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
+                _describe 'entry' entries
+                _describe 'option' opts
+                ;;
+            run)
+                local opts=(--quiet --dry-run --json --strict --no-masking --env-file --no-input)
+                entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
+                _describe 'entry' entries
+                _describe 'option' opts
+                ;;
+            inject)
+                local opts=(-i --in-file -o --out-file --stdout --force --force-git-exposed --no-input)
+                _describe 'option' opts
+                ;;
+            mount)
+                local opts=(--path --once --max-reads --timeout --force-git-exposed --quiet --no-input)
+                entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
+                _describe 'entry' entries
+                _describe 'option' opts
+                ;;
+            hook)
+                local opts=(install check --with-skill --tool --project-dir)
+                _describe 'option' opts
+                ;;
+            skill)
+                local opts=(install --tool --project-dir --json)
+                _describe 'option' opts
                 ;;
             clone)
                 entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
                 _describe 'entry' entries
                 ;;
             init)
-                local tools=(claude gemini vscode cursor opencode windsurf cline zed)
+                local tools=(claude gemini vscode cursor opencode windsurf cline zed --dry-run --yes --no-input)
                 _describe 'tool' tools
                 ;;
             completion)
@@ -147,9 +298,14 @@ function __passkey_entries
     passkey list --names-only 2>/dev/null
 end
 
+# Global flags
+complete -c passkey -l no-input -d 'Never prompt on stdin; fail fast with exit code 2'
+
 # Subcommands
 complete -c passkey -n '__fish_use_subcommand' -a new -d 'Create a new entry'
+complete -c passkey -n '__fish_use_subcommand' -a request -d 'Capture missing secrets via native OS dialog'
 complete -c passkey -n '__fish_use_subcommand' -a list -d 'List all entries'
+complete -c passkey -n '__fish_use_subcommand' -a find -d 'Locate entries by env var name'
 complete -c passkey -n '__fish_use_subcommand' -a get -d 'Browse and copy fields'
 complete -c passkey -n '__fish_use_subcommand' -a edit -d 'Edit an entry'
 complete -c passkey -n '__fish_use_subcommand' -a delete -d 'Delete an entry'
@@ -160,9 +316,12 @@ complete -c passkey -n '__fish_use_subcommand' -a clone -d 'Clone an entry'
 complete -c passkey -n '__fish_use_subcommand' -a set-field -d 'Upsert a field'
 complete -c passkey -n '__fish_use_subcommand' -a policy -d 'Show or set entry access policy'
 complete -c passkey -n '__fish_use_subcommand' -a run -d 'Run command with secrets'
+complete -c passkey -n '__fish_use_subcommand' -a exec -d 'Auto-discover project manifest and run command'
+complete -c passkey -n '__fish_use_subcommand' -a project -d 'Bootstrap and trust project manifests'
 complete -c passkey -n '__fish_use_subcommand' -a inject -d 'Render passkey:// template placeholders'
 complete -c passkey -n '__fish_use_subcommand' -a mount -d 'Mount ephemeral FIFO .env'
 complete -c passkey -n '__fish_use_subcommand' -a hook -d 'Install AI agent pre-execution hooks'
+complete -c passkey -n '__fish_use_subcommand' -a skill -d 'Install AI agent SKILL.md / rules'
 complete -c passkey -n '__fish_use_subcommand' -a export -d 'Export entries'
 complete -c passkey -n '__fish_use_subcommand' -a import -d 'Import entries'
 complete -c passkey -n '__fish_use_subcommand' -a check -d 'Verify entry fields'
@@ -187,9 +346,25 @@ complete -c passkey -n '__fish_use_subcommand' -a help -d 'Show help for any com
 complete -c passkey -n '__fish_use_subcommand' -a version -d 'Show passkey version'
 
 # Entry completions for subcommands that take entry names
-complete -c passkey -n '__fish_seen_subcommand_from get edit delete info set-field policy check browser-fill' -a '(__passkey_entries)' -d 'Entry'
+complete -c passkey -n '__fish_seen_subcommand_from get edit delete info set-field policy check rotate browser-fill request' -a '(__passkey_entries)' -d 'Entry'
+complete -c passkey -n '__fish_seen_subcommand_from policy' -a 'allow session prompt' -d 'Policy'
+complete -c passkey -n '__fish_seen_subcommand_from config' -a 'require-auth mcp-write-tools mcp-browser-broker agent-session-lease-ttl' -d 'Setting'
+complete -c passkey -n '__fish_seen_subcommand_from project' -a 'init status trust' -d 'Project subcommand'
 complete -c passkey -n '__fish_seen_subcommand_from clone' -a '(__passkey_entries)' -d 'Source entry'
-complete -c passkey -n '__fish_seen_subcommand_from run' -a '(__passkey_entries)' -d 'Entry'
+complete -c passkey -n '__fish_seen_subcommand_from run mount' -a '(__passkey_entries)' -d 'Entry'
+
+# Common agent & scripting flags
+complete -c passkey -n '__fish_seen_subcommand_from list find request info check doctor status servers audit policy config lease plugin skill run exec project' -l json -d 'Output as JSON'
+complete -c passkey -n '__fish_seen_subcommand_from find project' -l from-file -d 'Read variable names from template file'
+complete -c passkey -n '__fish_seen_subcommand_from request' -l reason -d 'Error or expiry reason for rotation prompt'
+complete -c passkey -n '__fish_seen_subcommand_from run exec init unwrap import' -l dry-run -d 'Validate or preview without side effects'
+complete -c passkey -n '__fish_seen_subcommand_from run' -l strict -d 'Fail if any requested entry is missing'
+complete -c passkey -n '__fish_seen_subcommand_from delete init audit' -s y -l yes -d 'Skip interactive confirmation'
+complete -c passkey -n '__fish_seen_subcommand_from rotate' -l touch-only -d 'Update last_rotated without prompting'
+complete -c passkey -n '__fish_seen_subcommand_from mount' -l timeout -d 'Max seconds to wait for FIFO reader'
+complete -c passkey -n '__fish_seen_subcommand_from inject mount' -l force-git-exposed -d 'Allow non-gitignored path'
+complete -c passkey -n '__fish_seen_subcommand_from hook' -l with-skill -d 'Also install agent SKILL.md / rules'
+complete -c passkey -n '__fish_seen_subcommand_from skill' -a 'install' -d 'Install agent skill files'
 
 # Positional fallback: passkey <entry>
 complete -c passkey -n 'test (count (commandline -opc)) -eq 1' -a '(__passkey_entries)' -d 'Entry'
@@ -213,6 +388,7 @@ def print_completion(shell: str) -> None:
     }
     if shell not in scripts:
         from .keychain import PasskeyError
+
         raise PasskeyError(
             f"Unknown shell: '{shell}'. Supported: {', '.join(sorted(scripts.keys()))}"
         )

@@ -21,6 +21,7 @@ _SETTINGS_SCHEMA: dict[str, tuple[type, object]] = {
     "require_auth": (bool, False),
     "mcp_write_tools": (bool, True),
     "mcp_browser_broker": (bool, False),
+    "agent_session_lease_ttl": (int, 600),
 }
 
 
@@ -47,7 +48,15 @@ def load_settings() -> dict:
         return defaults
     for key, (typ, default) in _SETTINGS_SCHEMA.items():
         value = data.get(key, default)
-        defaults[key] = value if isinstance(value, typ) else default
+        if typ is int and isinstance(value, bool):
+            defaults[key] = default
+        elif isinstance(value, typ):
+            if key == "agent_session_lease_ttl" and (value <= 0 or value > 7 * 24 * 3600):
+                defaults[key] = default
+            else:
+                defaults[key] = value
+        else:
+            defaults[key] = default
     return defaults
 
 
@@ -69,8 +78,12 @@ def set_setting(key: str, value) -> None:
             f"Unknown setting '{key}'. Known settings: {', '.join(sorted(_SETTINGS_SCHEMA))}"
         )
     typ, _ = _SETTINGS_SCHEMA[key]
-    if not isinstance(value, typ):
+    if (typ is int and isinstance(value, bool)) or not isinstance(value, typ):
         raise PasskeyError(f"Setting '{key}' must be of type {typ.__name__}")
+    if key == "agent_session_lease_ttl" and (value <= 0 or value > 7 * 24 * 3600):
+        raise PasskeyError(
+            "Setting 'agent_session_lease_ttl' must be between 1s and 7d (604800s)."
+        )
 
     settings = load_settings()
     settings[key] = value
@@ -97,6 +110,11 @@ def mcp_browser_broker_enabled() -> bool:
     return bool(load_settings().get("mcp_browser_broker", False))
 
 
+def get_agent_session_lease_ttl() -> int:
+    """Return session lease TTL in seconds for entries with ``policy = 'session'``."""
+    return int(load_settings().get("agent_session_lease_ttl", 600))
+
+
 def _parse_bool(raw: str) -> bool:
     raw = raw.strip().lower()
     if raw in ("on", "true", "yes", "1", "enable", "enabled"):
@@ -106,7 +124,12 @@ def _parse_bool(raw: str) -> bool:
     raise PasskeyError(f"Expected on/off, got '{raw}'")
 
 
-def cmd_config(key: str | None = None, value: str | None = None) -> None:
+def cmd_config(
+    key: str | None = None,
+    value: str | None = None,
+    *,
+    json_output: bool = False,
+) -> None:
     """Show or update passkey settings.
 
     Usage:
@@ -116,6 +139,9 @@ def cmd_config(key: str | None = None, value: str | None = None) -> None:
     """
     if key is None:
         settings = load_settings()
+        if json_output:
+            print(json.dumps(settings, indent=2))
+            return
         print("Passkey settings:")
         for name in sorted(settings):
             print(f"  {name.replace('_', '-')} = {settings[name]}")
@@ -125,12 +151,35 @@ def cmd_config(key: str | None = None, value: str | None = None) -> None:
 
     if value is None:
         current = get_setting(key)
-        print(f"{_normalize_key(key).replace('_', '-')} = {current}")
+        normalized = _normalize_key(key)
+        if json_output:
+            print(json.dumps({"key": normalized, "value": current}, indent=2))
+            return
+        print(f"{normalized.replace('_', '-')} = {current}")
         return
 
-    parsed = _parse_bool(value)
-    set_setting(key, parsed)
     normalized = _normalize_key(key)
+    if normalized not in _SETTINGS_SCHEMA:
+        raise PasskeyError(
+            f"Unknown setting '{normalized}'. Known settings: {', '.join(sorted(_SETTINGS_SCHEMA))}"
+        )
+    typ, _ = _SETTINGS_SCHEMA[normalized]
+    if typ is bool:
+        parsed: object = _parse_bool(value)
+    elif normalized == "agent_session_lease_ttl":
+        from .leases import parse_ttl
+
+        parsed = parse_ttl(value)
+    else:
+        try:
+            parsed = int(value)
+        except ValueError as e:
+            raise PasskeyError(f"Expected integer for '{normalized}', got '{value}'") from e
+
+    set_setting(normalized, parsed)
+    if json_output:
+        print(json.dumps({"key": normalized, "value": parsed, "updated": True}, indent=2))
+        return
     print(f"Set {normalized.replace('_', '-')} = {parsed}")
     if normalized == "require_auth" and parsed:
         print()

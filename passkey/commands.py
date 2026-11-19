@@ -12,9 +12,10 @@ from .audit import clear_logs, get_recent_logs, log_operation, verify_audit_log
 from .clipboard import copy_with_autoclear
 from .keychain import (
     PasskeyError,
+    _get_entry,
     delete_entry,
     get_all_entries,
-    get_entry,
+    get_entry,  # noqa: F401 (re-exported for callers and test mocks)
     list_entries,
     save_entry,
 )
@@ -341,7 +342,16 @@ def cmd_new(name: str | None = None, template_name: str | None = None) -> None:
         is_interactive,
         parse_field_shorthand,
         prompt_secret,
+        require_interactive,
     )
+
+    if name is not None:
+        name = _validate_entry_name(name)
+
+    human_cmd = f"passkey new {name}" if name else "passkey new <name>"
+    if template_name:
+        human_cmd += f" --template {template_name}"
+    require_interactive("passkey new", human_command=human_cmd)
 
     if template_name:
         from .templates import get_template
@@ -511,15 +521,44 @@ def cmd_template_apply(template: dict, entry_name: str) -> None:
     )
 
 
-def cmd_list(names_only: bool = False) -> None:
+def cmd_list(names_only: bool = False, *, json_output: bool = False) -> None:
     """List all entries with field count and age."""
     entries = get_all_entries()
+    entries.sort(key=lambda e: e.name)
+
+    if json_output:
+        from .leases import peek_all_leases
+
+        active_leases = peek_all_leases()
+        payload = [
+            {
+                "name": e.name,
+                "field_count": len(e.fields),
+                "config_count": len(e.config),
+                "fields": sorted(e.fields.keys()),
+                "config_keys": sorted(e.config.keys()),
+                "policy": e.policy,
+                "has_active_lease": (
+                    e.name in active_leases
+                    and (
+                        e.policy != "prompt"
+                        or active_leases[e.name].get("lease_kind") != "session"
+                    )
+                ),
+                "created": e.created,
+                "modified": e.modified,
+                "last_rotated": e.last_rotated,
+                "source": e.source,
+            }
+            for e in entries
+        ]
+        print(json.dumps(payload, indent=2))
+        return
+
     if not entries:
         if not names_only:
             print("No entries found")
         return
-
-    entries.sort(key=lambda e: e.name)
 
     if names_only:
         for e in entries:
@@ -574,12 +613,13 @@ def cmd_get_all(entry: Entry) -> None:
     )
 
 
-def cmd_delete(entry_name: str) -> None:
+def cmd_delete(entry_name: str, *, yes: bool = False) -> None:
     """Delete an entry from Keychain."""
-    confirm = input(f"Delete entry '{entry_name}'? [y/N]: ").strip().lower()
-    if confirm != "y":
-        print("Cancelled")
-        return
+    if not yes:
+        confirm = input(f"Delete entry '{entry_name}'? [y/N]: ").strip().lower()
+        if confirm != "y":
+            print("Cancelled")
+            return
 
     if delete_entry(entry_name):
         print(f"Deleted '{entry_name}'")
@@ -653,6 +693,7 @@ def _cmd_edit_noninteractive(entry: Entry) -> None:
     print(f"Editing '{entry.name}' (fields: {', '.join(entry.fields.keys())})")
     print("Enter fields (KEY=VALUE or field name; empty name to finish):")
     fields = entry.fields.copy()
+    mutated = False
     while True:
         try:
             raw_field = input("  Field name: ").strip()
@@ -670,7 +711,10 @@ def _cmd_edit_noninteractive(entry: Entry) -> None:
             else prompt_secret(f"  Value for {field_name}")
         )
         fields[field_name] = value
+        mutated = True
         print(f"  ~ {field_name}  {format_secret_preview(value)}")
+    if not mutated:
+        raise PasskeyError("No fields entered, edit cancelled.")
     save_entry(
         Entry(
             name=entry.name,
@@ -739,22 +783,80 @@ def cmd_clone(source: Entry, dest_name: str | None = None) -> None:
     print(f"Cloned '{source.name}' → '{final_name}' with {len(fields)} field(s)")
 
 
-def cmd_check(entry_name: str, required_fields: list[str], quiet: bool = False) -> int:
+def cmd_check(
+    entry_name: str,
+    required_fields: list[str],
+    quiet: bool = False,
+    *,
+    json_output: bool = False,
+) -> int:
     """Verify an entry has all required fields.
 
     Returns:
         0 if all required fields are present, 1 otherwise
         (the CLI layer owns sys.exit).
     """
-    entry = get_entry(entry_name)
+    entry = _get_entry(entry_name, log_read=False)
 
     if entry is None:
+        remediation = (
+            f"Ask the user to run 'passkey new {entry_name}' in their terminal "
+            "(never ask them to paste secrets into chat)."
+        )
+        if json_output:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error_code": "ENTRY_NOT_FOUND",
+                        "entry": entry_name,
+                        "exists": False,
+                        "valid": False,
+                        "present": [],
+                        "missing": list(required_fields),
+                        "missing_fields": list(required_fields),
+                        "remediation": remediation,
+                        "remediation_command": f"passkey new {entry_name}",
+                    },
+                    indent=2,
+                )
+            )
+            return 1
         if not quiet:
-            print(f"MISSING  entry '{entry_name}' not found", file=sys.stderr)
+            print(
+                f"MISSING  entry '{entry_name}' not found ({remediation})",
+                file=sys.stderr,
+            )
         return 1
 
     all_fields = set(entry.fields) | set(entry.config)
+    present = [f for f in required_fields if f in all_fields]
     missing = [f for f in required_fields if f not in all_fields]
+
+    if json_output:
+        remediation = (
+            f"Ask the user to run 'passkey entry set-field {entry_name} {missing[0]}' "
+            "in their terminal."
+            if missing
+            else None
+        )
+        payload_check: dict[str, object] = {
+            "ok": len(missing) == 0,
+            "entry": entry_name,
+            "exists": True,
+            "valid": len(missing) == 0,
+            "present": present,
+            "missing": missing,
+            "remediation": remediation,
+        }
+        if missing:
+            payload_check["error_code"] = "MISSING_FIELD"
+            payload_check["missing_fields"] = missing
+            payload_check["remediation_command"] = (
+                f"passkey entry set-field {entry_name} {missing[0]}"
+            )
+        print(json.dumps(payload_check, indent=2))
+        return 1 if missing else 0
 
     if not quiet:
         for f in required_fields:
@@ -763,7 +865,11 @@ def cmd_check(entry_name: str, required_fields: list[str], quiet: bool = False) 
 
     if missing:
         if not quiet:
-            print(f"\n{len(missing)} missing field(s) in '{entry_name}'", file=sys.stderr)
+            print(
+                f"\n{len(missing)} missing field(s) in '{entry_name}'. "
+                f"Ask the user to run 'passkey entry set-field {entry_name} {missing[0]}'.",
+                file=sys.stderr,
+            )
         return 1
 
     if not quiet:
@@ -771,29 +877,85 @@ def cmd_check(entry_name: str, required_fields: list[str], quiet: bool = False) 
     return 0
 
 
-def cmd_info(entry: Entry) -> None:
+def cmd_info(entry: Entry, *, json_output: bool = False) -> None:
     """Show entry details including metadata and field names."""
     if not entry:
         raise PasskeyError("Entry not found")
 
+    from .leases import peek_lease
+
+    lease = peek_lease(entry.name, allow_session=(entry.policy != "prompt"))
+    has_lease = lease is not None
+    secret_keys = sorted(entry.fields.keys())
+    config_keys = sorted(entry.config.keys())
+
+    if json_output:
+        payload = {
+            "name": entry.name,
+            "policy": entry.policy,
+            "has_active_lease": has_lease,
+            "lease_seconds_remaining": lease["seconds_remaining"] if lease else None,
+            "lease_remaining_uses": lease.get("remaining_uses") if lease else None,
+            "will_prompt_biometric": entry.policy in ("prompt", "session") and not has_lease,
+            "fields": secret_keys,
+            "config_keys": config_keys,
+            "field_count": len(secret_keys),
+            "config_count": len(config_keys),
+            "created": entry.created,
+            "modified": entry.modified,
+            "last_rotated": entry.last_rotated,
+            "source": entry.source,
+        }
+        print(json.dumps(payload, indent=2))
+        return
+
     print(f"Entry: {entry.name}")
     print(f"Policy: {entry.policy}")
+    if has_lease and lease is not None:
+        print(f"Active lease: yes ({lease['seconds_remaining']}s remaining)")
+    elif entry.policy in ("prompt", "session"):
+        print("Active lease: no (will prompt Touch ID/OS auth)")
     print(f"Created: {entry.created or 'unknown'}")
     print(f"Modified: {entry.modified or 'unknown'}")
     print(f"Source: {entry.source or 'unknown'}")
     if entry.last_rotated:
         print(f"Last rotated: {entry.last_rotated}")
-    print(f"\nFields ({len(entry.fields)}):")
-    for key in sorted(entry.fields.keys()):
+    print(f"\nFields ({len(secret_keys)}):")
+    for key in secret_keys:
         print(f"  {key}")
+    if config_keys:
+        print(f"\nConfig keys ({len(config_keys)}):")
+        for key in config_keys:
+            print(f"  {key}")
 
 
-def cmd_policy(entry: Entry, policy_value: str | None = None) -> None:
+def cmd_policy(
+    entry: Entry,
+    policy_value: str | None = None,
+    *,
+    json_output: bool = False,
+) -> None:
     """Show or update an entry's access policy ('allow' or 'prompt')."""
     if not entry:
         raise PasskeyError("Entry not found")
 
+    from .leases import peek_lease
+
     if policy_value is None:
+        if json_output:
+            lease = peek_lease(entry.name, allow_session=(entry.policy != "prompt"))
+            print(
+                json.dumps(
+                    {
+                        "entry": entry.name,
+                        "policy": entry.policy,
+                        "has_active_lease": lease is not None,
+                        "updated": False,
+                    },
+                    indent=2,
+                )
+            )
+            return
         print(f"{entry.name}: policy = {entry.policy}")
         return
 
@@ -806,6 +968,20 @@ def cmd_policy(entry: Entry, policy_value: str | None = None) -> None:
     entry.policy = normalized
     save_entry(entry, is_update=True)
     log_operation("policy", entry.name, details={"policy": normalized})
+    if json_output:
+        lease = peek_lease(entry.name, allow_session=(normalized != "prompt"))
+        print(
+            json.dumps(
+                {
+                    "entry": entry.name,
+                    "policy": normalized,
+                    "has_active_lease": lease is not None,
+                    "updated": True,
+                },
+                indent=2,
+            )
+        )
+        return
     print(f"Set policy for '{entry.name}' to '{normalized}'")
 
 
@@ -883,14 +1059,25 @@ def cmd_inject(
     *,
     to_stdout: bool = False,
     force: bool = False,
+    force_git_exposed: bool = False,
 ) -> None:
     """Resolve {{ passkey://entry/field }} placeholders from in_file into out_file (0o600)."""
     from .leases import authorize_entry_access
+    from .mcp_config import is_file_exposed_in_git
     from .references import render_template
 
     src = Path(in_file).expanduser()
     if not src.exists() or not src.is_file():
         raise PasskeyError(f"Template file not found: '{src}'")
+
+    if out_file is not None and out_file != "-":
+        dest_check = Path(out_file).expanduser()
+        if not force_git_exposed and is_file_exposed_in_git(dest_check):
+            raise PasskeyError(
+                f"Refusing to inject secrets into '{dest_check}' because it is inside a git "
+                f"repository and NOT gitignored. Add '{dest_check.name}' to .gitignore first, "
+                "or pass --force-git-exposed to override."
+            )
 
     template_text = src.read_text(encoding="utf-8")
     rendered = render_template(template_text, authorize_fn=authorize_entry_access)
@@ -938,29 +1125,49 @@ def cmd_inject(
     log_operation("inject", details={"mode": "file"})
 
 
-def cmd_audit(limit: int = 20, clear: bool = False, verify: bool = False) -> None:
+def cmd_audit(
+    limit: int = 20,
+    clear: bool = False,
+    verify: bool = False,
+    *,
+    yes: bool = False,
+    json_output: bool = False,
+) -> int:
     """View, verify, or clear audit log."""
     if verify:
         result = verify_audit_log()
+        if json_output:
+            print(json.dumps(result, indent=2))
+            return 0 if result["valid"] else 1
         if not result["valid"]:
             raise PasskeyError(f"Audit log verification FAILED: {result['error']}")
         print(f"Audit log verified OK ({result['checked']} record(s) intact)")
-        return
+        return 0
 
     if clear:
-        confirm = input("Clear audit log? [y/N]: ").strip().lower()
-        if confirm == "y":
-            if not clear_logs():
-                raise PasskeyError("Failed to clear audit log")
-            print("Audit log cleared")
+        if not yes:
+            confirm = input("Clear audit log? [y/N]: ").strip().lower()
+            if confirm != "y":
+                print("Cancelled")
+                return 0
+        if not clear_logs():
+            raise PasskeyError("Failed to clear audit log")
+        if json_output:
+            print(json.dumps({"cleared": True}, indent=2))
         else:
-            print("Cancelled")
-        return
+            print("Audit log cleared")
+        return 0
+
+    if json_output:
+        from .audit import get_sanitized_recent_logs
+
+        print(json.dumps(get_sanitized_recent_logs(limit=limit), indent=2))
+        return 0
 
     logs = get_recent_logs(limit)
     if not logs:
         print("No audit log entries")
-        return
+        return 0
 
     print(f"Recent operations (last {len(logs)}):\n")
     for log in logs:
@@ -979,3 +1186,4 @@ def cmd_audit(limit: int = 20, clear: bool = False, verify: bool = False) -> Non
         if details_str:
             line += f" ({details_str})"
         print(line)
+    return 0

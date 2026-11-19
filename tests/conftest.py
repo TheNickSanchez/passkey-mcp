@@ -49,13 +49,21 @@ def isolated_keyring():
 @pytest.fixture(autouse=True)
 def isolated_data_dir(tmp_path, monkeypatch):
     """Redirect all passkey data to a per-test temp dir."""
+    from passkey.interactive import _HEADLESS_AGENT_ENV_VARS, set_no_input
+
     data_dir = tmp_path / "passkey-data"
     monkeypatch.setenv("PASSKEY_DATA_DIR", str(data_dir))
     monkeypatch.delenv("PASSKEY_AUDIT_LOG", raising=False)
     monkeypatch.setenv("PASSKEY_DISABLE_LACONTEXT", "1")
+    for env_var in _HEADLESS_AGENT_ENV_VARS:
+        monkeypatch.delenv(env_var, raising=False)
+    monkeypatch.delenv("PASSKEY_ALLOW_INTERACTIVE", raising=False)
+    monkeypatch.delenv("PASSKEY_OUTPUT", raising=False)
+    set_no_input(False)
     # Never migrate real legacy data into the test dir
     monkeypatch.setattr("passkey.dirs.get_legacy_data_dir", lambda: tmp_path / "no-legacy")
     yield data_dir
+    set_no_input(False)
 
 
 @pytest.fixture(autouse=True)

@@ -255,10 +255,12 @@ def import_bundle(
                 skipped += 1
             continue
 
+        from .models import VALID_POLICIES
+
         raw_policy = entry_data.get("policy")
         policy = (
             raw_policy
-            if raw_policy in ("allow", "prompt")
+            if raw_policy in VALID_POLICIES
             else (existing.policy if existing else "allow")
         )
         entry = Entry(

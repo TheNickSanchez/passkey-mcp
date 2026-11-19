@@ -114,6 +114,15 @@ def _resolve_adapter(tool: str | None = None, *, prefer_exposed: bool = False) -
         if len(matching) > 1:
             unique_tools = matching
 
+    from .interactive import InteractiveRequiredError, can_prompt_interactively
+
+    if not can_prompt_interactively():
+        tool_list = ", ".join(t[0] for t in unique_tools)
+        raise InteractiveRequiredError(
+            f"Multiple MCP configs detected ({tool_list}) in non-interactive mode.\n"
+            f"  Re-run with an explicit tool flag, e.g.: passkey init --tool {unique_tools[0][0]}"
+        )
+
     print("Multiple MCP configs detected:\n")
     for idx, (_, adapter, path) in enumerate(unique_tools, 1):
         print(f"  {idx}. {adapter.display_name} ({path})")
@@ -142,6 +151,8 @@ def cmd_init(
     force: bool = False,
     include_all: bool = False,
     backup_path: str | None = None,
+    *,
+    yes: bool = False,
 ) -> None:
     """Migrate MCP config secrets to system keychain.
 
@@ -251,10 +262,11 @@ def cmd_init(
         print("[Dry run — no config files or keychain entries were modified]")
         return
 
-    confirm = input("Apply migration now? [Y/n]: ").strip().lower()
-    if confirm not in ("", "y", "yes"):
-        print("Cancelled.")
-        return
+    if not yes:
+        confirm = input("Apply migration now? [Y/n]: ").strip().lower()
+        if confirm not in ("", "y", "yes"):
+            print("Cancelled.")
+            return
 
     print()
 
@@ -361,7 +373,10 @@ def cmd_status(
                 adapters_to_check.append(adapter)
 
     if not adapters_to_check:
-        print("No MCP config files found.")
+        if json_output:
+            print("[]")
+        else:
+            print("No MCP config files found.")
         return
 
     try:
@@ -467,7 +482,7 @@ def cmd_status(
 # ---------------------------------------------------------------------------
 
 
-def cmd_doctor(deep: bool = False) -> None:
+def cmd_doctor(deep: bool = False, *, json_output: bool = False) -> int:
     """Run diagnostics across all detected MCP tool configs.
 
     Thin CLI printer over doctor.run_diagnostics — the single
@@ -475,14 +490,22 @@ def cmd_doctor(deep: bool = False) -> None:
     """
     from .doctor import run_diagnostics
 
-    print("Passkey Doctor" + (" (deep)" if deep else ""))
-    print("=" * 35)
-    print()
-
     result = run_diagnostics(deep=deep)
     checks = result["checks"]
     issues = result["issues"]
     recommendations = result["recommendations"]
+
+    log_operation(
+        "doctor", details={"checks": len(checks), "issues": len(issues), "deep": deep}
+    )
+
+    if json_output:
+        print(json.dumps(result, indent=2))
+        return 1 if result["summary"]["failed"] > 0 else 0
+
+    print("Passkey Doctor" + (" (deep)" if deep else ""))
+    print("=" * 35)
+    print()
 
     symbols = {"pass": "\u2713", "warn": "\u26a0", "fail": "\u2717"}
     for check in checks:
@@ -501,10 +524,7 @@ def cmd_doctor(deep: bool = False) -> None:
     else:
         print()
         print("All checks passed!")
-
-    log_operation(
-        "doctor", details={"checks": len(checks), "issues": len(issues), "deep": deep}
-    )
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -531,7 +551,10 @@ def cmd_servers(
                 adapters_to_check.append(adapter)
 
     if not adapters_to_check:
-        print("No MCP config files found.")
+        if json_output:
+            print("[]")
+        else:
+            print("No MCP config files found.")
         return
 
     with contextlib.suppress(PasskeyError):

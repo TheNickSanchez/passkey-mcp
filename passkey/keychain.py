@@ -109,21 +109,52 @@ def _metadata_lock():
 
 
 class PasskeyError(Exception):
-    """Base exception for passkey errors."""
+    """Base exception for passkey errors with structured agent metadata."""
 
-    pass
+    exit_code: int = 1
+    default_error_code: str = "PASSKEY_ERROR"
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        error_code: str | None = None,
+        entry: str | None = None,
+        missing_fields: list[str] | None = None,
+        remediation_command: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code: str = error_code or self.default_error_code
+        self.entry: str | None = entry
+        self.missing_fields: list[str] = list(missing_fields) if missing_fields else []
+        self.remediation_command: str | None = remediation_command
+
+    def to_error_dict(self) -> dict[str, object]:
+        """Serialize structured error envelope (guaranteed free of secret values)."""
+        payload: dict[str, object] = {
+            "ok": False,
+            "error_code": self.error_code,
+            "message": str(self),
+        }
+        if self.entry is not None:
+            payload["entry"] = self.entry
+        if self.missing_fields:
+            payload["missing_fields"] = list(self.missing_fields)
+        if self.remediation_command is not None:
+            payload["remediation_command"] = self.remediation_command
+        return payload
 
 
 class KeychainAccessError(PasskeyError):
     """Raised when Keychain access fails."""
 
-    pass
+    default_error_code: str = "KEYCHAIN_ACCESS_ERROR"
 
 
 class EntryCorruptedError(PasskeyError):
     """Raised when entry data cannot be parsed."""
 
-    pass
+    default_error_code: str = "ENTRY_CORRUPTED"
 
 
 def _keyring_error_message(e: Exception) -> str:
@@ -378,11 +409,12 @@ def rename_entry(old_name: str, new_entry: Entry) -> None:
         log_operation("rename", old_name, details={"new_name": new_entry.name})
 
 
-def get_all_entries() -> list[Entry]:
+def get_all_entries(*, log_read: bool = True) -> list[Entry]:
     """Get all entries with full data.
 
     Reads every entry without logging a per-entry "read" (that made
-    ``passkey list`` spam the audit log); a single bulk read is logged.
+    ``passkey list`` spam the audit log); a single bulk read is logged
+    when ``log_read`` is True.
 
     Returns:
         List of all Entry objects.
@@ -398,7 +430,7 @@ def get_all_entries() -> list[Entry]:
         if entry:
             entries.append(entry)
 
-    if entries:
+    if entries and log_read:
         log_operation("read", details={"bulk": True, "count": len(entries)})
 
     return entries
