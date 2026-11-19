@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Comprehensive multi-page Wiki (`docs/`) & link integrity suite (`tests/test_docs_links.py`)**: added `docs/_Sidebar.md`, `docs/Home.md`, and 10 guides (`01-Quickstart.md` through `10-Troubleshooting-and-FAQ.md`) covering human workflows, zero-config `passkey exec`, AI agent onboarding, `session` Touch ID policies, CDP browser autofill, and full CLI/MCP references, verified automatically against `parser.py` and `mcp_server.py`.
+
 ### Changed
 
 - Unpinned install recommendation in `README.md`, `passkey doctor`, and `AGENTS.md` from `pipx install passkey-mcp==0.4.0` to `pipx install passkey-mcp` / `uv tool install passkey-mcp` now that `0.8.0` is live on PyPI with digital provenance attestations.
