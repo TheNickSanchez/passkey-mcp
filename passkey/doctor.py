@@ -54,7 +54,7 @@ def run_diagnostics(deep: bool = False) -> dict:
         })
         issues.append("Passkey command not in PATH")
         recommendations.append(
-            "Install passkey: pipx install passkey-mcp==0.4.0 "
+            "Install passkey: pipx install passkey-mcp "
             "or uv tool install passkey-mcp."
         )
 

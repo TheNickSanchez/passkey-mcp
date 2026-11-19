@@ -65,7 +65,7 @@ and threat model: [SECURITY.md](SECURITY.md).
 ## Installation
 
 ```bash
-pipx install passkey-mcp==0.4.0
+pipx install passkey-mcp
 ```
 
 or:
