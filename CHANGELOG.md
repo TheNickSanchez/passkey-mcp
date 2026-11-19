@@ -10,6 +10,31 @@
 
 ### Added
 
+- **Non-TTY & PTY AI agent fail-fast (`--no-input`, exit code `2`)**: interactive commands (`passkey`, `new`, `edit`, `get`, `delete`, `set-field`, `rotate`, `init`, `add`, `share`, `receive`, `export --encrypt`, `import --decrypt`, `audit --clear`, `template apply|add`, and positional `passkey <entry>`) now fail fast with exit code `2` and actionable remediation hints when `--no-input` is set, stdin/stdout is not a TTY, or a headless AI agent environment variable (`CLAUDECODE`, `CURSOR_AGENT`, `GEMINI_CLI`, `CODEX_ENV`, `OPENAI_CODEX`, `AIDER`) is detected (`PASSKEY_ALLOW_INTERACTIVE=1` overrides).
+- **Headless confirmation & rotation flags (`--yes`, `--touch-only`)**: added `-y`/`--yes` to `passkey delete`, `passkey init`, and `passkey audit --clear`, and `--touch-only` to `passkey rotate`.
+- **Deterministic secret-free `--json` across CLI read & diagnostic commands**: added `--json` to `list`, `info`, `check`, `doctor`, `audit` (including `--summary` and `--verify`), `lease list`, `plugin list` (with `entry_exists`), `policy`, `config`, and `skill install`, and ensured empty `status --json` and `servers --json` emit `[]` instead of human text.
+- **Preflight `passkey run --dry-run [--json]` & `--strict`**: validates entries, `--env-file` mappings, `passkey://` references, `prompt` policy / active leases (`peek_lease`), and target command executables without spawning a child process or exposing secret values; `--strict` exits `1` immediately when any requested entry is missing.
+- **Richer MCP discovery, preflight & prompts (`passkey/mcp_server.py`)**: added `passkey_entry_info` and `passkey_preflight_run`, enriched `passkey_validate_references` with `prompt_entries_without_lease` and `will_prompt_biometric`, added `FastMCP` server `instructions`, `ToolAnnotations` (`readOnlyHint` / `destructiveHint`) on all 10 tools, and 3 `@mcp.prompt()` workflows (`setup-project-secrets`, `debug-missing-credential`, `migrate-exposed-mcp-configs`).
+- **Agent skill & rules installer (`passkey/skills.py`)**: added `passkey skill install --tool claude|cursor|gemini|agents|all` and `passkey hook install --with-skill` to atomically install concise golden-rule instructions into `.claude/skills/passkey/SKILL.md`, `.cursor/rules/passkey.mdc`, `.gemini/skills/passkey/SKILL.md`, and bounded `AGENTS.md` markers.
+- **Bounded `passkey mount --timeout` & stale-FIFO diagnostics**: added `--timeout <seconds>` (non-blocking `O_WRONLY | O_NONBLOCK` polling without `signal.alarm`), fast-fail guard for unbounded headless `mount`, and specific `rm '<path>'` guidance when a stale FIFO exists.
+
+### Changed
+
+- **Lazy `FastMCP` import & read-only lease inspection**: `passkey.cli` now lazy-imports `passkey.mcp_server` only on `mcp-serve` (avoiding startup overhead and `.env` FIFO consumption by `FastMCP`'s Pydantic BaseSettings), and `peek_lease()` / `peek_all_leases()` inspect active leases without decrementing `remaining_uses` or writing `read` audit entries during metadata checks.
+- **Actionable agent remediation hints & banner suppression**: missing entry/field errors across `runner`, `references`, `commands`, `hooks`, and `mcp_server` instruct agents to ask the human user to run `passkey new <entry>` or `passkey lease grant <entry> --ttl 15m` rather than pasting secrets in chat, and `passkey run` automatically suppresses the multi-line `SECURITY WARNING` banner inside detected AI agent subprocesses.
+
+### Security
+
+- **Hardened `passkey hook check` & `passkey inject` git-exposure guard**: pre-execution hooks now strip `--no-input` before subcommand matching and additionally block `passkey get` / `entry get`, `passkey generate --no-copy`, and `passkey inject --stdout` / `-o -`; `passkey inject` refuses writing to non-gitignored paths inside git repositories unless `--force-git-exposed` is passed.
+
+### Fixed
+
+- `passkey rotate` and non-interactive `edit` no longer stamp `last_rotated` or re-save unchanged entries when `prompt_secret` raises `EOFError` or receives empty input.
+
+## 0.6.0 (2026-11-18)
+
+### Added
+
 - **Real-time masked secret input (`prompt_secret`)**: `passkey new`, `edit`, `set-field`, `rotate`, and `add` now echo `•` bullets alongside a live character counter, with `Backspace`/`Delete`, `Ctrl+U` clear, and `Ctrl+R`/`Tab` temporary reveal (auto-remasked on `Enter` so terminal scrollback never retains secrets).
 - **Noun-verb subcommand groups (`passkey mcp`, `passkey entry`) and `help` / `version` subcommands**: organized MCP and advanced entry commands under scannable hierarchies, added `passkey help [command]` and `passkey version` (`-V`) alongside `-h`/`--help`/`--version`, and preserved all existing top-level commands as backwards-compatible aliases.
 - **Positional name, `--template`, and `KEY=VALUE` shorthand in `passkey new`**: run `passkey new stripe` (or `--template <name>`) to jump straight to field entry, paste `KEY=VALUE` at the field prompt in a single step, verify lengths via non-sensitive previews (`(36 chars, sk-…9a2)`), and press `Enter` on an empty field name to save and exit.

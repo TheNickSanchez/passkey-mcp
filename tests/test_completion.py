@@ -35,7 +35,7 @@ class TestPrintCompletion:
     def test_all_scripts_contain_new_commands(self):
         from passkey.completion import _BASH_SCRIPT, _FISH_SCRIPT, _ZSH_SCRIPT
         for script in [_BASH_SCRIPT, _FISH_SCRIPT, _ZSH_SCRIPT]:
-            for cmd in [
+            for token in [
                 "generate",
                 "template",
                 "share",
@@ -45,11 +45,20 @@ class TestPrintCompletion:
                 "inject",
                 "mount",
                 "hook",
+                "skill",
                 "lease",
                 "plugin",
                 "browser-fill",
+                "no-input",
+                "json",
+                "dry-run",
+                "strict",
+                "touch-only",
+                "timeout",
+                "with-skill",
+                "force-git-exposed",
             ]:
-                assert cmd in script, f"'{cmd}' missing from script"
+                assert token in script, f"'{token}' missing from script"
 
 
 class TestPrintSetupInstructions:

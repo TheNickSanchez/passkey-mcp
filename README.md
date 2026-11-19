@@ -27,9 +27,11 @@ comparison (Linux also needs a running, unlocked keyring daemon).
 3. At start, `passkey run` reads the keychain, injects env vars into **that
    child process only**, and masks resolved secret values (`<concealed by passkey>`)
    across child `stdout` and `stderr`. MCP tools (`passkey_list`, `passkey_fields`,
-   `passkey_status`, `passkey_doctor`, `passkey_wrap_server`,
-   `passkey_validate_references`, `passkey_audit_recent`, `passkey_cdp_autofill`)
-   return names, field names, and status — **never secret values**.
+   `passkey_entry_info`, `passkey_preflight_run`, `passkey_status`, `passkey_doctor`,
+   `passkey_wrap_server`, `passkey_validate_references`, `passkey_audit_recent`,
+   `passkey_cdp_autofill`) and built-in MCP prompts (`setup-project-secrets`,
+   `debug-missing-credential`, `migrate-exposed-mcp-configs`) return names, field
+   names, policy/lease readiness, and guided workflows — **never secret values**.
 4. `passkey unwrap` restores the original commands. Timestamped `0o600` backups
    are stored in `<data_dir>/backups/` before `init` and `unwrap` (never left in
    workspace directories).
@@ -48,7 +50,8 @@ and threat model: [SECURITY.md](SECURITY.md).
 - **Templates** for popular services and AI CLIs (GitHub, AWS, Slack, OpenAI, Claude, Codex, Gemini, Cursor Agent, Cloudflare Wrangler, Stripe, Vercel, PostgreSQL, MySQL)
 - **Real-time `stdout`/`stderr` secret masking** (`<concealed by passkey>`) in `passkey run` and `passkey plugin run`
 - **Secret reference URIs & ephemeral `.env` FIFO mounts** (`passkey://entry/field`, `passkey inject`, `passkey mount`)
-- **Pre-execution AI agent hooks** (`passkey hook install`) for Claude Code, Cursor, and Gemini CLI
+- **Pre-execution AI agent hooks & skill installer** (`passkey hook install`, `passkey skill install`) for Claude Code, Cursor, Gemini CLI, and `AGENTS.md`
+- **Deterministic headless Agent Experience (AX)** — non-TTY & PTY agent fail-fast (`--no-input`, exit code `2`), secret-free `--json` across read/diagnostic commands, and preflight `passkey run --dry-run [--json]` / `--strict`
 - **Per-entry biometric policies & HMAC-signed leases** (`passkey policy`, `passkey lease`, native macOS Touch ID via `LAContext`)
 - **Zero-config CLI wrappers & deterministic CDP browser autofill** (`passkey plugin`, `passkey browser-fill`)
 - **Share & receive** entries via encrypted file + passphrase (no key exchange needed)
@@ -184,14 +187,14 @@ $ passkey github
 | Command | Description |
 |---------|-------------|
 | `passkey new` | Create a new entry interactively |
-| `passkey list` | List all entry names |
+| `passkey list` | List all entry names (`--json` for metadata array) |
 | `passkey list --names-only` | Entry names only (one per line, for scripting) |
 | `passkey edit [entry]` | Modify an existing entry |
-| `passkey delete [entry]` | Delete an entry (exact match required) |
-| `passkey info [entry]` | Show entry metadata and field names |
+| `passkey delete [entry]` | Delete an entry (`-y` / `--yes` to skip prompt) |
+| `passkey info [entry]` | Show entry metadata, policy, lease status, and field names (`--json`) |
 | `passkey clone SOURCE [DEST]` | Clone an entry under a new name |
 | `passkey set-field ENTRY FIELD` | Upsert a single field interactively via `getpass` |
-| `passkey policy ENTRY [allow\|prompt]` | Show or set an entry's access policy |
+| `passkey policy ENTRY [allow\|prompt]` | Show or set an entry's access policy (`--json`) |
 
 ### Retrieving Secrets
 
@@ -213,34 +216,48 @@ passkey run --quiet github -- python -m github.server
 # Opt out of stream masking only when raw binary output requires it
 passkey run --no-masking github -- ./binary-tool
 
+# Preflight validate entries, passkey:// refs, and Touch ID lease readiness without spawning
+passkey run github --dry-run --json -- python app.py
+
+# Fail immediately (exit 1) if any requested entry is missing
+passkey run -q --strict github -- python app.py
+
 # Resolve passkey://entry/field references from a secret-free dotenv file
 passkey run --env-file .env.passkey -- python app.py
 
 # Run with secrets from multiple entries (later entries override)
 passkey run aws github -- python deploy.py
 
-# Render {{ passkey://entry/field }} placeholders to an 0o600 file
+# Render {{ passkey://entry/field }} placeholders to a gitignored 0o600 file
 passkey inject -i config.tmpl -o config.rendered.json
 
-# Mount an ephemeral POSIX FIFO (.env) backed by keychain (never touches disk)
-passkey mount github --path .env --once
+# Mount an ephemeral POSIX FIFO (.env) backed by keychain with an optional reader timeout
+passkey mount github --path .env --once --timeout 30
 ```
 
-### AI Agent Guardrails, Policies, Leases, Plugins & Browser Broker
+### AI Agent Guardrails, Skills, Policies, Leases, Plugins & Browser Broker
 
 ```bash
-# Install pre-execution hooks blocking AI reads of .env / *.backup / *.enc
-passkey hook install --tool claude   # also supports: cursor, gemini
+# Install pre-execution hooks (and optional SKILL.md / rules) blocking AI reads of .env / *.backup / *.enc
+passkey hook install --tool claude --with-skill   # also supports: cursor, gemini
+
+# Install concise AI agent golden-rule instructions (.claude/skills, .cursor/rules, .gemini/skills, AGENTS.md)
+passkey skill install --tool all
+
+# Force non-interactive fail-fast (exit code 2) and inspect structured secret-free JSON
+passkey --no-input info github --json
+passkey check github GITHUB_TOKEN --json
+passkey doctor --json
 
 # Gate high-sensitivity entries behind native Touch ID (LAContext) + scoped leases
 passkey policy prod_aws prompt
 passkey lease grant prod_aws --ttl 15m --max-uses 5
-passkey lease list
+passkey lease list --json
 passkey lease revoke prod_aws
 
 # Zero-config CLI secret wrappers (session > .passkey.toml > global > auto)
 passkey plugin init gh
-passkey plugin list
+passkey plugin list --json
 passkey plugin run gh -- repo list
 
 # Deterministically fill credentials into a local Chrome DevTools tab (exact origin verified)
@@ -382,10 +399,11 @@ passkey receive github-shared.passkey
 ### Lifecycle Management
 
 ```bash
-# Mark an entry as rotated (updates last_rotated timestamp)
+# Rotate a field interactively, or stamp last_rotated headlessly with --touch-only
 passkey rotate github
+passkey rotate github --touch-only
 
-# Run expanded diagnostics
+# Run expanded diagnostics (supports --json)
 passkey doctor --deep
 ```
 
@@ -489,9 +507,11 @@ Passkey can run as an MCP server itself, letting AI assistants invoke passkey to
 }
 ```
 
-Available tools: `passkey_list`, `passkey_fields`, `passkey_status`, `passkey_doctor`, `passkey_wrap_server` (disable with `passkey config mcp-write-tools off`), `passkey_validate_references`, `passkey_audit_recent`, and `passkey_cdp_autofill` (opt-in via `passkey config mcp-browser-broker on`).
+Available tools (annotated with MCP `ToolAnnotations` `readOnlyHint` / `destructiveHint`): `passkey_list`, `passkey_fields`, `passkey_entry_info`, `passkey_preflight_run`, `passkey_status`, `passkey_doctor`, `passkey_wrap_server` (disable with `passkey config mcp-write-tools off`), `passkey_validate_references`, `passkey_audit_recent`, and `passkey_cdp_autofill` (opt-in via `passkey config mcp-browser-broker on`).
 
-AI assistants can **discover** entry names but never see secret values — secrets only flow out via `passkey run`.
+Built-in MCP prompts: `setup-project-secrets`, `debug-missing-credential`, and `migrate-exposed-mcp-configs`.
+
+AI assistants can **discover** entry names, field/config key names, policy (`allow` vs `prompt`), and active lease readiness via preflight checks, but never see secret values — secrets only flow out at runtime via `passkey run` or `passkey inject`.
 
 ## Data Storage
 
