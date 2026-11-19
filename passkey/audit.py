@@ -30,6 +30,7 @@ _AGENT_ENV_MARKERS: tuple[tuple[str, str], ...] = (
     ("CURSOR_TRACE_ID", "cursor"),
     ("CURSOR_AGENT", "cursor"),
     ("GEMINI_CLI", "gemini-cli"),
+    ("ANTIGRAVITY_AGENT", "antigravity"),
     ("CODEX_ENV", "codex"),
     ("OPENAI_CODEX", "codex"),
     ("VSCODE_PID", "vscode"),

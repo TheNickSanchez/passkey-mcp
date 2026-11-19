@@ -26,6 +26,7 @@ _HEADLESS_AGENT_ENV_VARS: tuple[str, ...] = (
     "CLAUDE_CODE_ENTRYPOINT",
     "CURSOR_AGENT",
     "GEMINI_CLI",
+    "ANTIGRAVITY_AGENT",
     "CODEX_ENV",
     "OPENAI_CODEX",
 )

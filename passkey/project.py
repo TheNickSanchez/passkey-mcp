@@ -18,7 +18,7 @@ from .dirs import ensure_data_dir, get_data_dir
 from .find import find_env_vars
 from .hooks import is_sensitive_secret_path
 from .interactive import can_prompt_interactively
-from .keychain import PasskeyError
+from .keychain import KeychainAccessError, PasskeyError
 from .models import is_valid_name
 from .references import parse_dotenv_file
 from .runner import preflight_run, run_with_secrets
@@ -58,13 +58,17 @@ def _get_or_create_trust_hmac_key() -> bytes:
         new_hex = secrets.token_hex(32)
         keyring.set_password(TRUST_HMAC_SERVICE, TRUST_HMAC_KEY_NAME, new_hex)
         return bytes.fromhex(new_hex)
-    except (KeyringError, ValueError):
+    except (KeyringError, ValueError) as e:
         key_file = _fallback_trust_key_path()
         if key_file.exists():
             try:
                 return bytes.fromhex(key_file.read_text(encoding="utf-8").strip())
             except (OSError, ValueError):
                 pass
+        if isinstance(e, KeyringError) and get_trusted_projects_path().exists():
+            raise KeychainAccessError(
+                f"Failed to access Keychain to verify trusted_projects.json: {e}"
+            ) from e
         new_hex = secrets.token_hex(32)
         fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:

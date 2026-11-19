@@ -415,8 +415,12 @@ def _dispatch_command(command: str | None, parser, args) -> None:
 
         if args.hook_command == "install":
             proj = _Path(args.project_dir) if args.project_dir else None
-            target = install_hook(args.tool, project_dir=proj)
-            print(f"Installed passkey guard hook for {args.tool} at {target}")
+            hook_tools = (
+                ("claude", "cursor", "gemini") if args.tool == "all" else (args.tool,)
+            )
+            for h_tool in hook_tools:
+                target = install_hook(h_tool, project_dir=proj)
+                print(f"Installed passkey guard hook for {h_tool} at {target}")
             if getattr(args, "with_skill", False):
                 from ..skills import install_skill
 

@@ -23,7 +23,7 @@ from .audit import (
     log_operation,
 )
 from .dirs import ensure_data_dir, get_data_dir
-from .keychain import PasskeyError, _get_entry
+from .keychain import KeychainAccessError, PasskeyError, _get_entry
 from .models import Entry, is_valid_name
 
 LEASE_HMAC_SERVICE = "passkey"
@@ -57,13 +57,17 @@ def _get_or_create_lease_hmac_key() -> bytes:
         new_hex = secrets.token_hex(32)
         keyring.set_password(LEASE_HMAC_SERVICE, LEASE_HMAC_KEY_NAME, new_hex)
         return bytes.fromhex(new_hex)
-    except (KeyringError, ValueError):
+    except (KeyringError, ValueError) as e:
         key_file = _fallback_lease_key_path()
         if key_file.exists():
             try:
                 return bytes.fromhex(key_file.read_text().strip())
             except (OSError, ValueError):
                 pass
+        if isinstance(e, KeyringError) and get_leases_path().exists():
+            raise KeychainAccessError(
+                f"Failed to access Keychain to verify leases.json: {e}"
+            ) from e
         new_hex = secrets.token_hex(32)
         fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:

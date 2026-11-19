@@ -316,3 +316,62 @@ class TestProjectManifestAndTrustGuard:
         assert dry_json["ready"] is True
         assert dry_json["trusted"] is True
         assert secret_val not in json.dumps(dry_json)
+
+    def test_seatbelt_keyring_error_antigravity_env_and_hook_install_all(
+        self, tmp_path, isolated_data_dir, monkeypatch, capsys
+    ):
+        from keyring.errors import KeyringError
+
+        from passkey.keychain import KeychainAccessError
+
+        repo = tmp_path / "smoke_hardened"
+        (repo / ".git").mkdir(parents=True)
+        save_entry(Entry(name="demo", fields={"DEMO_API_KEY": "secret_demo_val"}))
+        (repo / ".env.example").write_text("DEMO_API_KEY=\n", encoding="utf-8")
+
+        # 1. ANTIGRAVITY_AGENT=1 prevents silent self-trust even inside a PTY
+        monkeypatch.setenv("ANTIGRAVITY_AGENT", "1")
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        res = init_project(project_dir=repo)
+        assert res["trusted"] is False
+
+        # Human interactive trust stores HMAC key in keyring
+        monkeypatch.delenv("ANTIGRAVITY_AGENT", raising=False)
+        trust_project(repo)
+        assert not (isolated_data_dir / ".trust_hmac_key").exists()
+
+        # 2. Seatbelt KeyringError (-50) on an existing Keychain-signed store raises
+        #    KEYCHAIN_ACCESS_ERROR rather than false TRUST_STORE_TAMPERED
+        with (
+            patch("passkey.project.keyring.get_password", side_effect=KeyringError("-50")),
+            pytest.raises(KeychainAccessError) as exc_kc,
+        ):
+            get_project_status(repo)
+        assert exc_kc.value.error_code == "KEYCHAIN_ACCESS_ERROR"
+        assert not (isolated_data_dir / ".trust_hmac_key").exists()
+
+        # 3. passkey hook install --tool all --with-skill installs all hooks + skills
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "passkey",
+                "hook",
+                "install",
+                "--tool",
+                "all",
+                "--with-skill",
+                "--project-dir",
+                str(repo),
+            ],
+        ):
+            main()
+        capsys.readouterr()
+        assert (repo / ".claude" / "settings.json").is_file()
+        assert (repo / ".cursor" / "hooks.json").is_file()
+        assert (repo / ".gemini" / "settings.json").is_file()
+        assert (repo / ".claude" / "skills" / "passkey" / "SKILL.md").is_file()
+        assert (repo / ".cursor" / "rules" / "passkey.mdc").is_file()
+        assert (repo / ".gemini" / "skills" / "passkey" / "SKILL.md").is_file()
+        assert (repo / "AGENTS.md").is_file()

@@ -798,8 +798,8 @@ def create_parser() -> argparse.ArgumentParser:
     hook_install.add_argument(
         "--tool",
         required=True,
-        choices=["claude", "cursor", "gemini"],
-        help="Target AI coding tool",
+        choices=["claude", "cursor", "gemini", "all"],
+        help="Target AI coding tool (or 'all' for Claude, Cursor, and Gemini)",
     )
     hook_install.add_argument(
         "--project-dir", help="Project directory (default: current working directory)"
