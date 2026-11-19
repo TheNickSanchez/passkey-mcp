@@ -16,11 +16,6 @@ from .leases import authorize_entry_access
 from .models import is_valid_name
 from .runner import _run_masked_subprocess
 
-try:
-    import tomllib as _tomllib  # type: ignore[import-not-found]
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-    _tomllib = None
-
 VALID_PLUGIN_SCOPES = ("session", "dir", "global")
 
 PLUGIN_SPECS: dict[str, dict] = {
@@ -144,70 +139,17 @@ def _save_global_plugins(mapping: dict[str, str]) -> Path:
 
 
 def _parse_passkey_toml_plugins(toml_path: Path) -> dict[str, str]:
-    """Parse [plugins] mapping from .passkey.toml using tomllib (with py310 fallback)."""
-    content = toml_path.read_text(encoding="utf-8")
-    if _tomllib is not None:
-        try:
-            parsed = _tomllib.loads(content)
-            plugins = parsed.get("plugins", {})
-            if isinstance(plugins, dict):
-                return {
-                    str(k): str(v)
-                    for k, v in plugins.items()
-                    if isinstance(k, str) and isinstance(v, str)
-                }
-        except Exception as e:
-            raise PasskeyError(f"Invalid TOML in '{toml_path}': {e}") from e
-        return {}
+    """Parse [plugins] mapping from .passkey.toml."""
+    from .project import parse_passkey_toml
 
-    # Minimal section parser for Python 3.10 where tomllib is not in stdlib
-    in_plugins = False
-    mapping: dict[str, str] = {}
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            in_plugins = line[1:-1].strip() == "plugins"
-            continue
-        if in_plugins and "=" in line:
-            k, v = line.split("=", 1)
-            key = k.strip().strip("'\"")
-            val = v.strip()
-            if " #" in val:
-                val = val.split(" #", 1)[0].strip()
-            val = val.strip("'\"")
-            if key and val:
-                mapping[key] = val
-    return mapping
+    return parse_passkey_toml(toml_path)["plugins"]
 
 
 def _write_passkey_toml_plugin(project_dir: Path, cli_name: str, entry_name: str) -> Path:
-    """Create or update [plugins] binding in <project_dir>/.passkey.toml."""
-    toml_path = project_dir / ".passkey.toml"
-    existing = _parse_passkey_toml_plugins(toml_path) if toml_path.exists() else {}
-    existing[cli_name] = entry_name
+    """Create or update [plugins] binding in <project_dir>/.passkey.toml (preserving [project])."""
+    from .project import write_passkey_toml
 
-    lines = [
-        "# Committable passkey plugin bindings (contains entry names only, never secrets)",
-        "[plugins]",
-    ]
-    for k in sorted(existing):
-        key_fmt = f'"{k}"' if "-" in k else k
-        lines.append(f'{key_fmt} = "{existing[k]}"')
-
-    content = "\n".join(lines) + "\n"
-    fd, tmp_path = tempfile.mkstemp(dir=project_dir, prefix=".passkey-toml-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.chmod(tmp_path, 0o644)
-        os.replace(tmp_path, toml_path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_path)
-        raise
-    return toml_path
+    return write_passkey_toml(project_dir, plugins_section={cli_name: entry_name})
 
 
 def _find_dir_plugin_binding(cli_name: str, start_dir: Path) -> tuple[str, Path] | None:

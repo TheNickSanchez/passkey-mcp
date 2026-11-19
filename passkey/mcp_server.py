@@ -85,7 +85,9 @@ def _is_forbidden_system_path(raw_path: str) -> tuple[bool, Path]:
     resolved_str = str(resolved)
     if resolved_str.startswith("/private/var/folders/"):
         return False, resolved
-    if str(expanded).startswith(_FORBIDDEN_SYSTEM_PREFIXES) or resolved_str.startswith(
+    exp_check = str(expanded).rstrip("/") + "/"
+    res_check = resolved_str.rstrip("/") + "/"
+    if exp_check.startswith(_FORBIDDEN_SYSTEM_PREFIXES) or res_check.startswith(
         _FORBIDDEN_SYSTEM_PREFIXES
     ):
         return True, resolved
@@ -292,6 +294,45 @@ def passkey_preflight_run(
         return preflight_run(entries, command=command, env_files=safe_env_files)
     except PasskeyError as e:
         raise Exception(f"Preflight check failed: {e}") from e
+
+
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
+def passkey_project_status(
+    project_dir: str = ".",
+    command: list[str] | None = None,
+) -> dict:
+    """Inspect repo secret manifest (.env.passkey / .passkey.toml), HMAC trust, and readiness.
+
+    Auto-discovers the project manifest up to the enclosing git root, verifies
+    whether its SHA-256 digest is trusted in ``trusted_projects.json``, and
+    preflights all referenced entries and ``passkey://`` URIs without exposing
+    any secret values.
+
+    Args:
+        project_dir: Project directory to inspect (default: current directory)
+        command: Optional command argv to verify executable availability
+
+    Returns:
+        Secret-free dictionary with manifest_found, trusted, trust_status,
+        ready, injected_env_vars, will_prompt_biometric, and remediation steps.
+    """
+    from .project import get_project_status
+
+    forbidden, resolved = _is_forbidden_system_path(project_dir)
+    if forbidden:
+        return {
+            "ok": False,
+            "error_code": "FORBIDDEN_PATH",
+            "message": "Access to system path denied.",
+            "manifest_found": False,
+            "trusted": False,
+            "ready": False,
+        }
+
+    try:
+        return get_project_status(resolved, command=command)
+    except PasskeyError as e:
+        return e.to_error_dict()
 
 
 @mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)

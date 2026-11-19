@@ -58,6 +58,7 @@ _SAFE_DETAIL_KEYS = frozenset(
         "fields_injected",
         "format",
         "issues",
+        "manifests",
         "max_uses",
         "mode",
         "new_name",
@@ -67,8 +68,10 @@ _SAFE_DETAIL_KEYS = frozenset(
         "read_count",
         "reads_served",
         "resolved_references",
+        "scope",
         "skipped",
         "source",
+        "trust_status",
         "ttl_seconds",
         "updated",
     }

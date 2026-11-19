@@ -10,7 +10,7 @@ SUBPARSER_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Run & Inject",
-        ["run", "inject", "mount", "plugin", "browser-fill"],
+        ["run", "exec", "project", "inject", "mount", "plugin", "browser-fill"],
     ),
     (
         "MCP & AI Guardrails",
@@ -475,6 +475,126 @@ def create_parser() -> argparse.ArgumentParser:
         help="Load KEY=VALUE / passkey:// references from file (repeatable)",
     )
     run_parser.add_argument("args", nargs=argparse.REMAINDER, help="entries... -- command")
+
+    exec_parser = _add_primary(
+        "exec", "Auto-discover repo manifest (.env.passkey/.passkey.toml) and run command"
+    )
+    exec_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress passkey warning and status output on stderr",
+    )
+    exec_parser.add_argument(
+        "--no-masking",
+        action="store_true",
+        help="Disable masking of secret values on child stdout and stderr",
+    )
+    exec_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate project manifest, trust, leases, and command without spawning child",
+    )
+    exec_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output --dry-run project readiness report as JSON (never contains secrets)",
+    )
+    exec_parser.add_argument(
+        "--no-strict",
+        action="store_true",
+        dest="no_strict",
+        help="Allow running even if manifest entries are missing",
+    )
+    exec_parser.add_argument(
+        "--project-dir",
+        dest="project_dir",
+        help="Project directory to discover manifest from (default: cwd)",
+    )
+    exec_parser.add_argument("args", nargs=argparse.REMAINDER, help="-- command")
+
+    project_parser = _add_primary(
+        "project", "Bootstrap, inspect, and trust repo-scoped .env.passkey manifests"
+    )
+    project_sub = project_parser.add_subparsers(dest="project_command")
+    project_init = project_sub.add_parser(
+        "init",
+        help="Scan .env.example and generate committable .env.passkey / .passkey.toml",
+        parents=common_parents,
+    )
+    project_init.add_argument(
+        "--from-file",
+        dest="from_file",
+        help="Template file to scan (default: auto-detect .env.example / .env.template)",
+    )
+    project_init.add_argument(
+        "--project-dir",
+        dest="project_dir",
+        help="Target project directory (default: current working directory)",
+    )
+    project_init.add_argument(
+        "--entries",
+        nargs="+",
+        help="Optional keychain entries to declare in .passkey.toml [project].entries",
+    )
+    project_init.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Overwrite existing .env.passkey file",
+    )
+    project_init.add_argument(
+        "--no-trust",
+        action="store_true",
+        dest="no_trust",
+        help="Do not automatically trust the generated manifest",
+    )
+    project_init.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output generated manifest summary as JSON",
+    )
+
+    project_status = project_sub.add_parser(
+        "status",
+        help="Check manifest discovery, HMAC trust, and preflight readiness",
+        parents=common_parents,
+    )
+    project_status.add_argument(
+        "--project-dir",
+        dest="project_dir",
+        help="Project directory to inspect (default: current working directory)",
+    )
+    project_status.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output project status as JSON",
+    )
+
+    project_trust = project_sub.add_parser(
+        "trust",
+        help="Approve (or --revoke) HMAC trust for the current project manifest",
+        parents=common_parents,
+    )
+    project_trust.add_argument(
+        "--project-dir",
+        dest="project_dir",
+        help="Project directory to trust (default: current working directory)",
+    )
+    project_trust.add_argument(
+        "--revoke",
+        action="store_true",
+        help="Revoke trust for the project manifest",
+    )
+    project_trust.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output trust update as JSON",
+    )
 
     inject_parser = _add_primary(
         "inject", "Render {{ passkey://entry/field }} placeholders into a file"

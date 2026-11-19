@@ -13,15 +13,18 @@ from ..interactive import (
 )
 from ..keychain import PasskeyError, _get_entry
 from .handlers import (
+    handle_exec_command,
     handle_onboarding_or_help,
     handle_run_command,
     handle_template_command,
+    print_project_status,
     resolve_entry,
 )
 from .parser import create_parser
 
 __all__ = [
     "create_parser",
+    "handle_exec_command",
     "handle_onboarding_or_help",
     "handle_run_command",
     "handle_template_command",
@@ -47,6 +50,8 @@ _KNOWN_COMMANDS = frozenset(
         "plugin",
         "browser-fill",
         "run",
+        "exec",
+        "project",
         "inject",
         "mount",
         "hook",
@@ -314,6 +319,60 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         # Never auth-gated: headless path for MCP servers.
         # Protection comes from the OS keychain's own ACL prompts.
         handle_run_command(parser, args)
+    elif command == "exec":
+        # Enforces HMAC manifest trust + per-entry policy inside exec_with_project.
+        handle_exec_command(parser, args)
+    elif command == "project":
+        from ..project import get_project_status, init_project, trust_project
+
+        sub = getattr(args, "project_command", None)
+        if sub == "init":
+            res = init_project(
+                project_dir=getattr(args, "project_dir", None),
+                from_file=getattr(args, "from_file", None),
+                entries=getattr(args, "entries", None),
+                force=bool(getattr(args, "force", False)),
+                no_trust=bool(getattr(args, "no_trust", False)),
+            )
+            if json_out:
+                print(json.dumps(res, indent=2))
+            else:
+                print(f"Initialized project manifest in '{res['project_root']}':")
+                for wf in res["written_files"]:
+                    print(f"  Wrote: {wf}")
+                if res["mapped_vars"]:
+                    print(f"  Mapped vars ({len(res['mapped_vars'])}): {', '.join(res['mapped_vars'])}")
+                if res["ambiguous_vars"]:
+                    print(f"  Ambiguous vars: {', '.join(res['ambiguous_vars'])}")
+                if res["missing_vars"]:
+                    print(f"  Missing vars: {', '.join(res['missing_vars'])}")
+                trust_msg = "trusted" if res["trusted"] else "pending Touch ID / 'passkey project trust'"
+                print(f"  Trust status: {trust_msg}")
+        elif sub == "status":
+            status = get_project_status(getattr(args, "project_dir", None))
+            if json_out:
+                print(json.dumps(status, indent=2))
+            else:
+                print_project_status(status)
+        elif sub == "trust":
+            res = trust_project(
+                getattr(args, "project_dir", None),
+                revoke=bool(getattr(args, "revoke", False)),
+            )
+            if json_out:
+                print(json.dumps(res, indent=2))
+            elif res.get("revoked") is not None and not res.get("trusted"):
+                print(f"Revoked project trust for '{res['project_root']}'")
+            else:
+                print(
+                    f"Trusted project manifest in '{res['project_root']}' "
+                    f"(sha256={res['manifest_sha256'][:12]}...)"
+                )
+        else:
+            raise PasskeyError(
+                "Usage: passkey project [init|status|trust]",
+                error_code="INVALID_USAGE",
+            )
     elif command == "inject":
         _require_auth("inject secrets into file")
         commands.cmd_inject(

@@ -202,6 +202,155 @@ def handle_run_command(parser, args):
     sys.exit(rc)
 
 
+def print_project_status(status: dict) -> None:
+    """Render a human-readable summary for ``passkey project status`` / ``exec --dry-run``."""
+    if not status.get("manifest_found"):
+        print(f"Project root:     {status['project_root']}")
+        print("Manifest status:  NOT FOUND")
+        if status.get("detected_templates"):
+            print(f"Templates found:  {', '.join(status['detected_templates'])}")
+        for item in status.get("remediation", []):
+            print(f"  -> {item}")
+        return
+
+    ready_label = "READY" if status["ready"] else "NOT READY"
+    trust_label = "TRUSTED" if status["trusted"] else f"UNTRUSTED ({status['trust_status']})"
+    print(f"Project root:     {status['project_root']}")
+    print(f"Manifests:        {', '.join(status['manifests'])}")
+    print(f"Trust status:     {trust_label}")
+    print(f"Readiness:        {ready_label}")
+    if status.get("entries"):
+        print(f"Entries:          {', '.join(status['entries'])}")
+    if status.get("injected_env_vars"):
+        print(f"Injected vars:    {', '.join(status['injected_env_vars'])}")
+    if status.get("entries_missing"):
+        print(f"Entries missing:  {', '.join(status['entries_missing'])}")
+    if status.get("missing_required_vars"):
+        print(f"Missing required: {', '.join(status['missing_required_vars'])}")
+    if status.get("will_prompt_biometric"):
+        print("Biometric prompt: YES")
+    else:
+        print("Biometric prompt: no")
+    if status.get("remediation"):
+        print("\nRemediation:")
+        for item in status["remediation"]:
+            print(f"  - {item}")
+
+
+def handle_exec_command(parser, args):
+    """Handler for the zero-config ``passkey exec`` subcommand."""
+    from ..interactive import is_json_output_env, set_no_input
+    from ..project import exec_with_project
+
+    exec_args = list(args.args)
+    no_masking = bool(getattr(args, "no_masking", False))
+    quiet = bool(getattr(args, "quiet", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+    json_output = bool(getattr(args, "json_output", False))
+    no_strict = bool(getattr(args, "no_strict", False))
+    project_dir = getattr(args, "project_dir", None)
+
+    if "--" in exec_args:
+        sep_idx = exec_args.index("--")
+        pre_sep = exec_args[:sep_idx]
+        cmd = exec_args[sep_idx + 1 :]
+    else:
+        pre_sep = []
+        cmd = []
+        idx = 0
+        while idx < len(exec_args):
+            tok = exec_args[idx]
+            if tok in (
+                "--no-masking",
+                "-q",
+                "--quiet",
+                "--dry-run",
+                "--json",
+                "--no-strict",
+                "--no-input",
+            ):
+                pre_sep.append(tok)
+                idx += 1
+            elif tok == "--project-dir" and idx + 1 < len(exec_args):
+                pre_sep.extend([tok, exec_args[idx + 1]])
+                idx += 2
+            elif tok.startswith("--project-dir="):
+                pre_sep.append(tok)
+                idx += 1
+            elif tok.startswith("-"):
+                raise PasskeyError(
+                    f"Unknown option '{tok}' for 'passkey exec'. "
+                    "Place '--' before command arguments: passkey exec -- <command>",
+                    error_code="INVALID_USAGE",
+                    remediation_command="passkey exec -- <command>",
+                )
+            else:
+                cmd = exec_args[idx:]
+                break
+
+    idx = 0
+    while idx < len(pre_sep):
+        token = pre_sep[idx]
+        if token == "--no-masking":
+            no_masking = True
+        elif token in ("-q", "--quiet"):
+            quiet = True
+        elif token == "--dry-run":
+            dry_run = True
+        elif token == "--json":
+            json_output = True
+        elif token == "--no-strict":
+            no_strict = True
+        elif token == "--no-input":
+            set_no_input(True)
+        elif token == "--project-dir":
+            if idx + 1 >= len(pre_sep):
+                raise PasskeyError(
+                    "--project-dir requires a path argument",
+                    error_code="INVALID_USAGE",
+                )
+            project_dir = pre_sep[idx + 1]
+            idx += 2
+            continue
+        elif token.startswith("--project-dir="):
+            project_dir = token.split("=", 1)[1]
+        else:
+            raise PasskeyError(
+                f"Unexpected argument '{token}' before '--' in 'passkey exec'. "
+                "Usage: passkey exec [-q] [--dry-run [--json]] -- <command>",
+                error_code="INVALID_USAGE",
+                remediation_command="passkey exec -- <command>",
+            )
+        idx += 1
+
+    if json_output and not dry_run:
+        raise PasskeyError(
+            "'--json' on 'passkey exec' requires '--dry-run' "
+            "(child command stdout is never wrapped in JSON).",
+            error_code="INVALID_USAGE",
+        )
+
+    result = exec_with_project(
+        cmd or None,
+        project_dir=project_dir,
+        quiet=quiet,
+        no_masking=no_masking,
+        dry_run=dry_run,
+        strict=not no_strict,
+    )
+
+    if dry_run:
+        assert isinstance(result, dict)
+        if json_output or is_json_output_env():
+            print(json.dumps(result, indent=2))
+        else:
+            print_project_status(result)
+        sys.exit(0 if (result["ready"] and result["trusted"]) else 1)
+
+    assert isinstance(result, int)
+    sys.exit(result)
+
+
 def handle_template_command(args):
     """Handler for the 'template' subcommands."""
     from ..templates import get_template, list_templates
