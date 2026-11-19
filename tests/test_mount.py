@@ -103,7 +103,114 @@ class TestEphemeralFifoMount:
     def test_clean_error_on_windows(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sys, "platform", "win32")
         with pytest.raises(PasskeyError, match="not supported on Windows"):
-            mount_env_fifo(["svc"], path=tmp_path / ".env")
+            mount_env_fifo(["svc"], path=tmp_path / ".env", max_reads=1)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFO only")
+    def test_unbounded_mount_fails_fast_for_headless_agents(self, tmp_path, monkeypatch, capsys):
+        from unittest.mock import patch
+
+        from passkey.cli import main
+
+        save_entry(Entry(name="svc", fields={"KEY": "val1234"}))
+        fifo_path = tmp_path / ".env"
+
+        # Non-TTY unbounded mount -> exit 2 with passkey run / --once --timeout guidance
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+        with (
+            patch.object(sys, "argv", ["passkey", "mount", "svc", "--path", str(fifo_path)]),
+            pytest.raises(SystemExit) as exc,
+        ):
+            main()
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "passkey run -q svc -- <command>" in err
+        assert "--once --timeout" in err
+        assert not fifo_path.exists()
+
+        # PTY-backed agent (CLAUDECODE=1) also fails fast if unbounded
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        with (
+            patch.object(sys, "argv", ["passkey", "mount", "svc", "--path", str(fifo_path)]),
+            pytest.raises(SystemExit) as exc_agent,
+        ):
+            main()
+        assert exc_agent.value.code == 2
+        capsys.readouterr()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFO only")
+    def test_mount_timeout_expires_cleanly_and_unlinks_fifo(self, tmp_path, capsys):
+        from unittest.mock import patch
+
+        from passkey.cli import main
+
+        save_entry(Entry(name="svc", fields={"KEY": "secret_timeout_val"}))
+        fifo_path = tmp_path / ".env"
+
+        start = time.monotonic()
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "passkey",
+                    "mount",
+                    "svc",
+                    "--path",
+                    str(fifo_path),
+                    "--once",
+                    "--timeout",
+                    "0.12",
+                    "-q",
+                ],
+            ),
+            pytest.raises(SystemExit) as exc,
+        ):
+            main()
+        elapsed = time.monotonic() - start
+        assert exc.value.code == 1
+        assert elapsed < 2.0
+        err = capsys.readouterr().err
+        assert "Timed out after 0.12s waiting for a reader" in err
+        assert "secret_timeout_val" not in err
+        assert not fifo_path.exists()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFO only")
+    def test_mount_timeout_serves_prompt_reader_and_stale_fifo_gives_rm_hint(self, tmp_path):
+        import os
+
+        save_entry(Entry(name="svc", fields={"KEY": "prompt_reader_val"}))
+        fifo_path = tmp_path / ".env"
+
+        # 1. Stale pre-existing FIFO yields specific rm '<path>' guidance
+        os.mkfifo(fifo_path, 0o600)
+        with pytest.raises(PasskeyError, match=r"FIFO already exists.*rm"):
+            mount_env_fifo(["svc"], path=fifo_path, max_reads=1, timeout=1.0, quiet=True)
+        fifo_path.unlink()
+
+        # 2. Bounded --timeout succeeds when reader opens promptly
+        errors: list[Exception] = []
+
+        def _serve():
+            try:
+                mount_env_fifo(["svc"], path=fifo_path, max_reads=1, timeout=2.0, quiet=True)
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+
+        worker = threading.Thread(target=_serve, daemon=True)
+        worker.start()
+
+        deadline = time.monotonic() + 2.0
+        while not fifo_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        data = fifo_path.read_text(encoding="utf-8")
+        assert "KEY='prompt_reader_val'" in data
+        worker.join(timeout=2.0)
+        assert not worker.is_alive()
+        assert errors == []
+        assert not fifo_path.exists()
 
 
 class TestAgentHooks:

@@ -301,6 +301,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             args.entries,
             path=args.path,
             max_reads=max_reads,
+            timeout=getattr(args, "timeout", None),
             force_git_exposed=args.force_git_exposed,
             quiet=args.quiet,
         )

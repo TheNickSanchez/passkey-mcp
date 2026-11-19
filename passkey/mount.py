@@ -1,8 +1,10 @@
 """Ephemeral UNIX FIFO (.env) secret mounter."""
 
 import contextlib
+import errno
 import os
 import signal
+import stat
 import sys
 import threading
 import time
@@ -11,6 +13,7 @@ from pathlib import Path
 
 from .audit import log_operation
 from .commands import fields_as_env
+from .interactive import InteractiveRequiredError, can_prompt_interactively
 from .keychain import PasskeyError, _get_entry
 from .mcp_config import is_file_exposed_in_git
 from .models import Entry
@@ -20,11 +23,37 @@ class _MountInterrupted(BaseException):
     """Internal signal to break cleanly out of a blocking FIFO open()."""
 
 
+def _open_fifo_writer(fifo_path: Path, *, timeout: float | None) -> int:
+    """Open FIFO for writing, optionally enforcing a bounded reader wait timeout."""
+    if timeout is None:
+        return os.open(fifo_path, os.O_WRONLY)
+
+    import fcntl
+
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fd = os.open(fifo_path, os.O_WRONLY | os.O_NONBLOCK)
+            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
+            return fd
+        except OSError as e:
+            if e.errno != errno.ENXIO:
+                raise PasskeyError(f"Failed to open FIFO '{fifo_path}': {e}") from e
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise PasskeyError(
+                    f"Timed out after {timeout:g}s waiting for a reader on FIFO '{fifo_path}'."
+                ) from None
+            time.sleep(min(0.02, max(0.001, remaining)))
+
+
 def mount_env_fifo(
     entries: list[str],
     path: str | Path = ".env",
     *,
     max_reads: int | None = None,
+    timeout: float | None = None,
     force_git_exposed: bool = False,
     quiet: bool = False,
     authorize_fn: Callable[[Entry], None] | None = None,
@@ -43,8 +72,30 @@ def mount_env_fifo(
     if not entries:
         raise PasskeyError("At least one passkey entry is required for 'passkey mount'.")
 
+    if timeout is not None and timeout <= 0:
+        raise PasskeyError("--timeout must be greater than 0 seconds.")
+
+    if max_reads is not None and max_reads <= 0:
+        raise PasskeyError("--max-reads must be at least 1.")
+
+    if not can_prompt_interactively() and max_reads is None and timeout is None:
+        joined = " ".join(entries)
+        raise InteractiveRequiredError(
+            f"'passkey mount' without --once, --max-reads, or --timeout blocks indefinitely "
+            f"in non-interactive sessions. "
+            f"For single-command execution use 'passkey run -q {joined} -- <command>' or "
+            f"'passkey run -q --env-file .env.passkey -- <command>', or bound the FIFO with "
+            f"'passkey mount --once --timeout 30 {joined}'."
+        )
+
     fifo_path = Path(path).expanduser()
     if fifo_path.exists() or fifo_path.is_symlink():
+        with contextlib.suppress(OSError):
+            if stat.S_ISFIFO(fifo_path.lstat().st_mode):
+                raise PasskeyError(
+                    f"FIFO already exists at '{fifo_path}'. Another 'passkey mount' may be "
+                    f"running; if it is stale, remove it with: rm '{fifo_path}'"
+                )
         raise PasskeyError(
             f"Refusing to mount FIFO at '{fifo_path}': file already exists. Remove it first."
         )
@@ -97,7 +148,7 @@ def mount_env_fifo(
 
     try:
         while max_reads is None or reads < max_reads:
-            fd = os.open(fifo_path, os.O_WRONLY)
+            fd = _open_fifo_writer(fifo_path, timeout=timeout)
             try:
                 combined: dict[str, str] = {}
                 for name in entries:

@@ -481,6 +481,12 @@ def create_parser() -> argparse.ArgumentParser:
         "--max-reads", type=int, help="Exit after serving N readers (default: unlimited)"
     )
     mount_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="Maximum seconds to wait for a FIFO reader before exiting and unlinking",
+    )
+    mount_parser.add_argument(
         "--force-git-exposed",
         action="store_true",
         help="Allow mounting even if target path is not gitignored",
