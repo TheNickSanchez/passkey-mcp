@@ -20,6 +20,7 @@ class TestLoadSettings:
             "require_auth": False,
             "mcp_write_tools": True,
             "mcp_browser_broker": False,
+            "agent_session_lease_ttl": 600,
         }
 
     def test_roundtrip(self, isolated_data_dir):
@@ -34,6 +35,7 @@ class TestLoadSettings:
             "require_auth": False,
             "mcp_write_tools": True,
             "mcp_browser_broker": False,
+            "agent_session_lease_ttl": 600,
         }
 
     def test_wrong_type_falls_back_to_default(self, isolated_data_dir):

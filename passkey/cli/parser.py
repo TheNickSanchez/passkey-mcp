@@ -820,14 +820,14 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     policy_parser = _add_primary(
-        "policy", "Show or set an entry's access policy (allow or prompt)"
+        "policy", "Show or set an entry's access policy (allow, session, or prompt)"
     )
     policy_parser.add_argument("entry", help="Entry name")
     policy_parser.add_argument(
         "policy_value",
         nargs="?",
-        choices=["allow", "prompt"],
-        help="Access policy: 'allow' (headless) or 'prompt' (requires Touch ID / lease)",
+        choices=["allow", "session", "prompt"],
+        help="Access policy: 'allow' (headless), 'session' (1 Touch ID per agent session), or 'prompt' (every access)",
     )
     policy_parser.add_argument(
         "--json",

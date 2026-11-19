@@ -16,7 +16,7 @@ RESERVED_NAMES = frozenset(
         "version",
     }
 )
-VALID_POLICIES = frozenset({"allow", "prompt"})
+VALID_POLICIES = frozenset({"allow", "session", "prompt"})
 
 
 def is_valid_name(name) -> bool:

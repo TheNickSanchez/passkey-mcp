@@ -538,7 +538,13 @@ def cmd_list(names_only: bool = False, *, json_output: bool = False) -> None:
                 "fields": sorted(e.fields.keys()),
                 "config_keys": sorted(e.config.keys()),
                 "policy": e.policy,
-                "has_active_lease": e.name in active_leases,
+                "has_active_lease": (
+                    e.name in active_leases
+                    and (
+                        e.policy != "prompt"
+                        or active_leases[e.name].get("lease_kind") != "session"
+                    )
+                ),
                 "created": e.created,
                 "modified": e.modified,
                 "last_rotated": e.last_rotated,
@@ -878,7 +884,7 @@ def cmd_info(entry: Entry, *, json_output: bool = False) -> None:
 
     from .leases import peek_lease
 
-    lease = peek_lease(entry.name)
+    lease = peek_lease(entry.name, allow_session=(entry.policy != "prompt"))
     has_lease = lease is not None
     secret_keys = sorted(entry.fields.keys())
     config_keys = sorted(entry.config.keys())
@@ -890,7 +896,7 @@ def cmd_info(entry: Entry, *, json_output: bool = False) -> None:
             "has_active_lease": has_lease,
             "lease_seconds_remaining": lease["seconds_remaining"] if lease else None,
             "lease_remaining_uses": lease.get("remaining_uses") if lease else None,
-            "will_prompt_biometric": entry.policy == "prompt" and not has_lease,
+            "will_prompt_biometric": entry.policy in ("prompt", "session") and not has_lease,
             "fields": secret_keys,
             "config_keys": config_keys,
             "field_count": len(secret_keys),
@@ -907,7 +913,7 @@ def cmd_info(entry: Entry, *, json_output: bool = False) -> None:
     print(f"Policy: {entry.policy}")
     if has_lease and lease is not None:
         print(f"Active lease: yes ({lease['seconds_remaining']}s remaining)")
-    elif entry.policy == "prompt":
+    elif entry.policy in ("prompt", "session"):
         print("Active lease: no (will prompt Touch ID/OS auth)")
     print(f"Created: {entry.created or 'unknown'}")
     print(f"Modified: {entry.modified or 'unknown'}")
@@ -937,7 +943,7 @@ def cmd_policy(
 
     if policy_value is None:
         if json_output:
-            lease = peek_lease(entry.name)
+            lease = peek_lease(entry.name, allow_session=(entry.policy != "prompt"))
             print(
                 json.dumps(
                     {
@@ -963,7 +969,7 @@ def cmd_policy(
     save_entry(entry, is_update=True)
     log_operation("policy", entry.name, details={"policy": normalized})
     if json_output:
-        lease = peek_lease(entry.name)
+        lease = peek_lease(entry.name, allow_session=(normalized != "prompt"))
         print(
             json.dumps(
                 {

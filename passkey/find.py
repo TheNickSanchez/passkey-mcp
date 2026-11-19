@@ -157,8 +157,11 @@ def find_env_vars(
         if pair in seen_pairs:
             return
         seen_pairs.add(pair)
-        has_lease = entry_obj.name in active_leases
         policy = getattr(entry_obj, "policy", "allow")
+        lease_rec = active_leases.get(entry_obj.name)
+        has_lease = lease_rec is not None and (
+            policy != "prompt" or lease_rec.get("lease_kind") != "session"
+        )
         will_prompt = policy in ("prompt", "session") and not has_lease
         hit = {
             "requested_var": req_var,

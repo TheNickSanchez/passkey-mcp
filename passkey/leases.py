@@ -15,7 +15,13 @@ from pathlib import Path
 import keyring
 from keyring.errors import KeyringError
 
-from .audit import detect_actor, log_operation
+from .audit import (
+    detect_actor,
+    get_caller_ancestor_pids,
+    get_process_start_token,
+    get_session_anchor,
+    log_operation,
+)
 from .dirs import ensure_data_dir, get_data_dir
 from .keychain import PasskeyError, _get_entry
 from .models import Entry, is_valid_name
@@ -145,13 +151,53 @@ def _save_leases_store(leases_map: dict[str, dict], key: bytes) -> None:
         raise
 
 
+def _format_duration_label(seconds: int) -> str:
+    """Render positive seconds as a concise human duration (e.g., '10m', '1h', '45s')."""
+    if seconds >= 3600 and seconds % 3600 == 0:
+        return f"{seconds // 3600}h"
+    if seconds >= 60 and seconds % 60 == 0:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
+
+
+def _is_session_lease_valid_for_caller(lease: dict) -> tuple[bool, bool]:
+    """Check session-bound lease lineage and start time.
+
+    Returns:
+        (valid_for_caller, dead_or_recycled_anchor)
+    """
+    if lease.get("lease_kind") != "session" and lease.get("session_pid") is None:
+        return True, False
+
+    spid = lease.get("session_pid")
+    expected_start = lease.get("session_start_time")
+    if (
+        isinstance(spid, bool)
+        or not isinstance(spid, int)
+        or spid <= 0
+        or not isinstance(expected_start, str)
+        or not expected_start
+    ):
+        return False, True
+
+    actual_start = get_process_start_token(spid)
+    if actual_start is None or actual_start != expected_start:
+        return False, True
+
+    if spid in get_caller_ancestor_pids():
+        return True, False
+
+    return False, False
+
+
 def _prune_expired(leases_map: dict[str, dict], now: float) -> bool:
-    """Remove expired or zero-remaining-use leases in place; return True if mutated."""
+    """Remove expired, zero-use, or dead/PID-recycled session leases in place."""
     expired_keys = []
     for name, item in leases_map.items():
         expires_at = float(item.get("expires_at", 0.0))
         rem = item.get("remaining_uses")
-        if expires_at <= now or (isinstance(rem, int) and rem <= 0):
+        _, dead_anchor = _is_session_lease_valid_for_caller(item)
+        if expires_at <= now or (isinstance(rem, int) and rem <= 0) or dead_anchor:
             expired_keys.append(name)
     for k in expired_keys:
         del leases_map[k]
@@ -208,23 +254,83 @@ def grant_lease(
     return lease_record
 
 
-def consume_lease(entry_name: str) -> bool:
+def grant_session_lease(
+    entry_name: str,
+    *,
+    ttl_seconds: int,
+    anchor: dict,
+) -> dict:
+    """Mint an HMAC-signed session lease bound to (anchor['pid'], anchor['start_time'])."""
+    leases_map, key = _load_leases_store()
+    now = time.time()
+    _prune_expired(leases_map, now)
+
+    anchor_pid = int(anchor["pid"])
+    start_time = str(anchor["start_time"])
+    client_label = str(anchor.get("client") or "terminal")
+    expires_at = now + ttl_seconds
+    store_key = f"{entry_name}@session:{anchor_pid}"
+
+    lease_record = {
+        "entry": entry_name,
+        "lease_kind": "session",
+        "session_pid": anchor_pid,
+        "session_start_time": start_time,
+        "granted_at": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+        "expires_at": expires_at,
+        "expires_at_iso": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
+        "ttl_seconds": ttl_seconds,
+        "max_uses": None,
+        "remaining_uses": None,
+        "granted_by": client_label,
+    }
+    leases_map[store_key] = lease_record
+    _save_leases_store(leases_map, key)
+
+    log_operation(
+        "lease_grant",
+        entry_name,
+        details={
+            "ttl_seconds": ttl_seconds,
+            "scope": "session",
+            "session_pid": anchor_pid,
+        },
+    )
+    return lease_record
+
+
+def consume_lease(entry_name: str, *, allow_session: bool = True) -> bool:
     """Check and consume 1 use of an active lease for entry_name, if present."""
     leases_map, key = _load_leases_store()
     now = time.time()
     mutated = _prune_expired(leases_map, now)
 
-    lease = leases_map.get(entry_name)
-    if lease is None:
+    selected_key: str | None = None
+    explicit = leases_map.get(entry_name)
+    if explicit is not None and explicit.get("lease_kind") != "session":
+        valid, _ = _is_session_lease_valid_for_caller(explicit)
+        if valid:
+            selected_key = entry_name
+
+    if selected_key is None and allow_session:
+        for k, cand in leases_map.items():
+            if cand.get("entry") == entry_name and cand.get("lease_kind") == "session":
+                valid, _ = _is_session_lease_valid_for_caller(cand)
+                if valid:
+                    selected_key = k
+                    break
+
+    if selected_key is None:
         if mutated:
             _save_leases_store(leases_map, key)
         return False
 
+    lease = leases_map[selected_key]
     rem = lease.get("remaining_uses")
     if isinstance(rem, int):
         rem -= 1
         if rem <= 0:
-            del leases_map[entry_name]
+            del leases_map[selected_key]
         else:
             lease["remaining_uses"] = rem
         mutated = True
@@ -237,20 +343,25 @@ def consume_lease(entry_name: str) -> bool:
 
 
 def list_leases() -> list[dict]:
-    """Return all currently active leases sorted by entry name."""
+    """Return all currently active leases visible to the current caller."""
     leases_map, key = _load_leases_store()
     now = time.time()
     if _prune_expired(leases_map, now):
         _save_leases_store(leases_map, key)
     result = []
-    for name in sorted(leases_map):
-        item = dict(leases_map[name])
+    for store_key in sorted(leases_map):
+        raw_item = leases_map[store_key]
+        valid, _ = _is_session_lease_valid_for_caller(raw_item)
+        if not valid:
+            continue
+        item = dict(raw_item)
         item["seconds_remaining"] = max(0, int(float(item["expires_at"]) - now))
         result.append(item)
+    result.sort(key=lambda r: (str(r.get("entry", "")), str(r.get("lease_kind", "explicit"))))
     return result
 
 
-def peek_all_leases() -> dict[str, dict]:
+def peek_all_leases(*, allow_session: bool = True) -> dict[str, dict]:
     """Read-only inspection of active leases without mutating leases.json or consuming uses."""
     if not get_leases_path().exists():
         return {}
@@ -258,20 +369,31 @@ def peek_all_leases() -> dict[str, dict]:
     now = time.time()
     _prune_expired(leases_map, now)
     result: dict[str, dict] = {}
-    for name in sorted(leases_map):
-        item = dict(leases_map[name])
+    for store_key in sorted(leases_map):
+        raw_item = leases_map[store_key]
+        is_sess = raw_item.get("lease_kind") == "session"
+        if is_sess and not allow_session:
+            continue
+        valid, _ = _is_session_lease_valid_for_caller(raw_item)
+        if not valid:
+            continue
+        ent_name = str(raw_item.get("entry", store_key))
+        item = dict(raw_item)
         item["seconds_remaining"] = max(0, int(float(item["expires_at"]) - now))
-        result[name] = item
+        existing = result.get(ent_name)
+        # Prefer explicit leases over session leases so 'prompt' checks know if an explicit lease exists
+        if existing is None or (existing.get("lease_kind") == "session" and not is_sess):
+            result[ent_name] = item
     return result
 
 
-def peek_lease(entry_name: str) -> dict | None:
+def peek_lease(entry_name: str, *, allow_session: bool = True) -> dict | None:
     """Read-only check for an active lease on entry_name without decrementing remaining_uses."""
-    return peek_all_leases().get(entry_name)
+    return peek_all_leases(allow_session=allow_session).get(entry_name)
 
 
 def revoke_lease(entry_name: str | None = None, *, revoke_all: bool = False) -> int:
-    """Revoke a specific lease or all active leases. Returns count revoked."""
+    """Revoke a specific lease (including session leases) or all active leases."""
     leases_map, key = _load_leases_store()
     now = time.time()
     _prune_expired(leases_map, now)
@@ -286,21 +408,58 @@ def revoke_lease(entry_name: str | None = None, *, revoke_all: bool = False) -> 
     if not entry_name:
         raise PasskeyError("Specify an entry name or pass --all to revoke leases.")
 
-    if entry_name in leases_map:
-        del leases_map[entry_name]
+    matching_keys = [
+        k for k, v in leases_map.items() if k == entry_name or v.get("entry") == entry_name
+    ]
+    if matching_keys:
+        for k in matching_keys:
+            del leases_map[k]
         _save_leases_store(leases_map, key)
-        log_operation("lease_revoke", entry_name, details={"count": 1})
-        return 1
+        log_operation("lease_revoke", entry_name, details={"count": len(matching_keys)})
+        return len(matching_keys)
 
     return 0
 
 
 def authorize_entry_access(entry: Entry, *, operation: str = "inject secrets") -> None:
-    """Enforce entry.policy ('allow' vs 'prompt') via active lease or out-of-band OS auth."""
-    if getattr(entry, "policy", "allow") != "prompt":
+    """Enforce entry.policy ('allow', 'session', or 'prompt') via lease or OS auth."""
+    policy = getattr(entry, "policy", "allow")
+    if policy == "allow":
         return
 
-    if consume_lease(entry.name):
+    if policy == "session":
+        if consume_lease(entry.name, allow_session=True):
+            return
+
+        from .auth import authenticate
+        from .settings import get_agent_session_lease_ttl
+
+        ttl_seconds = get_agent_session_lease_ttl()
+        dur_label = _format_duration_label(ttl_seconds)
+        anchor = get_session_anchor()
+        client_label = (
+            str(anchor["client"]) if anchor else str(detect_actor().get("client", "terminal"))
+        )
+        approved = authenticate(
+            f"Passkey: unlock '{entry.name}' for {client_label} ({dur_label} session)"
+        )
+        if not approved:
+            log_operation("policy_denied", entry.name, success=False)
+            raise PasskeyError(
+                f"Access denied for session-protected entry '{entry.name}'. "
+                f"Approve the Touch ID session prompt or run 'passkey lease grant {entry.name}'.",
+                error_code="BIOMETRIC_DENIED",
+                entry=entry.name,
+                remediation_command=f"passkey lease grant {entry.name} --ttl 15m",
+            )
+
+        log_operation("policy_approved", entry.name)
+        if anchor is not None:
+            grant_session_lease(entry.name, ttl_seconds=ttl_seconds, anchor=anchor)
+        return
+
+    # policy == "prompt": strict per-invocation unless explicit lease granted
+    if consume_lease(entry.name, allow_session=False):
         return
 
     from .auth import authenticate

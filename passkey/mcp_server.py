@@ -172,7 +172,7 @@ def passkey_entry_info(entry_name: str) -> dict:
             ),
         }
 
-    lease = peek_lease(entry.name)
+    lease = peek_lease(entry.name, allow_session=(entry.policy != "prompt"))
     has_lease = lease is not None
     secret_keys = sorted(entry.fields.keys())
     config_keys = sorted(entry.config.keys())
@@ -184,7 +184,7 @@ def passkey_entry_info(entry_name: str) -> dict:
         "has_active_lease": has_lease,
         "lease_seconds_remaining": lease["seconds_remaining"] if lease else None,
         "lease_remaining_uses": lease.get("remaining_uses") if lease else None,
-        "will_prompt_biometric": entry.policy == "prompt" and not has_lease,
+        "will_prompt_biometric": entry.policy in ("prompt", "session") and not has_lease,
         "fields": secret_keys,
         "config_keys": config_keys,
         "field_count": len(secret_keys),

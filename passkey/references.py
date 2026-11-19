@@ -258,7 +258,13 @@ def validate_references_in_file(
                     "reason": f"field '{field_name}' not found in entry '{entry_name}'",
                 }
             )
-        elif getattr(entry, "policy", "allow") == "prompt" and entry_name not in active_leases:
+        elif getattr(entry, "policy", "allow") in ("prompt", "session") and (
+            entry_name not in active_leases
+            or (
+                getattr(entry, "policy", "allow") == "prompt"
+                and active_leases[entry_name].get("lease_kind") == "session"
+            )
+        ):
             prompt_without_lease.add(entry_name)
 
     return {

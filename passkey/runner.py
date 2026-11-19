@@ -135,9 +135,12 @@ def preflight_run(
             )
             continue
 
-        has_lease = name in active_leases
         policy = getattr(entry, "policy", "allow")
-        will_prompt = policy == "prompt" and not has_lease
+        lease_rec = active_leases.get(name)
+        has_lease = lease_rec is not None and (
+            policy != "prompt" or lease_rec.get("lease_kind") != "session"
+        )
+        will_prompt = policy in ("prompt", "session") and not has_lease
         if will_prompt:
             prompt_without_lease.add(name)
 
@@ -217,8 +220,11 @@ def preflight_run(
             continue
 
         ref_policy = getattr(ref_entry, "policy", "allow")
-        ref_has_lease = ref_entry_name in active_leases
-        if ref_policy == "prompt" and not ref_has_lease:
+        ref_lease_rec = active_leases.get(ref_entry_name)
+        ref_has_lease = ref_lease_rec is not None and (
+            ref_policy != "prompt" or ref_lease_rec.get("lease_kind") != "session"
+        )
+        if ref_policy in ("prompt", "session") and not ref_has_lease:
             prompt_without_lease.add(ref_entry_name)
 
         if ref_field in ref_entry.fields:
