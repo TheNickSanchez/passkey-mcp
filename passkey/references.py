@@ -222,10 +222,14 @@ def validate_references_in_file(
     if not path.exists() or not path.is_file():
         raise PasskeyError(f"Reference template file not found: '{path}'")
 
+    from .leases import peek_all_leases
+
+    active_leases = peek_all_leases()
     content = path.read_text(encoding="utf-8")
     uris = extract_references_from_text(content)
     cache: dict[str, Entry | None] = {}
     missing: list[dict[str, str]] = []
+    prompt_without_lease: set[str] = set()
 
     for uri in uris:
         try:
@@ -246,9 +250,13 @@ def validate_references_in_file(
                     "reason": f"field '{field_name}' not found in entry '{entry_name}'",
                 }
             )
+        elif getattr(entry, "policy", "allow") == "prompt" and entry_name not in active_leases:
+            prompt_without_lease.add(entry_name)
 
     return {
         "valid": len(missing) == 0,
         "checked": len(uris),
         "missing": missing,
+        "prompt_entries_without_lease": sorted(prompt_without_lease),
+        "will_prompt_biometric": bool(prompt_without_lease),
     }

@@ -294,6 +294,10 @@ def resolve_plugin_entry(cli_name: str, *, cwd: Path | None = None) -> tuple[str
 
 def list_plugins(cwd: Path | None = None) -> list[dict]:
     """List all built-in CLI plugins and their currently resolved keychain entry."""
+    existing: set[str] = set()
+    with contextlib.suppress(PasskeyError):
+        existing = set(list_entries())
+
     items: list[dict] = []
     for cli_name in sorted(PLUGIN_SPECS):
         spec = PLUGIN_SPECS[cli_name]
@@ -304,6 +308,7 @@ def list_plugins(cwd: Path | None = None) -> list[dict]:
                 "description": spec["description"],
                 "env_vars": list(spec["env_vars"]),
                 "entry": entry_name,
+                "entry_exists": entry_name in existing,
                 "source": source,
             }
         )

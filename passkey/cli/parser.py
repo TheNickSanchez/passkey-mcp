@@ -14,7 +14,7 @@ SUBPARSER_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "MCP & AI Guardrails",
-        ["init", "status", "doctor", "mcp", "hook", "audit", "policy", "lease"],
+        ["init", "status", "doctor", "mcp", "hook", "skill", "audit", "policy", "lease"],
     ),
     (
         "Portability & Config",
@@ -461,6 +461,11 @@ def create_parser() -> argparse.ArgumentParser:
     inject_parser.add_argument(
         "-f", "--force", action="store_true", help="Overwrite output file if it already exists"
     )
+    inject_parser.add_argument(
+        "--force-git-exposed",
+        action="store_true",
+        help="Allow writing output file even if target path is not gitignored",
+    )
 
     mount_parser = _add_primary(
         "mount", "Stream secrets via an ephemeral POSIX FIFO (.env)"
@@ -488,8 +493,14 @@ def create_parser() -> argparse.ArgumentParser:
         "plugin", "Zero-config secret wrappers for AI and cloud CLIs"
     )
     plugin_sub = plugin_parser.add_subparsers(dest="plugin_command")
-    plugin_sub.add_parser(
+    plugin_list = plugin_sub.add_parser(
         "list", help="List supported CLI plugins and active bindings", parents=common_parents
+    )
+    plugin_list.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output plugin bindings as JSON",
     )
     plugin_init = plugin_sub.add_parser(
         "init", help="Bind a CLI plugin to a passkey entry", parents=common_parents
@@ -588,6 +599,11 @@ def create_parser() -> argparse.ArgumentParser:
     hook_install.add_argument(
         "--project-dir", help="Project directory (default: current working directory)"
     )
+    hook_install.add_argument(
+        "--with-skill",
+        action="store_true",
+        help="Also install the corresponding passkey agent skill/rules file",
+    )
     hook_check = hook_sub.add_parser(
         "check", help="Evaluate hook payload from stdin", parents=common_parents
     )
@@ -595,6 +611,31 @@ def create_parser() -> argparse.ArgumentParser:
         "--tool",
         choices=["claude", "cursor", "gemini"],
         help="Hook caller format",
+    )
+
+    skill_parser = _add_primary(
+        "skill", "Install agent instructions/skills for Claude, Cursor, Gemini, or AGENTS.md"
+    )
+    skill_sub = skill_parser.add_subparsers(dest="skill_command")
+    skill_install = skill_sub.add_parser(
+        "install",
+        help="Generate passkey agent skill/rules files in a project",
+        parents=common_parents,
+    )
+    skill_install.add_argument(
+        "--tool",
+        default="all",
+        choices=["claude", "cursor", "gemini", "agents", "all"],
+        help="Target AI tool or instruction format (default: all)",
+    )
+    skill_install.add_argument(
+        "--project-dir", help="Project directory (default: current working directory)"
+    )
+    skill_install.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output written file paths as JSON",
     )
 
     audit_parser = _add_primary(
@@ -617,6 +658,12 @@ def create_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument(
         "--verify", action="store_true", help="Verify HMAC-SHA256 hash chain integrity"
     )
+    audit_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output sanitized audit records, summary, or verification result as JSON",
+    )
 
     policy_parser = _add_primary(
         "policy", "Show or set an entry's access policy (allow or prompt)"
@@ -627,6 +674,12 @@ def create_parser() -> argparse.ArgumentParser:
         nargs="?",
         choices=["allow", "prompt"],
         help="Access policy: 'allow' (headless) or 'prompt' (requires Touch ID / lease)",
+    )
+    policy_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output entry policy as JSON",
     )
     policy_parser.completer = _entry_completer  # type: ignore[attr-defined]
 
@@ -644,7 +697,13 @@ def create_parser() -> argparse.ArgumentParser:
     lease_grant.add_argument(
         "--max-uses", type=int, help="Maximum number of injections before automatic expiry"
     )
-    lease_sub.add_parser("list", help="List active leases", parents=common_parents)
+    lease_list = lease_sub.add_parser("list", help="List active leases", parents=common_parents)
+    lease_list.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output active leases as JSON",
+    )
     lease_revoke = lease_sub.add_parser(
         "revoke", help="Revoke one or all active leases", parents=common_parents
     )
@@ -702,6 +761,12 @@ def create_parser() -> argparse.ArgumentParser:
     config_parser = _add_primary("config", "View or update passkey settings")
     config_parser.add_argument("key", nargs="?", help="Setting name")
     config_parser.add_argument("value", nargs="?", help="New value")
+    config_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output settings as JSON",
+    )
 
     completion_parser = _add_primary(
         "completion", "Print shell tab-completion scripts (bash, zsh, fish)"

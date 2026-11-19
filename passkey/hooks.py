@@ -92,18 +92,55 @@ def _check_shell_command(command: str) -> tuple[bool, str]:
         exe = Path(tokens[idx]).name
         rest = tokens[idx + 1 :]
 
-        # Block `passkey export` unless `--no-secrets` or `--encrypt` is present
-        if (
-            exe == "passkey"
-            and rest
-            and rest[0] == "export"
-            and "--no-secrets" not in rest
-            and "--encrypt" not in rest
-        ):
-            return (
-                False,
-                "Blocked by passkey hook: plaintext 'passkey export' is disallowed for AI agents.",
-            )
+        if exe == "passkey" and rest:
+            # Strip global flags like --no-input so they cannot bypass subcommand checks
+            effective = [t for t in rest if t != "--no-input"]
+            if effective:
+                sub0 = effective[0]
+                sub1 = effective[1] if len(effective) > 1 else ""
+
+                # Block plaintext `passkey export` unless `--no-secrets` or `--encrypt` is present
+                if (
+                    sub0 == "export"
+                    and "--no-secrets" not in effective
+                    and "--encrypt" not in effective
+                ):
+                    return (
+                        False,
+                        "Blocked by passkey hook: plaintext 'passkey export' is disallowed for AI agents. "
+                        "Use 'passkey list --json' or 'passkey export <file> --no-secrets' instead.",
+                    )
+
+                # Block `passkey get` / `passkey entry get` (overwrites clipboard / interactive)
+                if sub0 == "get" or (sub0 == "entry" and sub1 == "get"):
+                    return (
+                        False,
+                        "Blocked by passkey hook: 'passkey get' copies secrets to clipboard and is disallowed "
+                        "for AI agents. Inspect field names with 'passkey info <entry> --json' and inject "
+                        "at runtime with 'passkey run -q <entry> -- <command>'.",
+                    )
+
+                # Block `passkey generate --no-copy` (prints raw generated secret into agent stdout)
+                if (sub0 == "generate" or (sub0 == "entry" and sub1 == "generate")) and (
+                    "--no-copy" in effective
+                ):
+                    return (
+                        False,
+                        "Blocked by passkey hook: 'passkey generate --no-copy' prints raw secrets to stdout. "
+                        "Ask the user to generate or add secrets in their terminal via 'passkey new <entry>'.",
+                    )
+
+                # Block `passkey inject --stdout` or `-o -`
+                if sub0 == "inject" and (
+                    "--stdout" in effective
+                    or ("-o" in effective and effective.index("-o") + 1 < len(effective) and effective[effective.index("-o") + 1] == "-")
+                    or "--out-file=-" in effective
+                ):
+                    return (
+                        False,
+                        "Blocked by passkey hook: 'passkey inject --stdout' exposes secrets on stdout. "
+                        "Write to a gitignored file instead: 'passkey inject -i <tpl> -o <outfile>'.",
+                    )
 
         # Block shell file-reading utilities targeting .env, *.backup, *.enc
         if exe in _READ_SHELL_VERBS:
@@ -113,7 +150,9 @@ def _check_shell_command(command: str) -> tuple[bool, str]:
                 if is_sensitive_secret_path(arg):
                     return (
                         False,
-                        f"Blocked by passkey hook: reading sensitive secret file '{arg}' is disallowed.",
+                        f"Blocked by passkey hook: reading sensitive secret file '{arg}' is disallowed. "
+                        "Use 'passkey list --json', 'passkey info <entry> --json', or "
+                        "'passkey run -q <entry> -- <command>' instead.",
                     )
 
     return True, ""
@@ -144,7 +183,9 @@ def evaluate_hook_payload(payload: dict) -> tuple[bool, str]:
         if is_sensitive_secret_path(path_str):
             return (
                 False,
-                f"Blocked by passkey hook: direct agent access to '{path_str}' is prohibited.",
+                f"Blocked by passkey hook: direct agent access to '{path_str}' is prohibited. "
+                "Inspect safe templates (.env.example / .env.passkey) or run 'passkey list --json' "
+                "and 'passkey run -q <entry> -- <command>' instead.",
             )
 
     candidate_commands: list[str] = []

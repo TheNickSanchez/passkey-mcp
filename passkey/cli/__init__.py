@@ -43,6 +43,7 @@ _KNOWN_COMMANDS = frozenset(
         "inject",
         "mount",
         "hook",
+        "skill",
         "export",
         "import",
         "check",
@@ -190,8 +191,14 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         if args.policy_value is not None:
             _require_auth("update entry policy")
         entry = resolve_entry(args.entry, "Select entry for policy", fuzzy=False)
-        commands.cmd_policy(entry, args.policy_value)
+        commands.cmd_policy(
+            entry,
+            args.policy_value,
+            json_output=getattr(args, "json_output", False),
+        )
     elif command == "lease":
+        import json as _json
+
         from ..leases import grant_lease, list_leases, revoke_lease
 
         if args.lease_command == "grant":
@@ -210,7 +217,9 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             )
         elif args.lease_command == "list":
             active = list_leases()
-            if not active:
+            if getattr(args, "json_output", False):
+                print(_json.dumps(active, indent=2))
+            elif not active:
                 print("No active leases")
             else:
                 for item in active:
@@ -228,12 +237,18 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         else:
             raise PasskeyError("Usage: passkey lease [grant|list|revoke]")
     elif command == "plugin":
+        import json as _json
+
         from ..plugins import init_plugin, list_plugins, run_plugin
 
         if args.plugin_command == "list":
-            for p in list_plugins():
-                env_list = ", ".join(p["env_vars"])
-                print(f"  {p['cli']:<14} -> {p['entry']:<16} [{p['source']}] ({env_list})")
+            plugins = list_plugins()
+            if getattr(args, "json_output", False):
+                print(_json.dumps(plugins, indent=2))
+            else:
+                for p in plugins:
+                    env_list = ", ".join(p["env_vars"])
+                    print(f"  {p['cli']:<14} -> {p['entry']:<16} [{p['source']}] ({env_list})")
         elif args.plugin_command == "init":
             _require_auth("configure CLI plugin")
             info = init_plugin(args.cli, entry_name=args.entry, scope=args.scope)
@@ -275,6 +290,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             args.out_file,
             to_stdout=args.stdout,
             force=args.force,
+            force_git_exposed=getattr(args, "force_git_exposed", False),
         )
     elif command == "mount":
         _require_auth("mount ephemeral secret FIFO")
@@ -297,10 +313,38 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             proj = _Path(args.project_dir) if args.project_dir else None
             target = install_hook(args.tool, project_dir=proj)
             print(f"Installed passkey guard hook for {args.tool} at {target}")
+            if getattr(args, "with_skill", False):
+                from ..skills import install_skill
+
+                for skill_path in install_skill(args.tool, project_dir=proj):
+                    print(f"Installed passkey agent skill at {skill_path}")
         elif args.hook_command == "check":
             sys.exit(run_hook_check(tool=args.tool))
         else:
             raise PasskeyError("Usage: passkey hook [install|check]")
+    elif command == "skill":
+        import json as _json
+        from pathlib import Path as _Path
+
+        from ..skills import install_skill
+
+        if args.skill_command == "install":
+            proj = _Path(args.project_dir) if args.project_dir else None
+            written = install_skill(args.tool, project_dir=proj)
+            if getattr(args, "json_output", False):
+                print(
+                    _json.dumps(
+                        {"tool": args.tool, "installed": [str(p) for p in written]},
+                        indent=2,
+                    )
+                )
+            else:
+                for p in written:
+                    print(f"Installed passkey agent instructions at {p}")
+        else:
+            raise PasskeyError(
+                "Usage: passkey skill install [--tool claude|cursor|gemini|agents|all]"
+            )
     elif command == "export":
         if args.encrypt:
             require_interactive(
@@ -350,8 +394,11 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             )
         )
     elif command == "audit":
+        json_out = bool(getattr(args, "json_output", False))
         if getattr(args, "verify", False):
-            commands.cmd_audit(verify=True)
+            rc = commands.cmd_audit(verify=True, json_output=json_out)
+            if rc != 0:
+                sys.exit(rc)
         elif args.clear:
             yes = bool(getattr(args, "yes", False))
             if not yes:
@@ -360,13 +407,13 @@ def _dispatch_command(command: str | None, parser, args) -> None:
                     human_command="passkey audit --clear",
                     alternative="passkey audit --clear --yes",
                 )
-            commands.cmd_audit(clear=True, yes=yes)
+            commands.cmd_audit(clear=True, yes=yes, json_output=json_out)
         elif args.summary:
             from ..health import cmd_audit_summary
 
-            cmd_audit_summary()
+            cmd_audit_summary(json_output=json_out)
         else:
-            commands.cmd_audit(limit=args.limit)
+            commands.cmd_audit(limit=args.limit, json_output=json_out)
     elif command == "generate":
         from ..generator import generate_password
 
@@ -431,7 +478,11 @@ def _dispatch_command(command: str | None, parser, args) -> None:
     elif command == "config":
         from ..settings import cmd_config
 
-        cmd_config(args.key, args.value)
+        cmd_config(
+            args.key,
+            args.value,
+            json_output=getattr(args, "json_output", False),
+        )
     elif command == "mcp-serve":
         from ..mcp_server import main as mcp_main
 

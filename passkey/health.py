@@ -80,8 +80,10 @@ def cmd_rotate(
     print(f"Marked '{entry_name}' as rotated ({entry.last_rotated})")
 
 
-def cmd_audit_summary() -> None:
+def cmd_audit_summary(*, json_output: bool = False) -> None:
     """Show aggregate audit log summary for the last 30 days."""
+    import json
+
     logs = get_recent_logs(limit=1000)
 
     now = datetime.now()
@@ -96,24 +98,7 @@ def cmd_audit_summary() -> None:
         if ts >= cutoff:
             recent.append(log)
 
-    if not recent:
-        print("No audit log entries in the last 30 days")
-        return
-
-    # Count operations by type
-    op_counts: dict[str, int] = {}
-    entry_access_counts: dict[str, int] = {}
-
-    for log in recent:
-        op = log.get("operation", "unknown")
-        entry = log.get("entry", "")
-
-        op_counts[op] = op_counts.get(op, 0) + 1
-
-        if entry and op == "read":
-            entry_access_counts[entry] = entry_access_counts.get(entry, 0) + 1
-
-    # Get oldest entry
+    # Get oldest entry regardless of recent logs
     all_entries = get_all_entries()
     oldest_entry = None
     oldest_date = None
@@ -128,6 +113,46 @@ def cmd_audit_summary() -> None:
             except ValueError:
                 pass
 
+    days_old = (now - oldest_date).days if (oldest_entry and oldest_date) else None
+
+    # Count operations by type
+    op_counts: dict[str, int] = {}
+    entry_access_counts: dict[str, int] = {}
+
+    for log in recent:
+        op = log.get("operation", "unknown")
+        entry_name = log.get("entry", "")
+
+        op_counts[op] = op_counts.get(op, 0) + 1
+
+        if entry_name and op == "read":
+            entry_access_counts[entry_name] = entry_access_counts.get(entry_name, 0) + 1
+
+    most_accessed = (
+        max(entry_access_counts, key=entry_access_counts.get) if entry_access_counts else None
+    )
+
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "window_days": 30,
+                    "total_operations": sum(op_counts.values()),
+                    "operations": dict(sorted(op_counts.items(), key=lambda x: -x[1])),
+                    "most_accessed": most_accessed,
+                    "entry_read_counts": entry_access_counts,
+                    "oldest_entry": oldest_entry,
+                    "oldest_entry_days": days_old,
+                },
+                indent=2,
+            )
+        )
+        return
+
+    if not recent:
+        print("No audit log entries in the last 30 days")
+        return
+
     # Print summary
     print("Audit Summary (last 30 days)")
     print("=" * 35)
@@ -137,11 +162,9 @@ def cmd_audit_summary() -> None:
         print(f"  {op:12} {count:>5}")
     print(f"  {'TOTAL':12} {sum(op_counts.values()):>5}")
 
-    if entry_access_counts:
+    if most_accessed:
         print()
-        most_accessed = max(entry_access_counts, key=entry_access_counts.get)
         print(f"Most accessed: {most_accessed} ({entry_access_counts[most_accessed]} reads)")
 
-    if oldest_entry and oldest_date:
-        days_old = (now - oldest_date).days
+    if oldest_entry and days_old is not None:
         print(f"Oldest entry:  {oldest_entry} (created {days_old} days ago)")

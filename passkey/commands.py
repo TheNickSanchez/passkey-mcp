@@ -916,12 +916,33 @@ def cmd_info(entry: Entry, *, json_output: bool = False) -> None:
             print(f"  {key}")
 
 
-def cmd_policy(entry: Entry, policy_value: str | None = None) -> None:
+def cmd_policy(
+    entry: Entry,
+    policy_value: str | None = None,
+    *,
+    json_output: bool = False,
+) -> None:
     """Show or update an entry's access policy ('allow' or 'prompt')."""
     if not entry:
         raise PasskeyError("Entry not found")
 
+    from .leases import peek_lease
+
     if policy_value is None:
+        if json_output:
+            lease = peek_lease(entry.name)
+            print(
+                json.dumps(
+                    {
+                        "entry": entry.name,
+                        "policy": entry.policy,
+                        "has_active_lease": lease is not None,
+                        "updated": False,
+                    },
+                    indent=2,
+                )
+            )
+            return
         print(f"{entry.name}: policy = {entry.policy}")
         return
 
@@ -934,6 +955,20 @@ def cmd_policy(entry: Entry, policy_value: str | None = None) -> None:
     entry.policy = normalized
     save_entry(entry, is_update=True)
     log_operation("policy", entry.name, details={"policy": normalized})
+    if json_output:
+        lease = peek_lease(entry.name)
+        print(
+            json.dumps(
+                {
+                    "entry": entry.name,
+                    "policy": normalized,
+                    "has_active_lease": lease is not None,
+                    "updated": True,
+                },
+                indent=2,
+            )
+        )
+        return
     print(f"Set policy for '{entry.name}' to '{normalized}'")
 
 
@@ -1011,14 +1046,25 @@ def cmd_inject(
     *,
     to_stdout: bool = False,
     force: bool = False,
+    force_git_exposed: bool = False,
 ) -> None:
     """Resolve {{ passkey://entry/field }} placeholders from in_file into out_file (0o600)."""
     from .leases import authorize_entry_access
+    from .mcp_config import is_file_exposed_in_git
     from .references import render_template
 
     src = Path(in_file).expanduser()
     if not src.exists() or not src.is_file():
         raise PasskeyError(f"Template file not found: '{src}'")
+
+    if out_file is not None and out_file != "-":
+        dest_check = Path(out_file).expanduser()
+        if not force_git_exposed and is_file_exposed_in_git(dest_check):
+            raise PasskeyError(
+                f"Refusing to inject secrets into '{dest_check}' because it is inside a git "
+                f"repository and NOT gitignored. Add '{dest_check.name}' to .gitignore first, "
+                "or pass --force-git-exposed to override."
+            )
 
     template_text = src.read_text(encoding="utf-8")
     rendered = render_template(template_text, authorize_fn=authorize_entry_access)
@@ -1072,30 +1118,43 @@ def cmd_audit(
     verify: bool = False,
     *,
     yes: bool = False,
-) -> None:
+    json_output: bool = False,
+) -> int:
     """View, verify, or clear audit log."""
     if verify:
         result = verify_audit_log()
+        if json_output:
+            print(json.dumps(result, indent=2))
+            return 0 if result["valid"] else 1
         if not result["valid"]:
             raise PasskeyError(f"Audit log verification FAILED: {result['error']}")
         print(f"Audit log verified OK ({result['checked']} record(s) intact)")
-        return
+        return 0
 
     if clear:
         if not yes:
             confirm = input("Clear audit log? [y/N]: ").strip().lower()
             if confirm != "y":
                 print("Cancelled")
-                return
+                return 0
         if not clear_logs():
             raise PasskeyError("Failed to clear audit log")
-        print("Audit log cleared")
-        return
+        if json_output:
+            print(json.dumps({"cleared": True}, indent=2))
+        else:
+            print("Audit log cleared")
+        return 0
+
+    if json_output:
+        from .audit import get_sanitized_recent_logs
+
+        print(json.dumps(get_sanitized_recent_logs(limit=limit), indent=2))
+        return 0
 
     logs = get_recent_logs(limit)
     if not logs:
         print("No audit log entries")
-        return
+        return 0
 
     print(f"Recent operations (last {len(logs)}):\n")
     for log in logs:
@@ -1114,3 +1173,4 @@ def cmd_audit(
         if details_str:
             line += f" ({details_str})"
         print(line)
+    return 0

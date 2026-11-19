@@ -106,7 +106,12 @@ def _parse_bool(raw: str) -> bool:
     raise PasskeyError(f"Expected on/off, got '{raw}'")
 
 
-def cmd_config(key: str | None = None, value: str | None = None) -> None:
+def cmd_config(
+    key: str | None = None,
+    value: str | None = None,
+    *,
+    json_output: bool = False,
+) -> None:
     """Show or update passkey settings.
 
     Usage:
@@ -116,6 +121,9 @@ def cmd_config(key: str | None = None, value: str | None = None) -> None:
     """
     if key is None:
         settings = load_settings()
+        if json_output:
+            print(json.dumps(settings, indent=2))
+            return
         print("Passkey settings:")
         for name in sorted(settings):
             print(f"  {name.replace('_', '-')} = {settings[name]}")
@@ -125,12 +133,19 @@ def cmd_config(key: str | None = None, value: str | None = None) -> None:
 
     if value is None:
         current = get_setting(key)
-        print(f"{_normalize_key(key).replace('_', '-')} = {current}")
+        normalized = _normalize_key(key)
+        if json_output:
+            print(json.dumps({"key": normalized, "value": current}, indent=2))
+            return
+        print(f"{normalized.replace('_', '-')} = {current}")
         return
 
     parsed = _parse_bool(value)
     set_setting(key, parsed)
     normalized = _normalize_key(key)
+    if json_output:
+        print(json.dumps({"key": normalized, "value": parsed, "updated": True}, indent=2))
+        return
     print(f"Set {normalized.replace('_', '-')} = {parsed}")
     if normalized == "require_auth" and parsed:
         print()
