@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Unpinned install recommendation in `README.md`, `passkey doctor`, and `AGENTS.md` from `pipx install passkey-mcp==0.4.0` to `pipx install passkey-mcp` / `uv tool install passkey-mcp` now that `0.8.0` is live on PyPI with digital provenance attestations.
+
+### Fixed
+
+- Passed `GH_REPO: ${{ github.repository }}` to `gh release upload` in `.github/workflows/release.yml` so the checkout-free `publish` job attaches wheel and sdist artifacts cleanly to GitHub Releases.
+
 ## 0.8.0 (2026-11-19)
 
 ### Added
