@@ -195,6 +195,55 @@ def passkey_entry_info(entry_name: str) -> dict:
 
 
 @mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
+def passkey_find(
+    vars: list[str] | None = None,
+    from_file: str | None = None,
+) -> dict:
+    """Reverse-lookup which passkey entries store given environment variable names.
+
+    Matches exact names, service-specific aliases (e.g., GH_TOKEN <-> GITHUB_TOKEN),
+    and entry-scoped generic fields (e.g., RESEND_API_KEY -> resend/API_KEY) across
+    both secret fields and config keys without reading or exposing values.
+
+    Args:
+        vars: Environment variable names to find (e.g., ["RESEND_API_KEY", "GH_TOKEN"])
+        from_file: Optional path to a safe template file (e.g., ".env.example")
+
+    Returns:
+        Dictionary with matches, results, resolved_entries, missing_vars, and suggested_run_command.
+    """
+    from .find import find_env_vars
+    from .hooks import is_sensitive_secret_path
+
+    safe_file: Path | None = None
+    if from_file is not None:
+        if is_sensitive_secret_path(from_file):
+            return {
+                "ok": False,
+                "error_code": "SENSITIVE_FILE_REFUSED",
+                "message": (
+                    f"Refusing to read sensitive secret file '{_sanitize(from_file)}'. "
+                    "Pass '.env.example' or '.env.template' instead."
+                ),
+                "missing_vars": [],
+            }
+        forbidden, resolved = _is_forbidden_system_path(from_file)
+        if forbidden:
+            return {
+                "ok": False,
+                "error_code": "FORBIDDEN_PATH",
+                "message": "Access to system path denied.",
+                "missing_vars": [],
+            }
+        safe_file = resolved
+
+    try:
+        return find_env_vars(vars, from_file=safe_file)
+    except PasskeyError as e:
+        return e.to_error_dict()
+
+
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
 def passkey_preflight_run(
     entries: list[str],
     env_files: list[str] | None = None,

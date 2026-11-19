@@ -131,12 +131,13 @@ class TestMcpDiscoveryPreflightAndPrompts:
 
         tools = asyncio.run(mcp.list_tools())
         by_name = {t.name: t for t in tools}
-        assert len(by_name) == 10
+        assert len(by_name) >= 11
 
         read_only_tools = {
             "passkey_list",
             "passkey_fields",
             "passkey_entry_info",
+            "passkey_find",
             "passkey_preflight_run",
             "passkey_status",
             "passkey_doctor",

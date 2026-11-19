@@ -34,6 +34,7 @@ _KNOWN_COMMANDS = frozenset(
     {
         "new",
         "list",
+        "find",
         "get",
         "edit",
         "delete",
@@ -153,6 +154,14 @@ def _dispatch_command(command: str | None, parser, args) -> None:
     elif command == "list":
         commands.cmd_list(
             names_only=getattr(args, "names_only", False),
+            json_output=json_out,
+        )
+    elif command == "find":
+        from ..find import cmd_find
+
+        cmd_find(
+            getattr(args, "vars", None),
+            from_file=getattr(args, "from_file", None),
             json_output=json_out,
         )
     elif command == "get":

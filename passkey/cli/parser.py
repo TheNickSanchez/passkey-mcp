@@ -6,7 +6,7 @@ from importlib.metadata import version as package_version
 SUBPARSER_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Core Secret Management",
-        ["new", "get", "list", "edit", "delete", "info", "entry"],
+        ["new", "get", "list", "find", "edit", "delete", "info", "entry"],
     ),
     (
         "Run & Inject",
@@ -153,6 +153,26 @@ def _configure_info_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParse
         help="Output entry metadata, policy, lease state, and field names as JSON",
     )
     p.completer = _entry_completer  # type: ignore[attr-defined]
+    return p
+
+
+def _configure_find_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument(
+        "vars",
+        nargs="*",
+        help="Environment variable names to locate (e.g., RESEND_API_KEY GH_TOKEN)",
+    )
+    p.add_argument(
+        "--from-file",
+        dest="from_file",
+        help="Extract variable names from a safe template file (e.g., .env.example)",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output reverse-lookup matches and missing_vars as JSON",
+    )
     return p
 
 
@@ -350,6 +370,9 @@ def create_parser() -> argparse.ArgumentParser:
     _configure_new_parser(_add_primary("new", "Create a new secret entry"))
     _configure_get_parser(_add_primary("get", "Browse and copy fields from an entry"))
     _configure_list_parser(_add_primary("list", "List all saved entries"))
+    _configure_find_parser(
+        _add_primary("find", "Locate which entry stores given environment variable(s)")
+    )
     _configure_edit_parser(_add_primary("edit", "Interactive editor for an existing entry"))
     _configure_delete_parser(_add_primary("delete", "Delete an entry from the keychain"))
     _configure_info_parser(_add_primary("info", "Show entry metadata and field names"))
@@ -408,6 +431,11 @@ def create_parser() -> argparse.ArgumentParser:
     )
     _configure_info_parser(
         entry_sub.add_parser("info", help="Show entry details", parents=common_parents)
+    )
+    _configure_find_parser(
+        entry_sub.add_parser(
+            "find", help="Locate entries by env var name", parents=common_parents
+        )
     )
 
     # ── Run & Inject ──────────────────────────────────────────────────────
