@@ -457,7 +457,10 @@ class TestPasskeyDoctor:
         mock_list.return_value = []
         result = passkey_doctor()
         assert any(c["status"] == "fail" and "passkey_in_path" in c["name"] for c in result["checks"])
-        assert any("pipx install passkey-mcp" in r for r in result["recommendations"])
+        assert any(
+            "uv tool install passkey-mcp" in r and "pipx install passkey-mcp" in r and "==0.4.0" not in r
+            for r in result["recommendations"]
+        )
 
     @patch('passkey.doctor.list_entries')
     @patch('passkey.doctor.find_passkey_command')

@@ -24,16 +24,15 @@ id, stop-before-commit. Do not paste a second PLAN.md.
 Loop: arch **only if** a design fork exists → engineer → release → review →
 PR (commit/PR only if Nick asks). Nits: engineer patches; do not re-run the
 four-agent cycle unless Critical. A hook denies `git push` / `gh pr create`
-if `CHANGELOG.md` is unchanged vs `main`. Until 1.0: **patch** = fix/docs/tests/CI;
-**minor** = feature or 0.x breaking; **major** = 1.0.0 only. First tag is 0.4.0;
-before that bump 0.3.x. `PLAN.md` current-state describes **main**.
+if `CHANGELOG.md` is unchanged vs `main`. Until 1.0: **patch** = fix/docs/tests/CI; **minor** = feature or 0.x breaking;
+**major** = 1.0.0 only. `PLAN.md` current-state describes **main**.
 
 ## Environment
 
 - Python 3.10+; this machine is 3.14. **`uv` only — never pip.**
 - `uv sync` creates `.venv/`. Lint config is **`ruff.toml` only**.
 - Exercise the CLI with `uv run passkey …` from a clone. Team install is
-  `pipx install passkey-mcp` (or `uv tool install passkey-mcp`).
+  `uv tool install passkey-mcp` (or `pipx install passkey-mcp`).
 
 ```bash
 uv sync
@@ -66,16 +65,13 @@ and mocks `passkey.cli._require_auth`. Never call real sudo/pkexec. Cover
 6. Crypto constants: import from `bundle.py`, never redefine.
 7. Do not add a third doctor or a second permission checker (`doctor.py` and
    `bundle.check_file_permissions` are the singles).
-8. Root `SECURITY.md` is the disclosure policy. Do not copy old “approved
-   for corporate use” language. Team install is
-   `pipx install passkey-mcp` (or `uv tool install passkey-mcp`).
-9. After a branch checkout, `uv run passkey` — not a stale global install.
+8. After a branch checkout, `uv run passkey` — not a stale global install.
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `PLAN.md` | What to work on (D0–D3 → 0.4.0) |
+| `PLAN.md` | Roadmap & deployability notes |
 | `passkey/cli/` | CLI entry (`cli.py` is a shim) |
 | `passkey/auth.py` | Opt-in OS prompt only |
 | `passkey/keychain.py` | OS keychain + file index `entries.json` |

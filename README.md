@@ -50,8 +50,8 @@ Need to leave `passkey`? Run `passkey unwrap` at any time to restore inline comm
 ### Install
 
 ```bash
-pipx install passkey-mcp
-# or: uv tool install passkey-mcp
+uv tool install passkey-mcp
+# or: pipx install passkey-mcp
 ```
 
 *(Working from a local git clone? Run `uv sync && uv run passkey --help`.)*

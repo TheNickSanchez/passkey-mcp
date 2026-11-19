@@ -10,16 +10,16 @@ Install `passkey-mcp`, migrate plaintext secrets out of your AI tool configs, an
 
 ## 1. Install `passkey-mcp`
 
-Install into an isolated tool environment using `pipx` or `uv` (Python 3.10+ required):
-
-```bash
-pipx install passkey-mcp
-```
-
-Or with `uv`:
+Install into an isolated tool environment using `uv` or `pipx` (Python 3.10+ required):
 
 ```bash
 uv tool install passkey-mcp
+```
+
+Or with `pipx`:
+
+```bash
+pipx install passkey-mcp
 ```
 
 Verify the CLI and MCP server binaries are on your `PATH`:
