@@ -108,8 +108,8 @@ passkey unwrap --restore-secrets
 
 Timestamped `0o600` backups created before every `init` and `unwrap` also live in:
 * **macOS:** `~/Library/Application Support/passkey/backups/`
-* **Linux:** `~/.local/share/passkey/backups/`
-* **Windows:** `%LOCALAPPDATA%\passkey\backups\`
+* **Linux:** `~/.config/passkey/backups/`
+* **Windows:** `%APPDATA%\passkey\backups\`
 
 ---
 

@@ -25,7 +25,7 @@ Complete reference for every `passkey` command, subcommand group, flag, setting,
 | `PASSKEY_OUTPUT=json` | Automatically enables deterministic `--json` output across read/diagnostic commands and emits structured JSON error envelopes (`{"ok": false, "error_code": ..., ...}`). On child-wrapping commands (`run`, `exec`, `plugin run`), JSON error envelopes are written to `stderr` so child `stdout` pipelines stay untouched. |
 | `PASSKEY_NO_INPUT=1` | Equivalent to passing `--no-input` globally. |
 | `PASSKEY_ALLOW_INTERACTIVE=1` | Overrides automatic headless fail-fast inside detected AI agent PTY environments (`CLAUDECODE`, `CURSOR_AGENT`, `GEMINI_CLI`, `ANTIGRAVITY_AGENT`, `CODEX_ENV`, `OPENAI_CODEX`). |
-| `PASSKEY_DATA_DIR=<path>` | Overrides platform data directory (`~/Library/Application Support/passkey` on macOS, `~/.local/share/passkey` on Linux, `%LOCALAPPDATA%\passkey` on Windows). |
+| `PASSKEY_DATA_DIR=<path>` | Overrides platform data directory (`~/Library/Application Support/passkey` on macOS, `~/.config/passkey` on Linux, `%APPDATA%\passkey` on Windows). |
 | `PASSKEY_AUDIT_LOG=<path>` | Overrides audit log path (defaults to `<data_dir>/audit.log`). |
 | `PASSKEY_DISABLE_LACONTEXT=1` | Skips macOS `LocalAuthentication.framework` Touch ID dialog and falls back to `sudo -v`. |
 | `PASSKEY_PLUGIN_<CLI>=<entry>` | Session-scoped entry override for `passkey plugin run <cli>` (e.g., `PASSKEY_PLUGIN_GH=github_work`). |
