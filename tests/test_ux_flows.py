@@ -219,10 +219,15 @@ class TestStreamlinedPasskeyNewAndEdit:
         assert "(4 chars, ••••)" in out
 
     def test_new_explicit_template_flag(self, capsys):
+        mock_text = MagicMock()
+        mock_text.ask.return_value = ""
+        mock_confirm = MagicMock()
+        mock_confirm.ask.return_value = False
         with (
-            patch("passkey.interactive.is_interactive", return_value=False),
+            patch("passkey.interactive.is_interactive", return_value=True),
+            patch("questionary.text", return_value=mock_text),
+            patch("questionary.confirm", return_value=mock_confirm),
             patch("passkey.interactive.prompt_secret", return_value="ghp_1234567890abcdef"),
-            patch("builtins.input", return_value=""),
             patch.object(sys, "argv", ["passkey", "new", "gh_prod", "--template", "github"]),
         ):
             main()

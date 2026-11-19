@@ -123,6 +123,7 @@ class TestGetCommand:
         )
 
         with patch.object(sys, "argv", ["passkey", "get", "test", "--all"]), \
+             patch("passkey.interactive.is_interactive", return_value=True), \
              patch("passkey.commands.copy_with_autoclear") as mock_copy:
             main()
 
@@ -136,6 +137,7 @@ class TestGetCommand:
         )
 
         with patch.object(sys, "argv", ["passkey", "get", "test", "--all"]), \
+             patch("passkey.interactive.is_interactive", return_value=True), \
              patch("passkey.commands.copy_with_autoclear") as mock_copy:
             main()
 
@@ -149,6 +151,7 @@ class TestGetCommand:
         )
 
         with patch.object(sys, "argv", ["passkey", "get", "test", "--all"]), \
+             patch("passkey.interactive.is_interactive", return_value=True), \
              patch("passkey.commands.copy_with_autoclear") as mock_copy:
             main()
 
@@ -159,18 +162,19 @@ class TestPositionalFallback:
     """Tests for positional fallback: passkey <entry>."""
 
     def test_positional_entry_triggers_get_interactive(self, mock_keychain, capsys):
-        """passkey <entry> falls back to get-interactive."""
+        """passkey <entry> falls back to get-interactive on interactive TTY."""
         entry = Entry(name="slack", fields={"TOKEN": "secret"})
         mock_keychain["get"].return_value = entry
 
         with patch.object(sys, "argv", ["passkey", "slack"]), \
+             patch("passkey.interactive.is_interactive", return_value=True), \
              patch("passkey.commands.cmd_get_interactive") as mock_interactive:
             main()
 
         mock_interactive.assert_called_once_with(entry)
 
     def test_unknown_entry_falls_to_error(self, mock_keychain, capsys):
-        """passkey <unknown> with no match in non-interactive session exits 1."""
+        """passkey <unknown> in non-interactive session fails fast with exit 2."""
         mock_keychain["get"].return_value = None
 
         with patch.object(sys, "argv", ["passkey", "doesnotexist"]), \
@@ -178,7 +182,7 @@ class TestPositionalFallback:
              pytest.raises(SystemExit) as exc_info:
             main()
 
-        assert exc_info.value.code == 1
+        assert exc_info.value.code == 2
 
 
 class TestVersionFlag:

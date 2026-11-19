@@ -116,7 +116,11 @@ def resolve_reference(
             entry_cache[entry_name] = entry
 
     if entry is None:
-        raise PasskeyError(f"Referenced entry '{entry_name}' not found")
+        raise PasskeyError(
+            f"Referenced entry '{entry_name}' not found. "
+            f"Ask the user to run 'passkey new {entry_name}' in their terminal "
+            "(never paste secrets into chat)."
+        )
 
     if authorize_fn is not None:
         authorize_fn(entry)
@@ -126,7 +130,10 @@ def resolve_reference(
     if field_name in entry.config:
         return entry.config[field_name], False
 
-    raise PasskeyError(f"Field '{field_name}' not found in entry '{entry_name}'")
+    raise PasskeyError(
+        f"Field '{field_name}' not found in entry '{entry_name}'. "
+        f"Ask the user to run 'passkey entry set-field {entry_name} {field_name}' in their terminal."
+    )
 
 
 def parse_dotenv_file(path: Path) -> dict[str, str]:

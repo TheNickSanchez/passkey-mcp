@@ -10,19 +10,34 @@ from .audit import get_recent_logs
 from .keychain import PasskeyError, get_all_entries, get_entry
 
 
-def cmd_rotate(entry_name: str, field_name: str | None = None) -> None:
+def cmd_rotate(
+    entry_name: str,
+    field_name: str | None = None,
+    *,
+    touch_only: bool = False,
+) -> None:
     """Rotate a field value (or mark entry rotated) and update last_rotated.
 
     Args:
         entry_name: Name of the entry to rotate
         field_name: Optional field name to update using masked input
+        touch_only: When True, update last_rotated without prompting for field values
     """
     from .interactive import format_secret_preview, is_interactive, prompt_secret, select_field
     from .keychain import save_entry
 
     entry = get_entry(entry_name)
     if not entry:
-        raise PasskeyError(f"Entry '{entry_name}' not found")
+        raise PasskeyError(
+            f"Entry '{entry_name}' not found. "
+            f"Ask the user to run 'passkey new {entry_name}' in their terminal."
+        )
+
+    if touch_only:
+        entry.rotate()
+        save_entry(entry, is_update=True)
+        print(f"Marked '{entry_name}' as rotated ({entry.last_rotated})")
+        return
 
     target_field = field_name
     if target_field is None and entry.fields:
@@ -32,15 +47,32 @@ def cmd_rotate(entry_name: str, field_name: str | None = None) -> None:
             target_field = select_field(
                 entry_name, prompt="Select field to rotate", allow_empty=True
             )
+        else:
+            raise PasskeyError(
+                f"Multiple fields in '{entry_name}' ({', '.join(sorted(entry.fields))}). "
+                f"Specify a field name or pass --touch-only."
+            )
+    elif target_field is None and not entry.fields:
+        raise PasskeyError(
+            f"Entry '{entry_name}' has no secret fields to rotate. "
+            "Pass --touch-only to update the rotation timestamp."
+        )
 
     if target_field:
         try:
             new_value = prompt_secret(f"  New value for {target_field}")
-        except EOFError:
-            new_value = ""
-        if new_value:
-            entry.fields[target_field] = new_value
-            print(f"  Updated '{target_field}' {format_secret_preview(new_value)}")
+        except EOFError as e:
+            raise PasskeyError(
+                f"No secret value provided for '{target_field}'; rotation aborted. "
+                "Pass --touch-only to update the rotation timestamp without changing values."
+            ) from e
+        if not new_value:
+            raise PasskeyError(
+                f"Empty value provided for '{target_field}'; rotation aborted. "
+                "Pass --touch-only to update the rotation timestamp without changing values."
+            )
+        entry.fields[target_field] = new_value
+        print(f"  Updated '{target_field}' {format_secret_preview(new_value)}")
 
     entry.rotate()
     save_entry(entry, is_update=True)

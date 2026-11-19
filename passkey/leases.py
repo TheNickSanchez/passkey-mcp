@@ -250,6 +250,26 @@ def list_leases() -> list[dict]:
     return result
 
 
+def peek_all_leases() -> dict[str, dict]:
+    """Read-only inspection of active leases without mutating leases.json or consuming uses."""
+    if not get_leases_path().exists():
+        return {}
+    leases_map, _ = _load_leases_store()
+    now = time.time()
+    _prune_expired(leases_map, now)
+    result: dict[str, dict] = {}
+    for name in sorted(leases_map):
+        item = dict(leases_map[name])
+        item["seconds_remaining"] = max(0, int(float(item["expires_at"]) - now))
+        result[name] = item
+    return result
+
+
+def peek_lease(entry_name: str) -> dict | None:
+    """Read-only check for an active lease on entry_name without decrementing remaining_uses."""
+    return peek_all_leases().get(entry_name)
+
+
 def revoke_lease(entry_name: str | None = None, *, revoke_all: bool = False) -> int:
     """Revoke a specific lease or all active leases. Returns count revoked."""
     leases_map, key = _load_leases_store()

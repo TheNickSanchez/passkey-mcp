@@ -17,6 +17,54 @@ from questionary import Style
 
 from .keychain import PasskeyError, get_entry, list_entries
 
+# Environment markers set by headless/agent CLI harnesses (even inside PTY shells).
+# Deliberately excludes VSCODE_PID and CURSOR_TRACE_ID because human developers
+# routinely run interactive shells inside VS Code / Cursor integrated terminals.
+_HEADLESS_AGENT_ENV_VARS: tuple[str, ...] = (
+    "PASSKEY_NO_INPUT",
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CURSOR_AGENT",
+    "GEMINI_CLI",
+    "CODEX_ENV",
+    "OPENAI_CODEX",
+)
+
+_NO_INPUT_FORCED: bool = False
+
+
+class InteractiveRequiredError(PasskeyError):
+    """Raised when an interactive command is invoked in a non-TTY or --no-input session."""
+
+    exit_code: int = 2
+
+
+def set_no_input(enabled: bool) -> None:
+    """Enable or reset global --no-input mode for the current CLI invocation."""
+    global _NO_INPUT_FORCED
+    _NO_INPUT_FORCED = bool(enabled)
+
+
+def is_no_input_forced() -> bool:
+    """Return True if --no-input or PASSKEY_NO_INPUT is active."""
+    if _NO_INPUT_FORCED:
+        return True
+    val = os.environ.get("PASSKEY_NO_INPUT", "").strip().lower()
+    return val not in ("", "0", "false", "no")
+
+
+def is_agent_subprocess() -> bool:
+    """Return True when invoked inside a known AI coding agent subprocess."""
+    override = os.environ.get("PASSKEY_ALLOW_INTERACTIVE", "").strip().lower()
+    if override in ("1", "true", "yes"):
+        return False
+    for var in _HEADLESS_AGENT_ENV_VARS:
+        val = os.environ.get(var, "").strip().lower()
+        if val not in ("", "0", "false", "no"):
+            return True
+    return False
+
+
 # Custom style for passkey prompts
 PASSKEY_STYLE = Style(
     [
@@ -35,6 +83,8 @@ def is_interactive() -> bool:
     """Check if we're running in an interactive terminal.
 
     Returns False when:
+    - --no-input / PASSKEY_NO_INPUT is active
+    - Running inside a headless AI agent subprocess
     - stdout is piped to another command
     - stdin is piped from another command
     - Running in a non-TTY environment (cron, scripts, etc.)
@@ -42,7 +92,43 @@ def is_interactive() -> bool:
     Returns:
         True if running interactively, False otherwise
     """
+    if is_no_input_forced() or is_agent_subprocess():
+        return False
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def can_prompt_interactively() -> bool:
+    """Return True only when human interactive prompting is allowed and attached to a TTY."""
+    if is_no_input_forced() or is_agent_subprocess():
+        return False
+    return is_interactive()
+
+
+def require_interactive(
+    operation: str,
+    *,
+    human_command: str,
+    alternative: str | None = None,
+) -> None:
+    """Fail fast with exit code 2 when interactive input is unavailable or disabled."""
+    if can_prompt_interactively():
+        return
+
+    if is_no_input_forced():
+        reason = "--no-input is set"
+    elif is_agent_subprocess():
+        reason = "detected AI agent subprocess"
+    else:
+        reason = "stdin/stdout is not a TTY"
+
+    lines = [
+        f"'{operation}' requires an interactive terminal ({reason}).",
+        f"  Ask the user to run in their terminal: {human_command}",
+    ]
+    if alternative:
+        lines.append(f"  Headless alternative: {alternative}")
+    lines.append("  Security rule: Never ask the user to paste secret values into chat.")
+    raise InteractiveRequiredError("\n".join(lines))
 
 
 def _sanitize_preview_fragment(text: str) -> str:

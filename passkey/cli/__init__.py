@@ -1,10 +1,11 @@
 """CLI package — main entry point for the passkey command."""
 
+import difflib
 import sys
 
 from .. import commands, importers, mcp_commands
-from ..keychain import PasskeyError
-from ..mcp_server import main as mcp_main
+from ..interactive import InteractiveRequiredError, require_interactive, set_no_input
+from ..keychain import PasskeyError, _get_entry
 from .handlers import (
     handle_onboarding_or_help,
     handle_run_command,
@@ -120,35 +121,68 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         return
 
     if command == "new":
+        # Name validation runs first inside cmd_new before require_interactive
         _require_auth("create entries")
         commands.cmd_new(
             name=getattr(args, "name", None),
             template_name=getattr(args, "template", None),
         )
     elif command == "list":
-        commands.cmd_list(names_only=getattr(args, "names_only", False))
+        commands.cmd_list(
+            names_only=getattr(args, "names_only", False),
+            json_output=getattr(args, "json_output", False),
+        )
     elif command == "get":
+        entry_arg = getattr(args, "entry", None)
+        require_interactive(
+            "passkey get",
+            human_command=f"passkey get {entry_arg}" if entry_arg else "passkey get <entry>",
+            alternative=(
+                f"passkey info {entry_arg} --json  or  passkey run -q {entry_arg} -- <command>"
+                if entry_arg
+                else "passkey list --json  or  passkey run -q <entry> -- <command>"
+            ),
+        )
         _require_auth("access secrets")
-        entry = resolve_entry(getattr(args, "entry", None), "Select entry to browse")
+        entry = resolve_entry(entry_arg, "Select entry to browse")
         if args.get_all:
             commands.cmd_get_all(entry)
         else:
             commands.cmd_get_interactive(entry)
     elif command == "edit":
+        entry_arg = getattr(args, "entry", None)
+        require_interactive(
+            "passkey edit",
+            human_command=f"passkey edit {entry_arg}" if entry_arg else "passkey edit <entry>",
+        )
         _require_auth("edit entries")
-        entry = resolve_entry(getattr(args, "entry", None), "Select entry to edit")
+        entry = resolve_entry(entry_arg, "Select entry to edit")
         commands.cmd_edit(entry)
     elif command == "delete":
+        yes = bool(getattr(args, "yes", False))
+        if not yes:
+            require_interactive(
+                "passkey delete",
+                human_command=f"passkey delete {args.entry}",
+                alternative=f"passkey delete {args.entry} --yes",
+            )
         _require_auth("delete entries")
         entry = resolve_entry(args.entry, "Select entry to delete", fuzzy=False)
-        commands.cmd_delete(entry.name)
+        commands.cmd_delete(entry.name, yes=yes)
     elif command == "info":
-        commands.cmd_info(resolve_entry(getattr(args, "entry", None), "Select entry to view"))
+        commands.cmd_info(
+            resolve_entry(getattr(args, "entry", None), "Select entry to view"),
+            json_output=getattr(args, "json_output", False),
+        )
     elif command == "clone":
         _require_auth("clone entries")
         source = resolve_entry(args.source, "Select entry to clone", fuzzy=False)
         commands.cmd_clone(source, getattr(args, "dest", None))
     elif command == "set-field":
+        require_interactive(
+            "passkey set-field",
+            human_command=f"passkey entry set-field {args.entry} {args.field}",
+        )
         _require_auth("modify entries")
         entry = resolve_entry(args.entry, "Select entry to update", fuzzy=False)
         commands.cmd_set_field(entry, args.field, None)
@@ -268,18 +302,28 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         else:
             raise PasskeyError("Usage: passkey hook [install|check]")
     elif command == "export":
-        _require_auth("export secrets")
         if args.encrypt:
+            require_interactive(
+                "passkey export --encrypt",
+                human_command=f"passkey export {args.file} --encrypt",
+                alternative=f"passkey export {args.file} --no-secrets",
+            )
+            _require_auth("export secrets")
             from ..bundle import export_bundle
 
             result = export_bundle(args.file, entry_names=args.entries)
             print(f"Encrypted bundle saved: {result}")
             print(f"  Contains {len(args.entries) if args.entries else 'all'} entries")
         else:
+            _require_auth("export secrets")
             commands.cmd_export(args.file, entries=args.entries, no_secrets=args.no_secrets)
     elif command == "import":
-        _require_auth("import secrets")
         if args.decrypt:
+            require_interactive(
+                "passkey import --decrypt",
+                human_command=f"passkey import {args.file} --decrypt",
+            )
+            _require_auth("import secrets")
             from ..bundle import import_bundle
 
             result = import_bundle(args.file, mode=args.mode)
@@ -288,6 +332,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
                 f"{result['updated']} updated, {result['skipped']} skipped"
             )
         else:
+            _require_auth("import secrets")
             importers.import_auto(
                 args.file,
                 mode=args.mode,
@@ -296,12 +341,26 @@ def _dispatch_command(command: str | None, parser, args) -> None:
                 allow_insecure=args.insecure,
             )
     elif command == "check":
-        sys.exit(commands.cmd_check(args.entry, args.fields, quiet=args.quiet))
+        sys.exit(
+            commands.cmd_check(
+                args.entry,
+                args.fields,
+                quiet=args.quiet,
+                json_output=getattr(args, "json_output", False),
+            )
+        )
     elif command == "audit":
         if getattr(args, "verify", False):
             commands.cmd_audit(verify=True)
         elif args.clear:
-            commands.cmd_audit(clear=True)
+            yes = bool(getattr(args, "yes", False))
+            if not yes:
+                require_interactive(
+                    "passkey audit --clear",
+                    human_command="passkey audit --clear",
+                    alternative="passkey audit --clear --yes",
+                )
+            commands.cmd_audit(clear=True, yes=yes)
         elif args.summary:
             from ..health import cmd_audit_summary
 
@@ -324,6 +383,10 @@ def _dispatch_command(command: str | None, parser, args) -> None:
     elif command == "template":
         handle_template_command(args)
     elif command == "share":
+        require_interactive(
+            "passkey share",
+            human_command=f"passkey share {args.entry}",
+        )
         _require_auth("share secrets")
         entry = resolve_entry(args.entry, "Select entry to share")
         from ..sharing import cmd_share
@@ -334,16 +397,29 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             shared_by=args.shared_by,
         )
     elif command == "receive":
+        require_interactive(
+            "passkey receive",
+            human_command=f"passkey receive {args.file}",
+        )
         _require_auth("import secrets")
         from ..sharing import cmd_receive
 
         cmd_receive(args.file)
     elif command == "rotate":
+        touch_only = bool(getattr(args, "touch_only", False))
+        field_arg = getattr(args, "field", None)
+        if not touch_only:
+            human_cmd = f"passkey rotate {args.entry}" + (f" {field_arg}" if field_arg else "")
+            require_interactive(
+                "passkey rotate",
+                human_command=human_cmd,
+                alternative=f"passkey rotate {args.entry} --touch-only",
+            )
         _require_auth("rotate secrets")
         entry = resolve_entry(args.entry, "Select entry to rotate")
         from ..health import cmd_rotate
 
-        cmd_rotate(entry.name, getattr(args, "field", None))
+        cmd_rotate(entry.name, field_arg, touch_only=touch_only)
     elif command == "unwrap":
         mcp_commands.cmd_unwrap(
             tool=args.tool,
@@ -357,6 +433,8 @@ def _dispatch_command(command: str | None, parser, args) -> None:
 
         cmd_config(args.key, args.value)
     elif command == "mcp-serve":
+        from ..mcp_server import main as mcp_main
+
         mcp_main()
     elif command == "completion":
         from .. import completion
@@ -374,6 +452,14 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
     elif command == "init":
+        yes = bool(getattr(args, "yes", False))
+        if not args.dry_run and not yes:
+            tool_flag = f" --tool {args.tool}" if args.tool else ""
+            require_interactive(
+                "passkey init",
+                human_command=f"passkey init{tool_flag}",
+                alternative=f"passkey init --dry-run{tool_flag}  or  passkey init --yes{tool_flag}",
+            )
         _require_auth("migrate secrets to keychain")
         mcp_commands.cmd_init(
             tool=args.tool,
@@ -382,14 +468,23 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             force=args.force,
             include_all=args.include_all,
             backup_path=args.backup,
+            yes=yes,
         )
     elif command == "status":
         mcp_commands.cmd_status(tool=args.tool, json_output=args.json_output)
     elif command == "doctor":
-        mcp_commands.cmd_doctor(deep=args.deep)
+        json_out = bool(getattr(args, "json_output", False))
+        rc = mcp_commands.cmd_doctor(deep=args.deep, json_output=json_out)
+        if json_out and rc != 0:
+            sys.exit(rc)
     elif command == "servers":
         mcp_commands.cmd_servers(tool=args.tool, json_output=args.json_output)
     elif command == "add":
+        tool_flag = f" --tool {args.tool}" if getattr(args, "tool", None) else ""
+        require_interactive(
+            "passkey add",
+            human_command=f"passkey mcp add {args.server}{tool_flag}",
+        )
         _require_auth("add credentials")
         mcp_commands.cmd_add(
             server=args.server,
@@ -406,42 +501,89 @@ def main() -> None:
 
     run_migration_if_needed()
 
-    if (
-        len(sys.argv) >= 2
-        and not sys.argv[1].startswith("-")
-        and sys.argv[1] not in _KNOWN_COMMANDS
-    ):
-        entry_name = sys.argv[1]
+    raw_argv = sys.argv[1:]
+    pre_dash = raw_argv[: raw_argv.index("--")] if "--" in raw_argv else raw_argv
+    early_no_input = "--no-input" in pre_dash
+
+    set_no_input(early_no_input)
+    try:
+        non_no_input = [a for a in raw_argv if a != "--no-input"]
+        if (
+            "--" not in raw_argv
+            and len(non_no_input) == 1
+            and not non_no_input[0].startswith("-")
+            and non_no_input[0] not in _KNOWN_COMMANDS
+        ):
+            entry_name = non_no_input[0]
+            try:
+                close_cmds = difflib.get_close_matches(
+                    entry_name, sorted(_KNOWN_COMMANDS), n=1, cutoff=0.75
+                )
+                if close_cmds and _get_entry(entry_name, log_read=False) is None:
+                    raise PasskeyError(
+                        f"Unknown command '{entry_name}'. Did you mean 'passkey {close_cmds[0]}'?"
+                    )
+                require_interactive(
+                    "passkey <entry>",
+                    human_command=f"passkey {entry_name}",
+                    alternative=(
+                        f"passkey info {entry_name} --json  or  "
+                        f"passkey run -q {entry_name} -- <command>"
+                    ),
+                )
+                _require_auth("access secrets")
+                entry = resolve_entry(entry_name, "Select entry to browse")
+                commands.cmd_get_interactive(entry)
+            except InteractiveRequiredError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(e.exit_code)
+            except PasskeyError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(1)
+            except KeyboardInterrupt:
+                print("\nOperation cancelled by user.", file=sys.stderr)
+                sys.exit(1)
+            except EOFError:
+                print(
+                    "\nError: Unexpected EOF on stdin (non-interactive session). "
+                    "Pass required flags or ask the user to run this command in their terminal.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            return
+
+        parser = create_parser()
         try:
-            _require_auth("access secrets")
-            entry = resolve_entry(entry_name, "Select entry to browse")
-            commands.cmd_get_interactive(entry)
+            import argcomplete
+
+            argcomplete.autocomplete(parser)
+        except ImportError:
+            pass
+
+        args = parser.parse_args()
+        if getattr(args, "no_input", False):
+            set_no_input(True)
+
+        try:
+            _dispatch_command(args.command, parser, args)
+        except InteractiveRequiredError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(e.exit_code)
         except PasskeyError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
-        except (KeyboardInterrupt, EOFError):
+        except KeyboardInterrupt:
             print("\nOperation cancelled by user.", file=sys.stderr)
             sys.exit(1)
-        return
-
-    parser = create_parser()
-    try:
-        import argcomplete
-
-        argcomplete.autocomplete(parser)
-    except ImportError:
-        pass
-
-    args = parser.parse_args()
-
-    try:
-        _dispatch_command(args.command, parser, args)
-    except PasskeyError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except (KeyboardInterrupt, EOFError):
-        print("\nOperation cancelled by user.", file=sys.stderr)
-        sys.exit(1)
+        except EOFError:
+            print(
+                "\nError: Unexpected EOF on stdin (non-interactive session). "
+                "Pass required flags or ask the user to run this command in their terminal.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    finally:
+        set_no_input(False)
 
 
 if __name__ == "__main__":
