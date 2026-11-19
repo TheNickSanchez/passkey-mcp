@@ -57,6 +57,13 @@ class TestPrintCompletion:
                 "timeout",
                 "with-skill",
                 "force-git-exposed",
+                "find",
+                "exec",
+                "project",
+                "request",
+                "session",
+                "from-file",
+                "agent-session-lease-ttl",
             ]:
                 assert token in script, f"'{token}' missing from script"
 

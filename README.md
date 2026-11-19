@@ -187,14 +187,16 @@ $ passkey github
 | Command | Description |
 |---------|-------------|
 | `passkey new` | Create a new entry interactively |
+| `passkey request ENTRY --fields VAR...` | Capture missing secrets via out-of-band native OS hidden dialog (`--json`) |
 | `passkey list` | List all entry names (`--json` for metadata array) |
 | `passkey list --names-only` | Entry names only (one per line, for scripting) |
+| `passkey find [VAR...] [--from-file PATH]` | Reverse-lookup which entry stores given env var(s) (`--json`) |
 | `passkey edit [entry]` | Modify an existing entry |
 | `passkey delete [entry]` | Delete an entry (`-y` / `--yes` to skip prompt) |
 | `passkey info [entry]` | Show entry metadata, policy, lease status, and field names (`--json`) |
 | `passkey clone SOURCE [DEST]` | Clone an entry under a new name |
 | `passkey set-field ENTRY FIELD` | Upsert a single field interactively via `getpass` |
-| `passkey policy ENTRY [allow\|prompt]` | Show or set an entry's access policy (`--json`) |
+| `passkey policy ENTRY [allow\|session\|prompt]` | Show or set an entry's access policy (`--json`) |
 
 ### Retrieving Secrets
 
@@ -207,6 +209,11 @@ $ passkey github
 ### Running Commands, Reference URIs & Ephemeral Mounts
 
 ```bash
+# Zero-config repo manifest bootstrap & execution (HMAC-trusted per repo SHA-256)
+passkey project init --from-file .env.example
+passkey project status --json
+passkey exec -q -- pytest
+
 # Run with secrets from one entry (stdout/stderr secrets masked automatically)
 passkey run github -- python app.py
 
@@ -245,11 +252,16 @@ passkey hook install --tool claude --with-skill   # also supports: cursor, gemin
 passkey skill install --tool all
 
 # Force non-interactive fail-fast (exit code 2) and inspect structured secret-free JSON
+export PASSKEY_OUTPUT=json
 passkey --no-input info github --json
+passkey find RESEND_API_KEY GH_TOKEN --json
+passkey request stripe_dev --fields STRIPE_SECRET_KEY,WEBHOOK_SECRET --policy session --json
 passkey check github GITHUB_TOKEN --json
 passkey doctor --json
 
-# Gate high-sensitivity entries behind native Touch ID (LAContext) + scoped leases
+# Gate entries behind session-amortized Touch ID ('session') or strict per-call Touch ID ('prompt')
+passkey policy stripe_dev session
+passkey config agent-session-lease-ttl 10m
 passkey policy prod_aws prompt
 passkey lease grant prod_aws --ttl 15m --max-uses 5
 passkey lease list --json
@@ -507,7 +519,7 @@ Passkey can run as an MCP server itself, letting AI assistants invoke passkey to
 }
 ```
 
-Available tools (annotated with MCP `ToolAnnotations` `readOnlyHint` / `destructiveHint`): `passkey_list`, `passkey_fields`, `passkey_entry_info`, `passkey_preflight_run`, `passkey_status`, `passkey_doctor`, `passkey_wrap_server` (disable with `passkey config mcp-write-tools off`), `passkey_validate_references`, `passkey_audit_recent`, and `passkey_cdp_autofill` (opt-in via `passkey config mcp-browser-broker on`).
+Available tools (annotated with MCP `ToolAnnotations` `readOnlyHint` / `destructiveHint`): `passkey_list`, `passkey_fields`, `passkey_entry_info`, `passkey_find`, `passkey_preflight_run`, `passkey_project_status`, `passkey_status`, `passkey_doctor`, `passkey_request_secret` and `passkey_wrap_server` (disable with `passkey config mcp-write-tools off`), `passkey_validate_references`, `passkey_audit_recent`, and `passkey_cdp_autofill` (opt-in via `passkey config mcp-browser-broker on`).
 
 Built-in MCP prompts: `setup-project-secrets`, `debug-missing-credential`, and `migrate-exposed-mcp-configs`.
 
