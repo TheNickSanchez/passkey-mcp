@@ -39,6 +39,27 @@ comparison (Linux also needs a running, unlocked keyring daemon).
 Diagram source: [`docs/architecture.mmd`](docs/architecture.mmd). Disclosure
 and threat model: [SECURITY.md](SECURITY.md).
 
+## Documentation & Wiki
+
+Browse the full documentation directly in [`docs/Home.md`](docs/Home.md):
+
+| Section | Guide | What You'll Learn |
+| :--- | :--- | :--- |
+| **Start Here** | [**Wiki Home**](docs/Home.md) | 30-second architecture overview & "Choose Your Path" router |
+| **Getting Started** | [**01 — Quickstart**](docs/01-Quickstart.md) | `pipx` / `uv` install, FTUE, `passkey init`, `doctor`, and `unwrap` |
+| **Core Guides** | [**02 — Managing Secrets**](docs/02-Managing-Secrets.md) | Masked input shortcuts, `fields` vs. `config`, rotation, templates, and encrypted bundles |
+| **Core Guides** | [**03 — Running & Injecting**](docs/03-Running-and-Injecting.md) | `passkey run`, zero-config `passkey exec`, `passkey://` URIs, `inject`, FIFO `mount`, and CLI `plugin` wrappers |
+| **Core Guides** | [**04 — Onboarding AI Agents**](docs/04-AI-Agent-Onboarding.md) | Connect `passkey-mcp-server`, `hook install --tool all --with-skill`, and the 3-turn autonomous workflow |
+| **Core Guides** | [**05 — Team Workflows**](docs/05-Team-Workflows.md) | Committable `.env.passkey` / `.passkey.toml` manifests, HMAC repo trust, and 8-word encrypted `share` / `receive` |
+| **Security** | [**06 — Security & Biometrics**](docs/06-Security-and-Biometrics.md) | Threat model, OS boundaries, `allow` / `session` / `prompt` Touch ID policies, leases, and HMAC `audit.log` |
+| **Advanced** | [**07 — Browser Agent Autofill**](docs/07-Browser-Agent-Autofill.md) | Loopback Chrome DevTools (`CDP`) login & cookie broker (`passkey browser-fill`) |
+| **Reference** | [**08 — CLI Command Reference**](docs/08-CLI-Command-Reference.md) | Complete command, subcommand, flag, setting, env var, and exit code reference |
+| **Reference** | [**09 — MCP Tools & Prompts**](docs/09-MCP-Tools-and-Prompts-Reference.md) | All 13 FastMCP tools, `ToolAnnotations`, policy gates, and 3 `@mcp.prompt()` playbooks |
+| **Reference** | [**10 — Troubleshooting & FAQ**](docs/10-Troubleshooting-and-FAQ.md) | Fixes for macOS Seatbelt sandboxes, Linux headless keyrings, stale `.env` FIFOs, and recovery |
+
+> **Publishing `docs/` to GitHub Wiki:** Enable the **Wiki** tab in repository settings (create the initial home page once in the UI), then sync `docs/` with:
+> `git clone https://github.com/TheNickSanchez/passkey-mcp.wiki.git /tmp/pk-wiki && cp docs/_Sidebar.md docs/Home.md docs/[0-9][0-9]-*.md /tmp/pk-wiki/ && python3 -c 'import glob,pathlib,re; [p.write_text(re.sub(r"\]\(([A-Za-z0-9_-]+)\.md\)",r"](\1)",p.read_text())) for p in map(pathlib.Path,glob.glob("/tmp/pk-wiki/*.md"))]' && git -C /tmp/pk-wiki add . && git -C /tmp/pk-wiki commit -m "Sync docs wiki" && git -C /tmp/pk-wiki push`
+
 ## Features
 
 - Store multiple secrets per entry in the system keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
