@@ -36,6 +36,7 @@ __all__ = [
 _KNOWN_COMMANDS = frozenset(
     {
         "new",
+        "request",
         "list",
         "find",
         "get",
@@ -155,6 +156,18 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         commands.cmd_new(
             name=getattr(args, "name", None),
             template_name=getattr(args, "template", None),
+        )
+    elif command == "request":
+        from ..request_secret import cmd_request
+
+        cmd_request(
+            args.entry,
+            args.fields,
+            policy=getattr(args, "policy", None),
+            hint=getattr(args, "hint", None),
+            timeout=int(getattr(args, "timeout", 120)),
+            overwrite=bool(getattr(args, "overwrite", False)),
+            json_output=json_out,
         )
     elif command == "list":
         commands.cmd_list(

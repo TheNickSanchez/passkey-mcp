@@ -6,7 +6,7 @@ from importlib.metadata import version as package_version
 SUBPARSER_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Core Secret Management",
-        ["new", "get", "list", "find", "edit", "delete", "info", "entry"],
+        ["new", "request", "get", "list", "find", "edit", "delete", "info", "entry"],
     ),
     (
         "Run & Inject",
@@ -96,6 +96,47 @@ def _configure_new_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser
         dest="template",
         help="Populate fields from a template (e.g., github, aws, stripe)",
     )
+    return p
+
+
+def _configure_request_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p.add_argument("entry", help="Entry name to create or update (e.g., stripe_dev)")
+    p.add_argument(
+        "--fields",
+        "-f",
+        nargs="+",
+        required=True,
+        help="Field name(s) to prompt via native OS dialog (comma- or space-separated)",
+    )
+    p.add_argument(
+        "--policy",
+        choices=["allow", "session", "prompt"],
+        default=None,
+        help="Optional access policy to set ('allow', 'session', or 'prompt')",
+    )
+    p.add_argument(
+        "--hint",
+        default=None,
+        help="Optional guidance shown in the dialog (e.g., 'Stripe Dashboard -> API keys')",
+    )
+    p.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="Dialog timeout in seconds (5-300; default: 120)",
+    )
+    p.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Re-prompt even if requested fields already exist on the entry",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output secret-free capture status as JSON",
+    )
+    p.completer = _entry_completer  # type: ignore[attr-defined]
     return p
 
 
@@ -368,6 +409,9 @@ def create_parser() -> argparse.ArgumentParser:
 
     # ── Core Secret Management ────────────────────────────────────────────
     _configure_new_parser(_add_primary("new", "Create a new secret entry"))
+    _configure_request_parser(
+        _add_primary("request", "Capture missing secrets via out-of-band native OS dialog")
+    )
     _configure_get_parser(_add_primary("get", "Browse and copy fields from an entry"))
     _configure_list_parser(_add_primary("list", "List all saved entries"))
     _configure_find_parser(
@@ -416,6 +460,13 @@ def create_parser() -> argparse.ArgumentParser:
     )
     _configure_new_parser(
         entry_sub.add_parser("new", help="Create a new secret entry", parents=common_parents)
+    )
+    _configure_request_parser(
+        entry_sub.add_parser(
+            "request",
+            help="Capture missing secrets via native OS dialog",
+            parents=common_parents,
+        )
     )
     _configure_get_parser(
         entry_sub.add_parser("get", help="Browse and copy fields", parents=common_parents)

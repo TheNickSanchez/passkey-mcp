@@ -429,6 +429,61 @@ def _sanitize(s: str) -> str:
 
 
 @mcp.tool(annotations=_CONFIG_MUTATING_ANNOTATIONS)
+def passkey_request_secret(
+    entry_name: str,
+    fields: list[str],
+    policy: str | None = None,
+    hint: str | None = None,
+    timeout: int = 120,
+    overwrite: bool = False,
+) -> dict:
+    """Prompt the human user via an out-of-band native OS hidden dialog to save missing secrets.
+
+    Opens a secure macOS/Linux password dialog directly on the user's desktop,
+    stores the entered value(s) straight into the OS keychain, and returns only
+    field names and status — secret values NEVER enter AI context or tool output.
+    Automatically skips fields that already exist unless ``overwrite=True``.
+
+    Args:
+        entry_name: Keychain entry name to create or update (e.g., "stripe_dev")
+        fields: Environment variable / field names to capture (max 10)
+        policy: Optional access policy ('allow', 'session', or 'prompt')
+        hint: Optional short hint shown in the dialog (e.g., where to find the key)
+        timeout: Seconds to wait before timing out (5-300, default: 120)
+        overwrite: Re-prompt even if requested fields already exist
+
+    Returns:
+        Secret-free dictionary with ok, status ('created'|'updated'|'already_exists'),
+        entry, fields_saved, fields_present, and policy.
+    """
+    from .request_secret import request_secret
+    from .settings import mcp_write_tools_enabled
+
+    if not mcp_write_tools_enabled():
+        return {
+            "ok": False,
+            "error_code": "MCP_WRITE_DISABLED",
+            "message": (
+                "MCP write tools are disabled by policy (mcp-write-tools = False). "
+                "Enable with 'passkey config mcp-write-tools on' or ask the user to run "
+                f"'passkey new {_sanitize(entry_name)}' in their terminal."
+            ),
+        }
+
+    try:
+        return request_secret(
+            entry_name,
+            fields,
+            policy=policy,
+            hint=hint,
+            timeout=timeout,
+            overwrite=overwrite,
+        )
+    except PasskeyError as e:
+        return e.to_error_dict()
+
+
+@mcp.tool(annotations=_CONFIG_MUTATING_ANNOTATIONS)
 def passkey_wrap_server(
     server_name: str,
     config_paths: list[str] | None = None,

@@ -131,7 +131,7 @@ class TestMcpDiscoveryPreflightAndPrompts:
 
         tools = asyncio.run(mcp.list_tools())
         by_name = {t.name: t for t in tools}
-        assert len(by_name) >= 12
+        assert len(by_name) >= 13
 
         read_only_tools = {
             "passkey_list",
@@ -145,7 +145,11 @@ class TestMcpDiscoveryPreflightAndPrompts:
             "passkey_validate_references",
             "passkey_audit_recent",
         }
-        mutating_tools = {"passkey_wrap_server", "passkey_cdp_autofill"}
+        mutating_tools = {
+            "passkey_request_secret",
+            "passkey_wrap_server",
+            "passkey_cdp_autofill",
+        }
 
         for name in read_only_tools:
             assert by_name[name].annotations is not None
