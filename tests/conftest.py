@@ -58,6 +58,7 @@ def isolated_data_dir(tmp_path, monkeypatch):
     for env_var in _HEADLESS_AGENT_ENV_VARS:
         monkeypatch.delenv(env_var, raising=False)
     monkeypatch.delenv("PASSKEY_ALLOW_INTERACTIVE", raising=False)
+    monkeypatch.delenv("PASSKEY_OUTPUT", raising=False)
     set_no_input(False)
     # Never migrate real legacy data into the test dir
     monkeypatch.setattr("passkey.dirs.get_legacy_data_dir", lambda: tmp_path / "no-legacy")

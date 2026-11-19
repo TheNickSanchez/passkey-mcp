@@ -362,7 +362,10 @@ def run_with_secrets(
                     raise PasskeyError(
                         f"Entry '{name}' not found (--strict). "
                         f"Ask the user to run 'passkey new {name}' in their terminal "
-                        "(never ask them to paste secrets into chat)."
+                        "(never ask them to paste secrets into chat).",
+                        error_code="ENTRY_NOT_FOUND",
+                        entry=name,
+                        remediation_command=f"passkey new {name}",
                     )
                 if not quiet:
                     print(
@@ -391,19 +394,31 @@ def run_with_secrets(
                     secret_values.append(resolved_val)
                 resolved_references += 1
     except PasskeyError as e:
-        raise PasskeyError(f"Failed to load secrets: {e}") from e
+        raise PasskeyError(
+            f"Failed to load secrets: {e}",
+            error_code=e.error_code,
+            entry=e.entry,
+            missing_fields=e.missing_fields,
+            remediation_command=e.remediation_command,
+        ) from e
 
     if loaded_count == 0 and resolved_references == 0 and not env_files:
+        first_entry = entries[0] if entries else None
         hint = (
-            f" Ask the user to run 'passkey new {entries[0]}' in their terminal "
+            f" Ask the user to run 'passkey new {first_entry}' in their terminal "
             "(never paste secrets into chat)."
-            if entries
+            if first_entry
             else ""
         )
-        raise PasskeyError(f"No entries loaded, aborting command.{hint}")
+        raise PasskeyError(
+            f"No entries loaded, aborting command.{hint}",
+            error_code="ENTRY_NOT_FOUND" if first_entry else "NO_SECRETS_LOADED",
+            entry=first_entry,
+            remediation_command=f"passkey new {first_entry}" if first_entry else None,
+        )
 
     if not command:
-        raise PasskeyError("No command specified to run.")
+        raise PasskeyError("No command specified to run.", error_code="INVALID_USAGE")
 
     log_operation(
         "run",
@@ -421,6 +436,9 @@ def run_with_secrets(
             return result.returncode
         return _run_masked_subprocess(command, env, secret_values)
     except FileNotFoundError:
-        raise PasskeyError(f"Command not found: '{command[0]}'") from None
+        raise PasskeyError(
+            f"Command not found: '{command[0]}'",
+            error_code="COMMAND_NOT_FOUND",
+        ) from None
     except OSError as e:
         raise PasskeyError(f"Failed to execute command: {e}") from e

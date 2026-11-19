@@ -37,6 +37,12 @@ class InteractiveRequiredError(PasskeyError):
     """Raised when an interactive command is invoked in a non-TTY or --no-input session."""
 
     exit_code: int = 2
+    default_error_code: str = "INTERACTIVE_REQUIRED"
+
+
+def is_json_output_env() -> bool:
+    """Return True when PASSKEY_OUTPUT=json is configured in the environment."""
+    return os.environ.get("PASSKEY_OUTPUT", "").strip().lower() == "json"
 
 
 def set_no_input(enabled: bool) -> None:
@@ -109,6 +115,7 @@ def require_interactive(
     *,
     human_command: str,
     alternative: str | None = None,
+    entry: str | None = None,
 ) -> None:
     """Fail fast with exit code 2 when interactive input is unavailable or disabled."""
     if can_prompt_interactively():
@@ -128,7 +135,12 @@ def require_interactive(
     if alternative:
         lines.append(f"  Headless alternative: {alternative}")
     lines.append("  Security rule: Never ask the user to paste secret values into chat.")
-    raise InteractiveRequiredError("\n".join(lines))
+    raise InteractiveRequiredError(
+        "\n".join(lines),
+        error_code="INTERACTIVE_REQUIRED",
+        entry=entry,
+        remediation_command=alternative or human_command,
+    )
 
 
 def _sanitize_preview_fragment(text: str) -> str:

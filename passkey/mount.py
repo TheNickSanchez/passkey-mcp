@@ -43,7 +43,8 @@ def _open_fifo_writer(fifo_path: Path, *, timeout: float | None) -> int:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise PasskeyError(
-                    f"Timed out after {timeout:g}s waiting for a reader on FIFO '{fifo_path}'."
+                    f"Timed out after {timeout:g}s waiting for a reader on FIFO '{fifo_path}'.",
+                    error_code="MOUNT_TIMEOUT",
                 ) from None
             time.sleep(min(0.02, max(0.001, remaining)))
 
@@ -85,7 +86,9 @@ def mount_env_fifo(
             f"in non-interactive sessions. "
             f"For single-command execution use 'passkey run -q {joined} -- <command>' or "
             f"'passkey run -q --env-file .env.passkey -- <command>', or bound the FIFO with "
-            f"'passkey mount --once --timeout 30 {joined}'."
+            f"'passkey mount --once --timeout 30 {joined}'.",
+            error_code="INTERACTIVE_REQUIRED",
+            remediation_command=f"passkey run -q {joined} -- <command>",
         )
 
     fifo_path = Path(path).expanduser()

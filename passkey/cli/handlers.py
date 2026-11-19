@@ -33,14 +33,19 @@ def resolve_entry(
             raise PasskeyError(
                 f"Entry '{entry_arg}' not found. "
                 f"Ask the user to run 'passkey new {entry_arg}' in their terminal "
-                "(never ask them to paste secrets into chat)."
+                "(never ask them to paste secrets into chat).",
+                error_code="ENTRY_NOT_FOUND",
+                entry=entry_arg,
+                remediation_command=f"passkey new {entry_arg}",
             )
         resolved_name = entry_arg
     else:
         if not can_prompt_interactively():
             raise InteractiveRequiredError(
                 "No entry name specified in non-interactive mode.\n"
-                "  Pass an explicit <entry> name, or run 'passkey list --json' to discover entries."
+                "  Pass an explicit <entry> name, or run 'passkey list --json' to discover entries.",
+                error_code="INTERACTIVE_REQUIRED",
+                remediation_command="passkey list --json",
             )
 
     resolved_name = select_entry(prompt, filter_prefix=resolved_name if fuzzy else "")
@@ -50,7 +55,10 @@ def resolve_entry(
         raise PasskeyError(
             f"Entry '{resolved_name}' not found. "
             f"Ask the user to run 'passkey new {resolved_name}' in their terminal "
-            "(never ask them to paste secrets into chat)."
+            "(never ask them to paste secrets into chat).",
+            error_code="ENTRY_NOT_FOUND",
+            entry=resolved_name,
+            remediation_command=f"passkey new {resolved_name}",
         )
 
     return final_entry
@@ -156,8 +164,10 @@ def handle_run_command(parser, args):
         )
 
     if dry_run:
+        from ..interactive import is_json_output_env
+
         report = runner.preflight_run(entries, cmd or None, env_files=env_files)
-        if json_output:
+        if json_output or is_json_output_env():
             print(json.dumps(report, indent=2))
         else:
             _print_preflight_report(report)
@@ -340,7 +350,9 @@ def handle_onboarding_or_help(parser) -> None:
             f"Bare 'passkey' launches an interactive TUI ({summary}) and cannot run headlessly.\n"
             f"  Headless commands: {alt}\n"
             f"  Ask the user to run in their terminal: {human_cmd}\n"
-            "  Security rule: Never ask the user to paste secret values into chat."
+            "  Security rule: Never ask the user to paste secret values into chat.",
+            error_code="INTERACTIVE_REQUIRED",
+            remediation_command="passkey list --json",
         )
 
     # State C: Entries already exist -> fuzzy entry browser on TTY

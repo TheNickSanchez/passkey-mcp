@@ -801,12 +801,16 @@ def cmd_check(
             print(
                 json.dumps(
                     {
+                        "ok": False,
+                        "error_code": "ENTRY_NOT_FOUND",
                         "entry": entry_name,
                         "exists": False,
                         "valid": False,
                         "present": [],
                         "missing": list(required_fields),
+                        "missing_fields": list(required_fields),
                         "remediation": remediation,
+                        "remediation_command": f"passkey new {entry_name}",
                     },
                     indent=2,
                 )
@@ -830,19 +834,22 @@ def cmd_check(
             if missing
             else None
         )
-        print(
-            json.dumps(
-                {
-                    "entry": entry_name,
-                    "exists": True,
-                    "valid": len(missing) == 0,
-                    "present": present,
-                    "missing": missing,
-                    "remediation": remediation,
-                },
-                indent=2,
+        payload_check: dict[str, object] = {
+            "ok": len(missing) == 0,
+            "entry": entry_name,
+            "exists": True,
+            "valid": len(missing) == 0,
+            "present": present,
+            "missing": missing,
+            "remediation": remediation,
+        }
+        if missing:
+            payload_check["error_code"] = "MISSING_FIELD"
+            payload_check["missing_fields"] = missing
+            payload_check["remediation_command"] = (
+                f"passkey entry set-field {entry_name} {missing[0]}"
             )
-        )
+        print(json.dumps(payload_check, indent=2))
         return 1 if missing else 0
 
     if not quiet:

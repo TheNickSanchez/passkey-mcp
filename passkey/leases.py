@@ -310,7 +310,10 @@ def authorize_entry_access(entry: Entry, *, operation: str = "inject secrets") -
         log_operation("policy_denied", entry.name, success=False)
         raise PasskeyError(
             f"Access denied for prompt-protected entry '{entry.name}'. "
-            f"Approve the biometric prompt or run 'passkey lease grant {entry.name}'."
+            f"Approve the biometric prompt or run 'passkey lease grant {entry.name}'.",
+            error_code="BIOMETRIC_DENIED",
+            entry=entry.name,
+            remediation_command=f"passkey lease grant {entry.name} --ttl 15m",
         )
 
     log_operation("policy_approved", entry.name)

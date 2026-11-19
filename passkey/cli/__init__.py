@@ -1,10 +1,16 @@
 """CLI package — main entry point for the passkey command."""
 
 import difflib
+import json
 import sys
 
 from .. import commands, importers, mcp_commands
-from ..interactive import InteractiveRequiredError, require_interactive, set_no_input
+from ..interactive import (
+    InteractiveRequiredError,
+    is_json_output_env,
+    require_interactive,
+    set_no_input,
+)
 from ..keychain import PasskeyError, _get_entry
 from .handlers import (
     handle_onboarding_or_help,
@@ -87,8 +93,24 @@ def _require_auth(operation: str) -> None:
     require_auth(operation)
 
 
+def _emit_cli_error(
+    err: PasskeyError,
+    *,
+    json_mode: bool,
+    stream_child_stdout: bool = False,
+) -> None:
+    """Write either a structured JSON error envelope or human stderr error."""
+    if json_mode:
+        target = sys.stderr if stream_child_stdout else sys.stdout
+        print(json.dumps(err.to_error_dict(), indent=2), file=target)
+    else:
+        print(f"Error: {err}", file=sys.stderr)
+
+
 def _dispatch_command(command: str | None, parser, args) -> None:
     """Dispatch a parsed top-level or noun-verb subcommand."""
+    json_out = bool(getattr(args, "json_output", False)) or is_json_output_env()
+
     if command == "help":
         topics = list(getattr(args, "help_topic", None) or [])
         if not topics:
@@ -131,7 +153,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
     elif command == "list":
         commands.cmd_list(
             names_only=getattr(args, "names_only", False),
-            json_output=getattr(args, "json_output", False),
+            json_output=json_out,
         )
     elif command == "get":
         entry_arg = getattr(args, "entry", None)
@@ -143,6 +165,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
                 if entry_arg
                 else "passkey list --json  or  passkey run -q <entry> -- <command>"
             ),
+            entry=entry_arg,
         )
         _require_auth("access secrets")
         entry = resolve_entry(entry_arg, "Select entry to browse")
@@ -155,6 +178,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         require_interactive(
             "passkey edit",
             human_command=f"passkey edit {entry_arg}" if entry_arg else "passkey edit <entry>",
+            entry=entry_arg,
         )
         _require_auth("edit entries")
         entry = resolve_entry(entry_arg, "Select entry to edit")
@@ -166,6 +190,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
                 "passkey delete",
                 human_command=f"passkey delete {args.entry}",
                 alternative=f"passkey delete {args.entry} --yes",
+                entry=args.entry,
             )
         _require_auth("delete entries")
         entry = resolve_entry(args.entry, "Select entry to delete", fuzzy=False)
@@ -173,7 +198,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
     elif command == "info":
         commands.cmd_info(
             resolve_entry(getattr(args, "entry", None), "Select entry to view"),
-            json_output=getattr(args, "json_output", False),
+            json_output=json_out,
         )
     elif command == "clone":
         _require_auth("clone entries")
@@ -183,6 +208,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         require_interactive(
             "passkey set-field",
             human_command=f"passkey entry set-field {args.entry} {args.field}",
+            entry=args.entry,
         )
         _require_auth("modify entries")
         entry = resolve_entry(args.entry, "Select entry to update", fuzzy=False)
@@ -194,11 +220,9 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         commands.cmd_policy(
             entry,
             args.policy_value,
-            json_output=getattr(args, "json_output", False),
+            json_output=json_out,
         )
     elif command == "lease":
-        import json as _json
-
         from ..leases import grant_lease, list_leases, revoke_lease
 
         if args.lease_command == "grant":
@@ -217,8 +241,8 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             )
         elif args.lease_command == "list":
             active = list_leases()
-            if getattr(args, "json_output", False):
-                print(_json.dumps(active, indent=2))
+            if json_out:
+                print(json.dumps(active, indent=2))
             elif not active:
                 print("No active leases")
             else:
@@ -235,16 +259,14 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             revoked = revoke_lease(args.entry, revoke_all=args.revoke_all)
             print(f"Revoked {revoked} lease(s)")
         else:
-            raise PasskeyError("Usage: passkey lease [grant|list|revoke]")
+            raise PasskeyError("Usage: passkey lease [grant|list|revoke]", error_code="INVALID_USAGE")
     elif command == "plugin":
-        import json as _json
-
         from ..plugins import init_plugin, list_plugins, run_plugin
 
         if args.plugin_command == "list":
             plugins = list_plugins()
-            if getattr(args, "json_output", False):
-                print(_json.dumps(plugins, indent=2))
+            if json_out:
+                print(json.dumps(plugins, indent=2))
             else:
                 for p in plugins:
                     env_list = ", ".join(p["env_vars"])
@@ -324,7 +346,6 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         else:
             raise PasskeyError("Usage: passkey hook [install|check]")
     elif command == "skill":
-        import json as _json
         from pathlib import Path as _Path
 
         from ..skills import install_skill
@@ -332,9 +353,9 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         if args.skill_command == "install":
             proj = _Path(args.project_dir) if args.project_dir else None
             written = install_skill(args.tool, project_dir=proj)
-            if getattr(args, "json_output", False):
+            if json_out:
                 print(
-                    _json.dumps(
+                    json.dumps(
                         {"tool": args.tool, "installed": [str(p) for p in written]},
                         indent=2,
                     )
@@ -391,11 +412,10 @@ def _dispatch_command(command: str | None, parser, args) -> None:
                 args.entry,
                 args.fields,
                 quiet=args.quiet,
-                json_output=getattr(args, "json_output", False),
+                json_output=json_out,
             )
         )
     elif command == "audit":
-        json_out = bool(getattr(args, "json_output", False))
         if getattr(args, "verify", False):
             rc = commands.cmd_audit(verify=True, json_output=json_out)
             if rc != 0:
@@ -482,7 +502,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         cmd_config(
             args.key,
             args.value,
-            json_output=getattr(args, "json_output", False),
+            json_output=json_out,
         )
     elif command == "mcp-serve":
         from ..mcp_server import main as mcp_main
@@ -491,18 +511,14 @@ def _dispatch_command(command: str | None, parser, args) -> None:
     elif command == "completion":
         from .. import completion
 
-        try:
-            if args.bash:
-                completion.print_completion("bash")
-            elif args.zsh:
-                completion.print_completion("zsh")
-            elif args.fish:
-                completion.print_completion("fish")
-            else:
-                completion.print_setup_instructions()
-        except PasskeyError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            sys.exit(1)
+        if args.bash:
+            completion.print_completion("bash")
+        elif args.zsh:
+            completion.print_completion("zsh")
+        elif args.fish:
+            completion.print_completion("fish")
+        else:
+            completion.print_setup_instructions()
     elif command == "init":
         yes = bool(getattr(args, "yes", False))
         if not args.dry_run and not yes:
@@ -523,14 +539,13 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             yes=yes,
         )
     elif command == "status":
-        mcp_commands.cmd_status(tool=args.tool, json_output=args.json_output)
+        mcp_commands.cmd_status(tool=args.tool, json_output=json_out)
     elif command == "doctor":
-        json_out = bool(getattr(args, "json_output", False))
         rc = mcp_commands.cmd_doctor(deep=args.deep, json_output=json_out)
         if json_out and rc != 0:
             sys.exit(rc)
     elif command == "servers":
-        mcp_commands.cmd_servers(tool=args.tool, json_output=args.json_output)
+        mcp_commands.cmd_servers(tool=args.tool, json_output=json_out)
     elif command == "add":
         tool_flag = f" --tool {args.tool}" if getattr(args, "tool", None) else ""
         require_interactive(
@@ -556,24 +571,27 @@ def main() -> None:
     raw_argv = sys.argv[1:]
     pre_dash = raw_argv[: raw_argv.index("--")] if "--" in raw_argv else raw_argv
     early_no_input = "--no-input" in pre_dash
+    early_json = ("--json" in pre_dash) or is_json_output_env()
 
     set_no_input(early_no_input)
     try:
-        non_no_input = [a for a in raw_argv if a != "--no-input"]
+        non_flag_shortcut = [a for a in raw_argv if a not in ("--no-input", "--json")]
         if (
             "--" not in raw_argv
-            and len(non_no_input) == 1
-            and not non_no_input[0].startswith("-")
-            and non_no_input[0] not in _KNOWN_COMMANDS
+            and len(non_flag_shortcut) == 1
+            and not non_flag_shortcut[0].startswith("-")
+            and non_flag_shortcut[0] not in _KNOWN_COMMANDS
         ):
-            entry_name = non_no_input[0]
+            entry_name = non_flag_shortcut[0]
             try:
                 close_cmds = difflib.get_close_matches(
                     entry_name, sorted(_KNOWN_COMMANDS), n=1, cutoff=0.75
                 )
                 if close_cmds and _get_entry(entry_name, log_read=False) is None:
                     raise PasskeyError(
-                        f"Unknown command '{entry_name}'. Did you mean 'passkey {close_cmds[0]}'?"
+                        f"Unknown command '{entry_name}'. Did you mean 'passkey {close_cmds[0]}'?",
+                        error_code="UNKNOWN_COMMAND",
+                        remediation_command=f"passkey {close_cmds[0]}",
                     )
                 require_interactive(
                     "passkey <entry>",
@@ -582,25 +600,27 @@ def main() -> None:
                         f"passkey info {entry_name} --json  or  "
                         f"passkey run -q {entry_name} -- <command>"
                     ),
+                    entry=entry_name,
                 )
                 _require_auth("access secrets")
                 entry = resolve_entry(entry_name, "Select entry to browse")
                 commands.cmd_get_interactive(entry)
             except InteractiveRequiredError as e:
-                print(f"Error: {e}", file=sys.stderr)
+                _emit_cli_error(e, json_mode=early_json)
                 sys.exit(e.exit_code)
             except PasskeyError as e:
-                print(f"Error: {e}", file=sys.stderr)
-                sys.exit(1)
+                _emit_cli_error(e, json_mode=early_json)
+                sys.exit(e.exit_code)
             except KeyboardInterrupt:
                 print("\nOperation cancelled by user.", file=sys.stderr)
                 sys.exit(1)
             except EOFError:
-                print(
-                    "\nError: Unexpected EOF on stdin (non-interactive session). "
+                eof_err = PasskeyError(
+                    "Unexpected EOF on stdin (non-interactive session). "
                     "Pass required flags or ask the user to run this command in their terminal.",
-                    file=sys.stderr,
+                    error_code="INTERACTIVE_REQUIRED",
                 )
+                _emit_cli_error(eof_err, json_mode=early_json)
                 sys.exit(1)
             return
 
@@ -616,23 +636,30 @@ def main() -> None:
         if getattr(args, "no_input", False):
             set_no_input(True)
 
+        json_mode = bool(getattr(args, "json_output", False)) or early_json
+        is_dry = bool(getattr(args, "dry_run", False)) or ("--dry-run" in pre_dash)
+        stream_child = (args.command in ("run", "exec") and not is_dry) or (
+            args.command == "plugin" and getattr(args, "plugin_command", None) == "run"
+        )
+
         try:
             _dispatch_command(args.command, parser, args)
         except InteractiveRequiredError as e:
-            print(f"Error: {e}", file=sys.stderr)
+            _emit_cli_error(e, json_mode=json_mode, stream_child_stdout=stream_child)
             sys.exit(e.exit_code)
         except PasskeyError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            sys.exit(1)
+            _emit_cli_error(e, json_mode=json_mode, stream_child_stdout=stream_child)
+            sys.exit(e.exit_code)
         except KeyboardInterrupt:
             print("\nOperation cancelled by user.", file=sys.stderr)
             sys.exit(1)
         except EOFError:
-            print(
-                "\nError: Unexpected EOF on stdin (non-interactive session). "
+            eof_err = PasskeyError(
+                "Unexpected EOF on stdin (non-interactive session). "
                 "Pass required flags or ask the user to run this command in their terminal.",
-                file=sys.stderr,
+                error_code="INTERACTIVE_REQUIRED",
             )
+            _emit_cli_error(eof_err, json_mode=json_mode, stream_child_stdout=stream_child)
             sys.exit(1)
     finally:
         set_no_input(False)

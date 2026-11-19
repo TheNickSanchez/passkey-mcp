@@ -119,7 +119,11 @@ def resolve_reference(
         raise PasskeyError(
             f"Referenced entry '{entry_name}' not found. "
             f"Ask the user to run 'passkey new {entry_name}' in their terminal "
-            "(never paste secrets into chat)."
+            "(never paste secrets into chat).",
+            error_code="ENTRY_NOT_FOUND",
+            entry=entry_name,
+            missing_fields=[field_name],
+            remediation_command=f"passkey new {entry_name}",
         )
 
     if authorize_fn is not None:
@@ -132,7 +136,11 @@ def resolve_reference(
 
     raise PasskeyError(
         f"Field '{field_name}' not found in entry '{entry_name}'. "
-        f"Ask the user to run 'passkey entry set-field {entry_name} {field_name}' in their terminal."
+        f"Ask the user to run 'passkey entry set-field {entry_name} {field_name}' in their terminal.",
+        error_code="MISSING_FIELD",
+        entry=entry_name,
+        missing_fields=[field_name],
+        remediation_command=f"passkey entry set-field {entry_name} {field_name}",
     )
 
 

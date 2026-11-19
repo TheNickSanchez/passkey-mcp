@@ -424,7 +424,11 @@ def _build_plugin_env(cli_name: str, entry) -> tuple[dict[str, str], list[str]]:
     if missing_required:
         raise PasskeyError(
             f"Entry '{entry.name}' is missing required credential field(s) for '{cli_name}': "
-            f"{', '.join(missing_required)}"
+            f"{', '.join(missing_required)}",
+            error_code="MISSING_FIELD",
+            entry=entry.name,
+            missing_fields=missing_required,
+            remediation_command=f"passkey entry set-field {entry.name} {missing_required[0]}",
         )
 
     return injected, secrets_to_mask
@@ -442,7 +446,8 @@ def run_plugin(
     """Resolve plugin binding, enforce entry policy, map credentials, and execute with masking."""
     if cli_name not in PLUGIN_SPECS:
         raise PasskeyError(
-            f"Unsupported plugin '{cli_name}'. Available plugins: {', '.join(sorted(PLUGIN_SPECS))}"
+            f"Unsupported plugin '{cli_name}'. Available plugins: {', '.join(sorted(PLUGIN_SPECS))}",
+            error_code="INVALID_USAGE",
         )
 
     resolved_entry_name = entry_name
@@ -452,7 +457,10 @@ def run_plugin(
     entry = get_entry(resolved_entry_name)
     if entry is None:
         raise PasskeyError(
-            f"Passkey entry '{resolved_entry_name}' for plugin '{cli_name}' was not found."
+            f"Passkey entry '{resolved_entry_name}' for plugin '{cli_name}' was not found.",
+            error_code="ENTRY_NOT_FOUND",
+            entry=resolved_entry_name,
+            remediation_command=f"passkey new {resolved_entry_name}",
         )
 
     authorize_entry_access(entry, operation=f"run plugin '{cli_name}'")
@@ -460,7 +468,10 @@ def run_plugin(
 
     exe = executable_override or shutil.which(cli_name)
     if not exe:
-        raise PasskeyError(f"CLI executable '{cli_name}' was not found in PATH.")
+        raise PasskeyError(
+            f"CLI executable '{cli_name}' was not found in PATH.",
+            error_code="COMMAND_NOT_FOUND",
+        )
 
     env = os.environ.copy()
     env.update(plugin_vars)
