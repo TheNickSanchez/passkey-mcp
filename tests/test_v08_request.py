@@ -250,3 +250,48 @@ class TestOutOfBandSecretRequest:
         assert mcp_ok["ok"] is True
         assert mcp_ok["status"] == "created"
         assert "mcp_secret_xyz_789" not in json.dumps(mcp_ok)
+
+    def test_expired_token_rotation_sets_notification_alert_and_last_rotated(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr("passkey.request_secret.sys.platform", "darwin")
+        save_entry(
+            Entry(
+                name="resend_rot",
+                fields={"RESEND_API_KEY": "re_expired_old_0000"},
+                last_rotated=None,
+            )
+        )
+
+        fresh_token = "re_live_fresh_rotated_9999"
+        mock_proc = MagicMock(returncode=0, stdout=fresh_token + "\n", stderr="")
+
+        with patch("passkey.request_secret.subprocess.run", return_value=mock_proc) as mock_run:
+            res = request_secret(
+                "resend_rot",
+                ["RESEND_API_KEY"],
+                reason="HTTP 401 Unauthorized — token expired",
+                hint="Resend Dashboard → API Keys → Create API Key",
+                cooldown_seconds=0.0,
+            )
+
+        mock_run.assert_called_once()
+        env = mock_run.call_args.kwargs["env"]
+        assert env["PASSKEY_REQ_TITLE"] == "Passkey - Rotate Secret"
+        assert env["PASSKEY_REQ_ACTION"] == "Update Keychain"
+        assert "Alert: HTTP 401 Unauthorized - token expired" in env["PASSKEY_REQ_PROMPT"]
+        assert "resend_rot/RESEND_API_KEY: HTTP 401 Unauthorized - token expired" in env[
+            "PASSKEY_REQ_NOTICE"
+        ]
+        assert env["PASSKEY_REQ_TITLE"].isascii()
+        assert env["PASSKEY_REQ_PROMPT"].isascii()
+        assert env["PASSKEY_REQ_NOTICE"].isascii()
+
+        assert res["status"] == "updated"
+        assert res["rotated"] is True
+        assert isinstance(res["last_rotated"], str)
+
+        updated = _get_entry("resend_rot", log_read=False)
+        assert updated is not None
+        assert updated.fields["RESEND_API_KEY"] == fresh_token
+        assert updated.last_rotated == res["last_rotated"]

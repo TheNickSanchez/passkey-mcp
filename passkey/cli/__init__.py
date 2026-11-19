@@ -165,6 +165,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             args.fields,
             policy=getattr(args, "policy", None),
             hint=getattr(args, "hint", None),
+            reason=getattr(args, "reason", None),
             timeout=int(getattr(args, "timeout", 120)),
             overwrite=bool(getattr(args, "overwrite", False)),
             json_output=json_out,

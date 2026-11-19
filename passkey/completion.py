@@ -82,7 +82,7 @@ _passkey_completions() {
             ;;
         request)
             entries=$(passkey list --names-only 2>/dev/null)
-            COMPREPLY=( $(compgen -W "$entries --fields --policy --hint --timeout --overwrite --json --no-input" -- "$cur") )
+            COMPREPLY=( $(compgen -W "$entries --fields --policy --hint --reason --timeout --overwrite --json --no-input" -- "$cur") )
             return 0
             ;;
         exec)
@@ -211,7 +211,7 @@ _passkey() {
                 _describe 'option' opts
                 ;;
             request)
-                local opts=(--fields --policy --hint --timeout --overwrite --json --no-input)
+                local opts=(--fields --policy --hint --reason --timeout --overwrite --json --no-input)
                 entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
                 _describe 'entry' entries
                 _describe 'option' opts
@@ -356,6 +356,7 @@ complete -c passkey -n '__fish_seen_subcommand_from run mount' -a '(__passkey_en
 # Common agent & scripting flags
 complete -c passkey -n '__fish_seen_subcommand_from list find request info check doctor status servers audit policy config lease plugin skill run exec project' -l json -d 'Output as JSON'
 complete -c passkey -n '__fish_seen_subcommand_from find project' -l from-file -d 'Read variable names from template file'
+complete -c passkey -n '__fish_seen_subcommand_from request' -l reason -d 'Error or expiry reason for rotation prompt'
 complete -c passkey -n '__fish_seen_subcommand_from run exec init unwrap import' -l dry-run -d 'Validate or preview without side effects'
 complete -c passkey -n '__fish_seen_subcommand_from run' -l strict -d 'Fail if any requested entry is missing'
 complete -c passkey -n '__fish_seen_subcommand_from delete init audit' -s y -l yes -d 'Skip interactive confirmation'

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime
 
 from .audit import detect_actor, log_operation
 from .dirs import ensure_data_dir, get_data_dir
@@ -32,8 +33,15 @@ CANCEL_COOLDOWN_SECONDS = 10.0
 _APPLESCRIPT_HIDDEN_DIALOG = """\
 set dlgTitle to system attribute "PASSKEY_REQ_TITLE"
 set dlgPrompt to system attribute "PASSKEY_REQ_PROMPT"
+set dlgNotice to system attribute "PASSKEY_REQ_NOTICE"
+set dlgAction to system attribute "PASSKEY_REQ_ACTION"
 set dlgTimeout to (system attribute "PASSKEY_REQ_TIMEOUT") as integer
-set res to display dialog dlgPrompt with title dlgTitle default answer "" buttons {"Cancel", "Save to Keychain"} default button "Save to Keychain" cancel button "Cancel" with hidden answer giving up after dlgTimeout
+if dlgNotice is not "" then
+    try
+        display notification dlgNotice with title dlgTitle
+    end try
+end if
+set res to display dialog dlgPrompt with title dlgTitle default answer "" buttons {"Cancel", dlgAction} default button dlgAction cancel button "Cancel" with hidden answer giving up after dlgTimeout
 if gave up of res then
     error "PASSKEY_DIALOG_TIMEOUT" number -1712
 end if
@@ -176,23 +184,51 @@ def _prompt_macos_hidden_dialog(
     field_total: int,
     client_label: str,
     hint: str,
+    reason: str,
+    is_rotating: bool,
     timeout: int,
     remaining_fields: list[str],
 ) -> str:
     """Capture a single secret value via macOS StandardAdditions hidden dialog."""
     step_str = f" ({field_index}/{field_total})" if field_total > 1 else ""
-    title = _to_applescript_attr_ascii(f"Passkey - Secret Request{step_str}")
-    prompt_lines = [
-        f"Enter '{field_name}' for keychain entry '{entry_name}'.",
-        f"Requested by: {client_label} (saved directly to OS Keychain; never shown to AI).",
-    ]
+    rotate_mode = is_rotating or bool(reason)
+    raw_title = (
+        f"Passkey - Rotate Secret{step_str}"
+        if rotate_mode
+        else f"Passkey - Secret Request{step_str}"
+    )
+    title = _to_applescript_attr_ascii(raw_title)
+    action_btn = "Update Keychain" if rotate_mode else "Save to Keychain"
+
+    lead_line = (
+        f"Rotate '{field_name}' in keychain entry '{entry_name}'."
+        if rotate_mode
+        else f"Enter '{field_name}' for keychain entry '{entry_name}'."
+    )
+    prompt_lines = [lead_line]
+    if reason:
+        prompt_lines.append(f"Alert: {reason}")
+    prompt_lines.append(
+        f"Requested by: {client_label} (saved directly to OS Keychain; never shown to AI)."
+    )
     if hint:
         prompt_lines.append(f"Hint: {hint}")
     prompt_text = _to_applescript_attr_ascii("\n\n".join(prompt_lines))
 
+    notice_text = ""
+    if rotate_mode:
+        raw_notice = (
+            f"{entry_name}/{field_name}: {reason}"
+            if reason
+            else f"Rotation requested for {entry_name}/{field_name}"
+        )
+        notice_text = _to_applescript_attr_ascii(raw_notice)
+
     env = os.environ.copy()
     env["PASSKEY_REQ_TITLE"] = title
     env["PASSKEY_REQ_PROMPT"] = prompt_text
+    env["PASSKEY_REQ_NOTICE"] = notice_text
+    env["PASSKEY_REQ_ACTION"] = action_btn
     env["PASSKEY_REQ_TIMEOUT"] = str(int(timeout))
 
     try:
@@ -367,6 +403,8 @@ def _prompt_native_secret_field(
     field_total: int,
     client_label: str,
     hint: str,
+    reason: str,
+    is_rotating: bool,
     timeout: int,
     remaining_fields: list[str],
 ) -> str:
@@ -378,16 +416,19 @@ def _prompt_native_secret_field(
             field_total=field_total,
             client_label=client_label,
             hint=hint,
+            reason=reason,
+            is_rotating=is_rotating,
             timeout=timeout,
             remaining_fields=remaining_fields,
         )
     if sys.platform.startswith("linux"):
+        combined_hint = f"{reason} ({hint})" if (reason and hint) else (reason or hint)
         return _prompt_linux_zenity(
             entry_name=entry_name,
             field_name=field_name,
             field_index=field_index,
             field_total=field_total,
-            hint=hint,
+            hint=combined_hint,
             timeout=timeout,
             remaining_fields=remaining_fields,
         )
@@ -407,6 +448,7 @@ def request_secret(
     *,
     policy: str | None = None,
     hint: str | None = None,
+    reason: str | None = None,
     timeout: int = 120,
     overwrite: bool = False,
     cooldown_seconds: float | None = None,
@@ -443,9 +485,12 @@ def request_secret(
         )
 
     safe_hint = _sanitize_hint(hint)
+    safe_reason = _sanitize_hint(reason)
+    # Passing an explicit error/expiry --reason automatically forces re-prompting existing fields
+    force_prompt = overwrite or bool(safe_reason)
     existing = _get_entry(entry_name, log_read=False)
 
-    if existing is not None and not overwrite:
+    if existing is not None and not force_prompt:
         fields_to_prompt = [
             f for f in parsed_fields if f not in existing.fields or not existing.fields[f]
         ]
@@ -478,6 +523,7 @@ def request_secret(
     try:
         for idx, fld in enumerate(fields_to_prompt, start=1):
             remaining = fields_to_prompt[idx - 1 :]
+            is_rot = existing is not None and fld in existing.fields and bool(existing.fields[fld])
             val = _prompt_native_secret_field(
                 entry_name=entry_name,
                 field_name=fld,
@@ -485,6 +531,8 @@ def request_secret(
                 field_total=total,
                 client_label=client_label,
                 hint=safe_hint,
+                reason=safe_reason,
+                is_rotating=is_rot,
                 timeout=timeout,
                 remaining_fields=remaining,
             )
@@ -495,17 +543,24 @@ def request_secret(
         log_operation("request_secret", entry_name, success=False)
         raise
 
+    did_rotate_existing = existing is not None and any(
+        f in existing.fields and bool(existing.fields[f]) for f in captured
+    )
+
     if existing is not None:
         merged_fields = existing.fields.copy()
         merged_fields.update(captured)
         final_policy = normalized_policy if normalized_policy is not None else existing.policy
+        rotated_ts = (
+            datetime.now().isoformat() if did_rotate_existing else existing.last_rotated
+        )
         entry_obj = Entry(
             name=entry_name,
             fields=merged_fields,
             config=existing.config.copy(),
             created=existing.created,
             source=existing.source,
-            last_rotated=existing.last_rotated,
+            last_rotated=rotated_ts,
             policy=final_policy,
         )
         save_entry(entry_obj, is_update=True)
@@ -523,7 +578,7 @@ def request_secret(
 
     saved_names = list(captured.keys())
     log_operation(
-        "request_secret",
+        "rotate" if did_rotate_existing else "request_secret",
         entry_name,
         details={
             "field_count": len(saved_names),
@@ -532,7 +587,7 @@ def request_secret(
         },
     )
 
-    return {
+    result: dict[str, object] = {
         "ok": True,
         "status": status,
         "entry": entry_name,
@@ -540,6 +595,10 @@ def request_secret(
         "fields_present": sorted(entry_obj.fields.keys()),
         "policy": entry_obj.policy,
     }
+    if did_rotate_existing:
+        result["rotated"] = True
+        result["last_rotated"] = entry_obj.last_rotated
+    return result
 
 
 def cmd_request(
@@ -548,6 +607,7 @@ def cmd_request(
     *,
     policy: str | None = None,
     hint: str | None = None,
+    reason: str | None = None,
     timeout: int = 120,
     overwrite: bool = False,
     json_output: bool = False,
@@ -558,6 +618,7 @@ def cmd_request(
         fields,
         policy=policy,
         hint=hint,
+        reason=reason,
         timeout=timeout,
         overwrite=overwrite,
     )
@@ -571,7 +632,11 @@ def cmd_request(
             f"({', '.join(res['fields_present'])}; policy={res['policy']})."
         )
     else:
-        verb = "Created" if res["status"] == "created" else "Updated"
+        verb = (
+            "Rotated"
+            if res.get("rotated")
+            else ("Created" if res["status"] == "created" else "Updated")
+        )
         print(
             f"{verb} '{entry_name}' via secure OS prompt "
             f"(saved: {', '.join(res['fields_saved'])}; policy={res['policy']})."

@@ -436,27 +436,31 @@ def passkey_request_secret(
     fields: list[str],
     policy: str | None = None,
     hint: str | None = None,
+    reason: str | None = None,
     timeout: int = 120,
     overwrite: bool = False,
 ) -> dict:
-    """Prompt the human user via an out-of-band native OS hidden dialog to save missing secrets.
+    """Prompt the human user via an out-of-band native OS hidden dialog to save or rotate secrets.
 
     Opens a secure macOS/Linux password dialog directly on the user's desktop,
     stores the entered value(s) straight into the OS keychain, and returns only
     field names and status — secret values NEVER enter AI context or tool output.
-    Automatically skips fields that already exist unless ``overwrite=True``.
+    Automatically skips fields that already exist unless ``overwrite=True`` or
+    an error/expiry ``reason`` is provided (which triggers a native rotation
+    notification + ``Passkey - Rotate Secret`` prompt and stamps ``last_rotated``).
 
     Args:
         entry_name: Keychain entry name to create or update (e.g., "stripe_dev")
         fields: Environment variable / field names to capture (max 10)
         policy: Optional access policy ('allow', 'session', or 'prompt')
         hint: Optional short hint shown in the dialog (e.g., where to find the key)
+        reason: Optional error/expiry reason (e.g., "401 Unauthorized: token expired")
         timeout: Seconds to wait before timing out (5-300, default: 120)
         overwrite: Re-prompt even if requested fields already exist
 
     Returns:
         Secret-free dictionary with ok, status ('created'|'updated'|'already_exists'),
-        entry, fields_saved, fields_present, and policy.
+        entry, fields_saved, fields_present, policy, and optional rotated/last_rotated.
     """
     from .request_secret import request_secret
     from .settings import mcp_write_tools_enabled
@@ -478,6 +482,7 @@ def passkey_request_secret(
             fields,
             policy=policy,
             hint=hint,
+            reason=reason,
             timeout=timeout,
             overwrite=overwrite,
         )

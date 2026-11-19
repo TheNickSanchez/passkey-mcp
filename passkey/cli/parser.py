@@ -120,6 +120,11 @@ def _configure_request_parser(p: argparse.ArgumentParser) -> argparse.ArgumentPa
         help="Optional guidance shown in the dialog (e.g., 'Stripe Dashboard -> API keys')",
     )
     p.add_argument(
+        "--reason",
+        default=None,
+        help="Optional error/expiry alert triggering rotation notification & prompt (e.g., '401 token expired')",
+    )
+    p.add_argument(
         "--timeout",
         type=int,
         default=120,
