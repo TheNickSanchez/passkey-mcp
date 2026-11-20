@@ -65,6 +65,8 @@ class TestPrintCompletion:
                 "session",
                 "from-file",
                 "agent-session-lease-ttl",
+                "default-policy",
+                "exclude-mcp",
             ]:
                 assert token in script, f"'{token}' missing from script"
 

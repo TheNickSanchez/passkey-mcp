@@ -439,3 +439,14 @@ Release. Do not use major until 1.0.
 Keep 1.0 for product completeness (Windows CI, Homebrew optional, wrap-disable
 default documented, no stale docs). Deployability is 0.4.0. Re-labeling to
 1.0 without a published 0.4.x would repeat the 1.2.0 mistake.
+
+---
+
+## Post-`v0.9.2` Roadmap Priority (Updated 2026-11-20)
+
+Tree on `main` is **`v0.9.2`** (live on PyPI with Trusted Publishing attestations, `entries.json` v2 zero-Keychain metadata index, `pk1:` inline encrypted token sharing, `LAContext` Touch ID + `session` leases, `.env.passkey` HMAC repo trust, and 12-page synced GitHub Wiki).
+
+| Priority | Milestone | Spec | Rationale |
+|----------|-----------|------|-----------|
+| **P1 (Next)** | **Agent Authorization Onboarding & Bulk Modes (`v0.10.0`)** | [`docs/plans/v0.10-agent-auth-onboarding.md`](docs/plans/v0.10-agent-auth-onboarding.md) | Surfaces 1-tap `10m` Session Touch ID vs. YOLO (`allow`) vs. Strict (`prompt`) at first-run onboarding (`default-policy`), keeps `passkey init` background MCP servers boot-safe, and adds `passkey policy --all` bulk switching. High daily impact for all macOS/agent users in 1 focused PR; finalizes policy UX before cross-platform porting. |
+| **P2** | **First-Class Windows Parity (`v0.11.0`, Phases 2–5)** | [`docs/plans/v0.9-sharing-and-windows.md`](docs/plans/v0.9-sharing-and-windows.md) | `WinVaultKeyring` `2,560B` chunking (`pkz1`/`pkc1`), `credui.dll` native secret dialogs, Win32 `Toolhelp32` + `GetProcessTimes` session lineage, threaded pipe masking (`WinError 10038` fix), PowerShell wrappers, and `windows-latest` CI matrix. |

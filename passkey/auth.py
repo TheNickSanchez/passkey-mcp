@@ -40,6 +40,75 @@ def _lacontext_enabled() -> bool:
     )
 
 
+def is_lacontext_available() -> bool:
+    """Return True when macOS LocalAuthentication (Touch ID / Watch / passcode) can be evaluated.
+
+    Non-interactive capability check: queries ``canEvaluatePolicy:error:`` only
+    and never triggers a Touch ID or password prompt.
+    """
+    if sys.platform != "darwin" or not _lacontext_enabled():
+        return False
+
+    try:
+        objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+        ctypes.CDLL(
+            "/System/Library/Frameworks/LocalAuthentication.framework/LocalAuthentication"
+        )
+    except OSError:
+        return False
+
+    try:
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+
+        msg_send_addr = ctypes.cast(objc.objc_msgSend, ctypes.c_void_p).value
+        if not msg_send_addr:
+            return False
+
+        msg_id = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(
+            msg_send_addr
+        )
+        msg_void = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)(msg_send_addr)
+        msg_can_eval = ctypes.CFUNCTYPE(
+            ctypes.c_bool,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_long,
+            ctypes.POINTER(ctypes.c_void_p),
+        )(msg_send_addr)
+
+        la_cls = objc.objc_getClass(b"LAContext")
+        if not la_cls:
+            return False
+
+        sel_alloc = objc.sel_registerName(b"alloc")
+        sel_init = objc.sel_registerName(b"init")
+        sel_release = objc.sel_registerName(b"release")
+        sel_can_eval = objc.sel_registerName(b"canEvaluatePolicy:error:")
+
+        ctx_raw = msg_id(la_cls, sel_alloc)
+        ctx = msg_id(ctx_raw, sel_init) if ctx_raw else None
+        if not ctx:
+            return False
+
+        try:
+            err_ptr = ctypes.c_void_p(0)
+            return bool(
+                msg_can_eval(
+                    ctx,
+                    sel_can_eval,
+                    _LA_POLICY_DEVICE_OWNER_AUTH,
+                    ctypes.byref(err_ptr),
+                )
+            )
+        finally:
+            msg_void(ctx, sel_release)
+    except Exception:
+        return False
+
+
 def _evaluate_lacontext(reason: str, timeout: float = 120.0) -> bool | None:
     """Invoke macOS LocalAuthentication.framework LAContext out-of-band via ctypes.
 

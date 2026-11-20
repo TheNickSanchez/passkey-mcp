@@ -551,3 +551,47 @@ def get_all_entries(*, log_read: bool = True) -> list[Entry]:
         log_operation("read", details={"bulk": True, "count": len(entries)})
 
     return entries
+
+
+def bulk_update_policies(entry_names: list[str], policy: str) -> tuple[list[str], list[str]]:
+    """Update access policy across multiple entries and sync entries.json v2 in one pass.
+
+    Preserves all existing Entry fields, config, created, source, and last_rotated.
+
+    Returns:
+        Tuple of (updated_names, unchanged_names).
+    """
+    if policy not in VALID_POLICIES:
+        raise PasskeyError(
+            f"Invalid policy '{policy}'. Expected one of: {', '.join(sorted(VALID_POLICIES))}",
+            error_code="INVALID_USAGE",
+        )
+
+    updated: list[str] = []
+    unchanged: list[str] = []
+    synced_metas: dict[str, EntryMeta] = {}
+
+    try:
+        for name in entry_names:
+            entry = _get_entry(name, log_read=False)
+            if entry is None:
+                continue
+            if entry.policy != policy:
+                entry.policy = policy
+                entry.touch()
+                keyring.set_password(SERVICE, entry.name, entry.to_json())
+                updated.append(entry.name)
+            else:
+                unchanged.append(entry.name)
+            synced_metas[entry.name] = EntryMeta.from_entry(entry)
+
+        if synced_metas:
+            with _metadata_lock():
+                meta_map = _read_index_nolock()
+                meta_map.update(synced_metas)
+                _write_index_nolock(meta_map)
+    except KeyringError as e:
+        log_operation("policy", details={"bulk": True, "policy": policy, "error": str(e)}, success=False)
+        raise KeychainAccessError(f"Failed during bulk policy update: {e}") from e
+
+    return updated, unchanged

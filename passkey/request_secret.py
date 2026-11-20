@@ -566,7 +566,11 @@ def request_secret(
         save_entry(entry_obj, is_update=True)
         status = "updated"
     else:
-        final_policy = normalized_policy if normalized_policy is not None else "allow"
+        from .settings import get_default_policy
+
+        final_policy = (
+            normalized_policy if normalized_policy is not None else get_default_policy()
+        )
         entry_obj = Entry(
             name=entry_name,
             fields=captured,

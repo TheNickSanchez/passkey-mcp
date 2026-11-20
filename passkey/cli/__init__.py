@@ -244,16 +244,66 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         entry = resolve_entry(args.entry, "Select entry to update", fuzzy=False)
         commands.cmd_set_field(entry, args.field, None)
     elif command == "policy":
-        if args.policy_value is not None:
+        all_entries = bool(getattr(args, "all_entries", False))
+        exclude_mcp = bool(getattr(args, "exclude_mcp", False))
+        yes = bool(getattr(args, "yes", False))
+
+        if all_entries:
+            if args.entry is not None and args.policy_value is not None:
+                raise PasskeyError(
+                    "Cannot specify an entry name together with '--all'. "
+                    "Usage: passkey policy --all <allow|session|prompt> [--exclude-mcp]",
+                    error_code="INVALID_USAGE",
+                )
+            bulk_pol = args.policy_value or args.entry
+            if not bulk_pol:
+                raise PasskeyError(
+                    "Specify a target policy with '--all': "
+                    "passkey policy --all <allow|session|prompt> [--exclude-mcp]",
+                    error_code="INVALID_USAGE",
+                )
+            from ..models import VALID_POLICIES
+
+            norm_bulk = bulk_pol.strip().lower()
+            if norm_bulk not in VALID_POLICIES:
+                raise PasskeyError(
+                    f"Invalid policy '{bulk_pol}'. Expected one of: {', '.join(sorted(VALID_POLICIES))}",
+                    error_code="INVALID_USAGE",
+                )
+            if not yes:
+                excl_flag = " --exclude-mcp" if exclude_mcp else ""
+                require_interactive(
+                    "passkey policy --all",
+                    human_command=f"passkey policy --all {norm_bulk}{excl_flag}",
+                    alternative=f"passkey policy --all {norm_bulk}{excl_flag} --yes",
+                )
             _require_auth("update entry policy")
-            target = resolve_entry(args.entry, "Select entry for policy", fuzzy=False)
+            commands.cmd_policy_all(
+                norm_bulk,
+                exclude_mcp=exclude_mcp,
+                yes=yes,
+                json_output=json_out,
+            )
         else:
-            target = resolve_entry_meta(args.entry, "Select entry for policy", fuzzy=False)
-        commands.cmd_policy(
-            target,
-            args.policy_value,
-            json_output=json_out,
-        )
+            if exclude_mcp:
+                raise PasskeyError(
+                    "'--exclude-mcp' requires '--all'.",
+                    error_code="INVALID_USAGE",
+                )
+            if args.entry is None:
+                parser.error(
+                    "the following arguments are required: entry (or --all <allow|session|prompt>)"
+                )
+            if args.policy_value is not None:
+                _require_auth("update entry policy")
+                target = resolve_entry(args.entry, "Select entry for policy", fuzzy=False)
+            else:
+                target = resolve_entry_meta(args.entry, "Select entry for policy", fuzzy=False)
+            commands.cmd_policy(
+                target,
+                args.policy_value,
+                json_output=json_out,
+            )
     elif command == "lease":
         from ..leases import grant_lease, list_leases, revoke_lease
 
@@ -649,6 +699,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
             force=args.force,
             include_all=args.include_all,
             backup_path=args.backup,
+            policy=getattr(args, "policy", None),
             yes=yes,
         )
     elif command == "status":

@@ -45,10 +45,10 @@ Complete reference for every `passkey` command, subcommand group, flag, setting,
 
 | Command | Flags & Arguments | Description |
 | :--- | :--- | :--- |
-| `passkey` *(bare)* | `[--no-input]` | Context-aware router: offers 1-step MCP migration if exposed configs exist, FTUE onboarding if 0 entries, or fuzzy entry picker if entries exist. |
+| `passkey` *(bare)* | `[--no-input]` | Context-aware router: prompts once for `default-policy` on first run, then offers 1-step MCP migration if exposed configs exist, FTUE onboarding if 0 entries, or fuzzy entry picker if entries exist. |
 | `passkey <entry>` | `[--no-input]` | Shortcut for `passkey get <entry>` (opens interactive fuzzy field picker). |
-| `passkey new` | `[name] [-t\|--template <tpl>]` | Create a new secret entry via masked interactive input. |
-| `passkey request` | `<entry> -f\|--fields <VAR...> [--policy allow\|session\|prompt] [--hint <str>] [--reason <str>] [--timeout 5..300] [--overwrite] [--json]` | Capture or rotate secrets via out-of-band native OS hidden dialog (`osascript` / `zenity`) with popup cooldown rate-limiting. |
+| `passkey new` | `[name] [-t\|--template <tpl>]` | Create a new secret entry via masked interactive input (inherits `default-policy`). |
+| `passkey request` | `<entry> -f\|--fields <VAR...> [--policy allow\|session\|prompt] [--hint <str>] [--reason <str>] [--timeout 5..300] [--overwrite] [--json]` | Capture or rotate secrets via out-of-band native OS hidden dialog (`osascript` / `zenity`) with popup cooldown rate-limiting (net-new entries inherit `default-policy` when `--policy` is omitted). |
 | `passkey get` | `[entry] [-a\|--all]` | Interactive field picker (copies 1 field to clipboard for 30s; `--all` copies `KEY='value'` lines). |
 | `passkey list` | `[-n\|--names-only] [--json]` | List saved entries from the secret-free `entries.json` index with zero Keychain reads (`--names-only` fast-paths `<TAB>` completion; `--json` emits metadata array). |
 | `passkey find` | `[vars...] [--from-file <path>] [--json]` | Reverse-lookup which entry owns given env var name(s) across exact keys and service aliases. |
@@ -96,7 +96,7 @@ Every subcommand below can be invoked either as `passkey entry <subcommand>` or 
 
 | Command | Flags & Arguments | Description |
 | :--- | :--- | :--- |
-| `passkey [mcp] init` | `[--tool <name>] [--config <path>] [--dry-run] [--force] [--include-all] [--backup <path>] [-y\|--yes]` | Migrate plaintext MCP server env secrets into OS keychain and wrap configs (`0o600` backup in `<data_dir>/backups/`). |
+| `passkey [mcp] init` | `[--tool <name>] [--config <path>] [--dry-run] [--force] [--include-all] [--backup <path>] [--policy allow\|session\|prompt] [-y\|--yes]` | Migrate plaintext MCP server env secrets into OS keychain and wrap configs (`0o600` backup in `<data_dir>/backups/`; defaults wrapped servers to `policy = allow` for headless IDE startup unless `--policy` is passed). |
 | `passkey [mcp] status` | `[--tool <name>] [--json]` | Report `secured`, `exposed`, `partial`, or `no_secrets` status across all detected AI tools. |
 | `passkey [mcp] doctor` | `[--deep] [--json]` | Run keychain, `PATH`, MCP config, backup, rotation age (`--deep`), and audit integrity (`--deep`) checks. |
 | `passkey [mcp] servers` | `[--tool <name>] [--json]` | List configured MCP servers across detected AI clients. |
@@ -107,7 +107,7 @@ Every subcommand below can be invoked either as `passkey entry <subcommand>` or 
 | `passkey hook check` | `[--tool claude\|cursor\|gemini]` | Evaluate a hook JSON payload from `stdin` (exits `0` if allowed, `2` if blocked). |
 | `passkey skill install` | `[--tool claude\|cursor\|gemini\|agents\|all] [--project-dir <dir>] [--json]` | Install golden-rule `SKILL.md` / `.mdc` / `AGENTS.md` instructions for AI agents. |
 | `passkey audit` | `[--limit 10] [--summary] [--verify] [--clear [-y\|--yes]] [--json]` | Inspect, summarize (30-day), clear, or HMAC-verify `<data_dir>/audit.log`. |
-| `passkey policy` | `<entry> [allow\|session\|prompt] [--json]` | View or set an entry's biometric access policy. |
+| `passkey policy` | `<entry> [allow\|session\|prompt] [--json]` *or* `--all <allow\|session\|prompt> [--exclude-mcp] [-y\|--yes] [--json]` | View or set a single entry's biometric access policy, or bulk-switch all entries (`--exclude-mcp` skips MCP server entries) across Keychain and `entries.json` in one pass. |
 | `passkey lease grant` | `<entry> [--ttl 15m] [--max-uses <N>]` | Grant an HMAC-signed temporary lease after OS biometric/passcode auth. |
 | `passkey lease list` | `[--json]` | List active leases visible to the current caller. |
 | `passkey lease revoke` | `[entry] [--all]` | Revoke a specific entry's lease(s) or `--all` active leases. |
@@ -121,7 +121,7 @@ Every subcommand below can be invoked either as `passkey entry <subcommand>` or 
 | `passkey export` | `<file> [--entries <E...>] [--no-secrets] [--encrypt]` | Export entries to `0o600` JSON or an `AES-256-GCM` + `Scrypt` encrypted bundle (`--encrypt`). |
 | `passkey import` | `<file> [--mode auto\|passkey\|csv\|chrome] [--decrypt] [--dry-run] [--filter <prefix>] [--insecure]` | Import entries from JSON, encrypted bundle (`--decrypt`), CSV, or Chrome export. |
 | `passkey share` | `[entry] [fields...] [-f\|--fields <F...>] [-o\|--output <file>] [--shared-by <name>] [--no-passphrase \| --prompt-passphrase] [--no-copy]` | Fuzzy-resolve an entry, optionally filter fields, and copy a compact AAD-authenticated `pk1:...` token (`120s` auto-clear; `60s` with `--no-passphrase`) + 8-word passphrase (or write a `PK01` `.enc` file with `-o`). |
-| `passkey upload` | `[file] [--as <name>] [--mode ask\|skip\|overwrite\|merge]` | Interactively paste a `pk1:...` token (or decrypt a `.enc` file), preview masked fields, resolve collisions, and save to the OS keychain. Refuses `pk1:` tokens in CLI `argv`. |
+| `passkey upload` | `[file] [--as <name>] [--mode ask\|skip\|overwrite\|merge]` | Interactively paste a `pk1:...` token (or decrypt a `.enc` file), preview masked fields, resolve collisions, and save to the OS keychain (net-new entries with default `allow` policy inherit `default-policy`). Refuses `pk1:` tokens in CLI `argv`. |
 | `passkey receive` | `[file] [--as <name>] [--mode ask\|skip\|overwrite\|merge]` | Alias for `passkey upload` supporting both interactive `pk1:...` token paste and `.enc` bundle files. |
 | `passkey config` | `[key] [value] [--json]` | View or update settings in `<data_dir>/settings.json`. |
 | `passkey completion` | `[--bash \| --zsh \| --fish]` | Print shell tab-completion script (or setup instructions if no flag given). |
@@ -136,6 +136,7 @@ Every subcommand below can be invoked either as `passkey entry <subcommand>` or 
 | `mcp-write-tools` | `bool` | `true` | Allow mutating MCP tools (`passkey_request_secret`, `passkey_wrap_server`). |
 | `mcp-browser-broker` | `bool` | `false` | Enable opt-in `passkey_cdp_autofill` MCP tool over loopback Chrome DevTools. |
 | `agent-session-lease-ttl` | `int` / TTL | `600` (`10m`) | Session lease duration (`1s`..`7d`, accepts durations like `5m`, `1h`, or seconds) for `policy = session`. |
+| `default-policy` | `str` | `"session"` *(macOS `LAContext`)* / `"allow"` *(headless/Linux/Windows)* | Default access policy (`allow`, `session`, or `prompt`) inherited by net-new entries created via `passkey new`, `passkey request` (without `--policy`), and `passkey upload` (when incoming policy is `"allow"`). |
 
 ---
 

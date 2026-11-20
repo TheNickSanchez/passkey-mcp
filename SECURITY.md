@@ -77,11 +77,21 @@ values**.
 values (`len >= 4`, raw UTF-8 and JSON-escaped) from child `stdout` and
 `stderr` with `<concealed by passkey>` unless `--no-masking` is passed, and
 is **never** gated by global `require-auth` so headless MCP servers with
-default `allow` policy can start. See `cli/__init__.py` (`run` branch),
+`allow` policy can start. See `cli/__init__.py` (`run` branch),
 `runner.py`, and `masking.py`. Global extra auth (`passkey config require-auth on`)
-applies to interactive CLI commands; per-entry `prompt` policy
-(`passkey policy <entry> prompt`) optionally gates specific entries behind
-out-of-band biometric/OS auth or an HMAC-signed lease (`passkey lease`).
+applies to interactive CLI commands; per-entry policies
+(`passkey policy <entry> <allow|session|prompt>` and bulk
+`passkey policy --all <mode> [--exclude-mcp]`) gate entries at secret-release
+time (`session` mints a `10m` process-tree lease bound to
+`(session_pid, start_time)`; `prompt` requires out-of-band biometric/OS auth on
+every access unless an explicit `passkey lease grant` is active). Newly created
+entries (`passkey new`, `passkey request` without `--policy`, and net-new
+`passkey upload` entries with default `"allow"` policy) inherit
+`default-policy` from `<data_dir>/settings.json` (`"session"` when macOS
+`LAContext` is available, `"allow"` on Windows or headless/Linux), while
+`passkey init` keeps wrapped background stdio MCP server entries on `"allow"`
+by default (unless `--policy` is explicitly passed) so IDE startup never spawns
+concurrent prompts.
 
 Windows extra-auth is a documented no-op (`auth.py`
 `_authenticate_windows` returns True). Protection is Credential Manager

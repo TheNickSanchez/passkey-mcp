@@ -505,13 +505,17 @@ class TestBarePasskeyFTUEAndInitPreview:
             global_paths={sys.platform: cfg},
         )
 
-        mock_q = MagicMock()
-        mock_q.ask.return_value = "init"
+        select_answers = iter(["session", "init"])
+
+        def _fake_select(*args, **kwargs):
+            m = MagicMock()
+            m.ask.side_effect = lambda: next(select_answers)
+            return m
 
         with (
             patch.dict(ADAPTERS, {"claude": fake_claude}, clear=True),
             patch("passkey.interactive.is_interactive", return_value=True),
-            patch("questionary.select", return_value=mock_q) as select_spy,
+            patch("questionary.select", side_effect=_fake_select) as select_spy,
             patch("builtins.input", return_value="y"),
             patch.object(sys, "argv", ["passkey"]),
         ):
@@ -522,33 +526,77 @@ class TestBarePasskeyFTUEAndInitPreview:
         assert "Claude Code" in out
         assert "github" in out
         assert "GITHUB_TOKEN" in out
-        # Prompted with clean arrow-key menu label (no [Y/n] suffix)
-        assert select_spy.call_args[0][0] == "How would you like to get started?"
-        assert "[Y/n]" not in select_spy.call_args[0][0]
-        # Secret migrated to keychain and masked in preview
+        # 1st prompt: 3-option default-policy onboarding; 2nd prompt: State A action menu
+        assert select_spy.call_count == 2
+        pol_choices = [c.title for c in select_spy.call_args_list[0].kwargs["choices"]]
+        assert pol_choices == [
+            "Touch ID once per 10m agent session (Recommended — like 1Password)",
+            "Auto-approve / YOLO (zero prompts — fastest for local dev & background MCP)",
+            "Strict Touch ID on every single command (maximum lock-down)",
+        ]
+        assert select_spy.call_args_list[1].args[0] == "How would you like to get started?"
+        assert "[Y/n]" not in select_spy.call_args_list[1].args[0]
+        # Background MCP server stays on policy='allow' despite default_policy='session', with tip printed
         migrated = get_entry("github")
         assert migrated is not None
         assert migrated.fields == {"GITHUB_TOKEN": "ghp_exposed_token_1234567890"}
+        assert migrated.policy == "allow"
+        assert "passkey policy jamf session" in out
         assert "ghp_exposed_token_1234567890" not in out
 
     def test_ftue_state_b_clean_machine_offers_new_or_examples(self, capsys):
+        from passkey.settings import get_default_policy, has_explicit_default_policy
+
         assert list_entries() == []
-        mock_q = MagicMock()
-        mock_q.ask.return_value = "examples"
+        assert has_explicit_default_policy() is False
+        select_answers = iter(["session", "examples"])
+
+        def _fake_select(*args, **kwargs):
+            m = MagicMock()
+            m.ask.side_effect = lambda: next(select_answers)
+            return m
 
         with (
             patch.dict(ADAPTERS, {}, clear=True),
             patch("passkey.interactive.is_interactive", return_value=True),
-            patch("questionary.select", return_value=mock_q) as select_spy,
+            patch("questionary.select", side_effect=_fake_select) as select_spy,
             patch.object(sys, "argv", ["passkey"]),
         ):
             main()
 
         out = capsys.readouterr().out
-        choice_titles = [c.title for c in select_spy.call_args.kwargs["choices"]]
+        assert has_explicit_default_policy() is True
+        assert get_default_policy() == "session"
+        assert select_spy.call_count == 2
+        choice_titles = [c.title for c in select_spy.call_args_list[1].kwargs["choices"]]
         assert any("Create your first secret" in t for t in choice_titles)
         assert any("Show quickstart examples" in t for t in choice_titles)
         assert "Quickstart Examples:" in out
+
+        # Second bare 'passkey' run must NEVER ask default_policy twice — and 'new' inherits 'session'!
+        second_select = MagicMock()
+        second_select.ask.return_value = "new"
+        text_answers = iter(["jamf", "JAMF_CLIENT_SECRET=sec_12345678", ""])
+
+        def _fake_text(*args, **kwargs):
+            m = MagicMock()
+            m.ask.side_effect = lambda: next(text_answers)
+            return m
+
+        with (
+            patch.dict(ADAPTERS, {}, clear=True),
+            patch("passkey.interactive.is_interactive", return_value=True),
+            patch("questionary.select", return_value=second_select) as second_spy,
+            patch("questionary.text", side_effect=_fake_text),
+            patch.object(sys, "argv", ["passkey"]),
+        ):
+            main()
+
+        second_spy.assert_called_once()
+        assert second_spy.call_args.args[0] == "What would you like to do?"
+        jamf_entry = get_entry("jamf")
+        assert jamf_entry is not None
+        assert jamf_entry.policy == "session"
 
     def test_ftue_state_c_existing_entries_jumps_to_fuzzy_browser(self):
         entry = Entry(name="stripe", fields={"STRIPE_SECRET_KEY": "sk_test_123"})
@@ -653,3 +701,53 @@ class TestBarePasskeyFTUEAndInitPreview:
         assert "0o600" in out
         # 4. Exact passkey unwrap rollback command
         assert f"passkey unwrap --tool claude --config {cfg}" in out
+
+    def test_init_policy_flag_and_cli_help_strings(self, tmp_path, capsys):
+        parser = create_parser()
+        sub_action = next(
+            a for a in parser._actions if hasattr(a, "choices") and isinstance(a.choices, dict)
+        )
+        init_help = sub_action.choices["init"].format_help()
+        policy_help = sub_action.choices["policy"].format_help()
+        assert "--policy" in init_help
+        assert "headless IDE startup" in init_help
+        assert "--all" in policy_help
+        assert "--exclude-mcp" in policy_help
+        assert "--yes" in policy_help
+
+        cfg = tmp_path / "cursor_mcp.json"
+        cfg.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "jamf": {
+                            "command": "npx",
+                            "args": ["-y", "@corp/jamf-mcp"],
+                            "env": {"JAMF_CLIENT_SECRET": "jamf_secret_value_12345"},
+                        }
+                    }
+                }
+            )
+        )
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "passkey",
+                "init",
+                "--tool",
+                "cursor",
+                "--config",
+                str(cfg),
+                "--policy",
+                "session",
+                "--yes",
+            ],
+        ):
+            main()
+
+        out = capsys.readouterr().out
+        jamf = get_entry("jamf")
+        assert jamf is not None
+        assert jamf.policy == "session"
+        assert "passkey policy jamf session" not in out

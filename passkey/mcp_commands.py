@@ -11,7 +11,14 @@ from pathlib import Path
 
 from .audit import log_operation
 from .interactive import format_secret_preview, parse_field_shorthand, prompt_secret
-from .keychain import PasskeyError, get_all_entry_metas, get_entry, list_entries, save_entry
+from .keychain import (
+    PasskeyError,
+    _get_entry,
+    get_all_entry_metas,
+    get_entry,
+    list_entries,
+    save_entry,
+)
 from .mcp_config import (
     ADAPTERS,
     MCPConfigError,
@@ -30,7 +37,7 @@ from .mcp_config import (
     save_config,
     set_mcp_servers,
 )
-from .models import Entry
+from .models import VALID_POLICIES, Entry
 
 
 def detect_exposed_mcp_servers() -> list[dict]:
@@ -152,14 +159,25 @@ def cmd_init(
     include_all: bool = False,
     backup_path: str | None = None,
     *,
+    policy: str | None = None,
     yes: bool = False,
 ) -> None:
     """Migrate MCP config secrets to system keychain.
 
     Scans the selected tool's MCP config for plaintext secrets,
     stores them in the keychain, and rewrites the config to use
-    the passkey wrapper.
+    the passkey wrapper. Defaults wrapped MCP server entries to
+    ``policy='allow'`` so background IDE startup stays prompt-free.
     """
+    explicit_policy: str | None = None
+    if policy is not None:
+        explicit_policy = policy.strip().lower()
+        if explicit_policy not in VALID_POLICIES:
+            raise PasskeyError(
+                f"Invalid policy '{policy}'. Expected one of: {', '.join(sorted(VALID_POLICIES))}",
+                error_code="INVALID_USAGE",
+            )
+    effective_policy = explicit_policy or "allow"
     if config_path and not tool:
         from .mcp_config import find_adapter_for_path
 
@@ -301,10 +319,25 @@ def cmd_init(
             continue
 
         try:
-            entry = Entry(name=name, fields=secrets, source=f"{adapter.name}-init")
-            save_entry(entry, is_update=(name in existing_entries))
+            is_existing = name in existing_entries
+            existing_ent = _get_entry(name, log_read=False) if is_existing else None
+            entry_policy = (
+                explicit_policy
+                if explicit_policy is not None
+                else (existing_ent.policy if existing_ent else effective_policy)
+            )
+            entry = Entry(
+                name=name,
+                fields=secrets,
+                config=existing_ent.config.copy() if existing_ent else {},
+                created=existing_ent.created if existing_ent else None,
+                source=f"{adapter.name}-init",
+                last_rotated=existing_ent.last_rotated if existing_ent else None,
+                policy=entry_policy,
+            )
+            save_entry(entry, is_update=is_existing)
 
-            if name in existing_entries:
+            if is_existing:
                 print(f"  {name}: updated ({len(secrets)} secrets)")
                 updated += 1
             else:
@@ -327,6 +360,11 @@ def cmd_init(
 
     print()
     print(f"Done! {created} created, {updated} updated, {skipped} skipped")
+    if explicit_policy is None and (created + updated) > 0:
+        print(
+            "  Tip: Wrapped MCP servers default to policy 'allow' for headless IDE startup; "
+            "gate high-privilege servers with: passkey policy jamf session"
+        )
     print()
     print("SECURITY NOTE: The backup file contains your pre-migration config.")
     print(f"  Once verified, you can delete it: rm '{actual_backup}'")

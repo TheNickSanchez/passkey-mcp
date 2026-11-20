@@ -124,13 +124,21 @@ The agent receives only `{"ok": true, "status": "updated", "fields_saved": ["RES
 
 ### 3. Biometric Touch ID Session Leases (`policy = session`)
 
-Balance hardware biometric security with uninterrupted multi-turn agent loops using three per-entry policies (`passkey policy <entry> <mode>`):
+First-run onboarding (`passkey`) lets you choose your global `default-policy` (`passkey config default-policy <mode>`), and you can switch individual entries or your entire keychain (`passkey policy --all <mode> [--exclude-mcp]`) anytime:
 
 | Policy | Biometric Behavior | Ideal Use Case |
 | :--- | :--- | :--- |
-| **`allow`** *(default)* | Headless OS Keychain access (no extra prompt) | Background MCP servers & everyday dev keys |
-| **`session`** | **1 Touch ID tap** unlocks the calling agent session (`10m` default TTL, bound to `(ancestor_pid, start_time)`) | Staging/cloud APIs used across 20-turn coding loops |
-| **`prompt`** | **Touch ID on every single invocation** unless an explicit `passkey lease grant` is active | Production databases, billing, & root credentials |
+| **`session`** *(macOS Touch ID default)* | **1 Touch ID tap** unlocks the calling agent session (`10m` default TTL, bound to `(ancestor_pid, start_time)`) | CLI/agent APIs (`stripe`, `aws`, `jamf`, `gh`) across 20-turn coding loops |
+| **`allow`** *(YOLO / Headless — MCP & Windows/Linux default)* | Headless OS Keychain access (0 extra prompts; still scrubbed by `SecretMasker` & guarded by `.env.passkey` trust) | Background IDE-boot MCP servers (`passkey init`) & fastest local dev |
+| **`prompt`** *(Strict Step-Up)* | **Touch ID on every single invocation** unless an explicit `passkey lease grant` is active | Production databases, billing, & root credentials |
+
+```bash
+# Switch all CLI/agent entries to 1-tap Session Touch ID while keeping background MCP servers headless
+passkey policy --all session --exclude-mcp --yes
+
+# Or switch everything to zero-prompt YOLO mode (and back anytime)
+passkey policy --all allow --yes
+```
 
 ### 4. Zero-Config Repo Execution (`passkey project init` + `passkey exec`)
 
@@ -183,7 +191,7 @@ passkey upload
 * **OS Keychain at Rest:** Credentials, config values, authoritative per-entry policies, and all three internal 256-bit HMAC keys (`__audit_hmac_key__`, `__lease_hmac_key__`, `__trust_hmac_key__`) live in your OS Keychain—`<data_dir>` (`0o700`) stores `0o600` secret-free metadata (`entries.json` v2) so discovery, `<TAB>` completion, and `--dry-run` preflight trigger zero Keychain prompts.
 * **Authenticated Portability (`pk1:` & `PK01`):** `passkey share` / `passkey upload` exchange compact URL-safe `pk1:...` tokens authenticated with `AES-256-GCM` (`"pk1:" + header` AAD) + `Scrypt` (`N=2^20, r=8, p=1`), while `passkey export --encrypt` and `passkey share -o` write `O_EXCL`, `0o600` `PK01` bundles.
 * **Tamper-Evident Audit Chain:** Every operation records `actor` attribution (`human` vs. `agent` client) in an HMAC-SHA256 hash chain (`passkey audit --verify`).
-* **Pre-Execution Agent Guardrails:** `passkey hook check` blocks agent file/shell reads of `.env`, `*.backup`, `*.enc`, `passkey get`, `passkey share`/`upload`/`receive`, and plaintext `passkey export` (exit code `2`).
+* **Pre-Execution Agent Guardrails:** `passkey hook check` blocks agent file/shell reads of `.env`, `*.backup`, `*.enc`, `passkey get`, `passkey share`/`upload`/`receive`, policy mutations (`passkey policy <entry> <mode>`, `passkey policy --all`, `passkey config default-policy <mode>`), and plaintext `passkey export` (exit code `2`).
 * **Loopback-Only Browser Broker:** `passkey browser-fill` verifies exact `(scheme, host, port)` `ORIGIN` match over direct loopback CDP WebSockets (`127.0.0.1`) before injecting login fields outside LLM context.
 * **Honest Boundaries:** Same-UID processes on an unlocked machine share user-level OS privileges (and on macOS `pipx`/venv installs, Keychain ACLs bind to the underlying `python3` binary). See [SECURITY.md](SECURITY.md) for the full threat model and vulnerability reporting policy.
 
@@ -245,6 +253,8 @@ passkey project init                       # Generate committable .env.passkey f
 passkey exec -q -- <command>               # Auto-inject repo manifest secrets with output masking
 passkey run -q <entry> -- <command>        # Inject explicit entry secrets into any command
 passkey policy <entry> session             # Require 1 Touch ID tap per 10m agent session
+passkey policy --all session --exclude-mcp # Enable Session Touch ID while keeping MCP servers headless
+passkey config default-policy session      # Set default policy for new/requested/uploaded entries
 passkey share <entry>                      # Copy encrypted pk1: share token + 8-word passphrase
 passkey upload                             # Decrypt a pasted pk1: token into OS Keychain
 passkey init                               # Migrate plaintext MCP server tokens to OS Keychain

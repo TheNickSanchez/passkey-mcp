@@ -524,6 +524,56 @@ def _print_quickstart_examples() -> None:
     print()
 
 
+def _prompt_onboarding_default_policy() -> bool:
+    """Prompt once for default_policy if settings.json has not recorded an explicit choice.
+
+    Returns True to continue onboarding, or False if cancelled by the user.
+    """
+    from ..interactive import PASSKEY_STYLE
+    from ..settings import (
+        _platform_default_policy,
+        has_explicit_default_policy,
+        set_setting,
+    )
+
+    if has_explicit_default_policy():
+        return True
+
+    import questionary
+
+    chosen = questionary.select(
+        "How should AI agents be authorized to use your credentials?",
+        choices=[
+            questionary.Choice(
+                "Touch ID once per 10m agent session (Recommended — like 1Password)",
+                value="session",
+            ),
+            questionary.Choice(
+                "Auto-approve / YOLO (zero prompts — fastest for local dev & background MCP)",
+                value="allow",
+            ),
+            questionary.Choice(
+                "Strict Touch ID on every single command (maximum lock-down)",
+                value="prompt",
+            ),
+        ],
+        default=_platform_default_policy(),
+        style=PASSKEY_STYLE,
+        use_jk_keys=False,
+    ).ask()
+
+    if chosen is None:
+        return False
+
+    set_setting("default_policy", chosen)
+    print(
+        f"  Default policy saved: '{chosen}' "
+        "(change anytime with 'passkey config default-policy <mode>')"
+    )
+    print()
+    return True
+
+
 def handle_onboarding_or_help(parser) -> None:
     """Context-aware bare ``passkey`` router across States A, B, and C."""
     from ..interactive import (
@@ -586,6 +636,10 @@ def handle_onboarding_or_help(parser) -> None:
             print(f"    • {item['display_name']} ({item['config_path']}): {item['server']} [{keys}]")
         print()
 
+        if not _prompt_onboarding_default_policy():
+            print("\n  Run 'passkey init' or 'passkey new' whenever you're ready.\n")
+            return
+
         action = questionary.select(
             "How would you like to get started?",
             choices=[
@@ -622,6 +676,10 @@ def handle_onboarding_or_help(parser) -> None:
     print("  Store API keys and tokens in your OS keychain and inject them")
     print("  into CLIs and MCP servers on demand.")
     print()
+
+    if not _prompt_onboarding_default_policy():
+        print("\n  Run 'passkey new' when you're ready.\n")
+        return
 
     action = questionary.select(
         "What would you like to do?",

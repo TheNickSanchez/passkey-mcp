@@ -73,7 +73,7 @@ _passkey_completions() {
             ;;
         policy)
             entries=$(passkey list --names-only 2>/dev/null)
-            COMPREPLY=( $(compgen -W "$entries allow session prompt --json --no-input" -- "$cur") )
+            COMPREPLY=( $(compgen -W "$entries allow session prompt --all --exclude-mcp --yes --json --no-input" -- "$cur") )
             return 0
             ;;
         find)
@@ -158,11 +158,11 @@ _passkey_completions() {
             return 0
             ;;
         init)
-            COMPREPLY=( $(compgen -W "claude gemini vscode cursor opencode windsurf cline zed --dry-run --yes --force --tool --no-input" -- "$cur") )
+            COMPREPLY=( $(compgen -W "claude gemini vscode cursor opencode windsurf cline zed --dry-run --yes --force --policy --tool --no-input" -- "$cur") )
             return 0
             ;;
         config)
-            COMPREPLY=( $(compgen -W "require-auth mcp-write-tools mcp-browser-broker agent-session-lease-ttl --json" -- "$cur") )
+            COMPREPLY=( $(compgen -W "require-auth mcp-write-tools mcp-browser-broker agent-session-lease-ttl default-policy --json" -- "$cur") )
             return 0
             ;;
         completion)
@@ -214,7 +214,7 @@ _passkey() {
                 _describe 'option' opts
                 ;;
             policy)
-                local opts=(allow session prompt --json --no-input)
+                local opts=(allow session prompt --all --exclude-mcp --yes --json --no-input)
                 entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
                 _describe 'entry' entries
                 _describe 'option' opts
@@ -238,7 +238,7 @@ _passkey() {
                 _describe 'option' opts
                 ;;
             config)
-                local opts=(require-auth mcp-write-tools mcp-browser-broker agent-session-lease-ttl --json)
+                local opts=(require-auth mcp-write-tools mcp-browser-broker agent-session-lease-ttl default-policy --json)
                 _describe 'option' opts
                 ;;
             list|status|servers|doctor)
@@ -295,7 +295,7 @@ _passkey() {
                 _files
                 ;;
             init)
-                local tools=(claude gemini vscode cursor opencode windsurf cline zed --dry-run --yes --no-input)
+                local tools=(claude gemini vscode cursor opencode windsurf cline zed --dry-run --yes --policy --no-input)
                 _describe 'tool' tools
                 ;;
             completion)
@@ -381,7 +381,9 @@ complete -c passkey -n '__fish_seen_subcommand_from share' -l no-copy -d 'Print 
 complete -c passkey -n '__fish_seen_subcommand_from upload receive' -l as -d 'Save imported entry under custom name'
 complete -c passkey -n '__fish_seen_subcommand_from upload receive' -l mode -a 'ask skip overwrite merge' -d 'Collision resolution mode'
 complete -c passkey -n '__fish_seen_subcommand_from policy' -a 'allow session prompt' -d 'Policy'
-complete -c passkey -n '__fish_seen_subcommand_from config' -a 'require-auth mcp-write-tools mcp-browser-broker agent-session-lease-ttl' -d 'Setting'
+complete -c passkey -n '__fish_seen_subcommand_from policy' -l all -d 'Apply policy across all entries'
+complete -c passkey -n '__fish_seen_subcommand_from policy' -l exclude-mcp -d 'Skip MCP server entries with --all'
+complete -c passkey -n '__fish_seen_subcommand_from config' -a 'require-auth mcp-write-tools mcp-browser-broker agent-session-lease-ttl default-policy' -d 'Setting'
 complete -c passkey -n '__fish_seen_subcommand_from project' -a 'init status trust' -d 'Project subcommand'
 complete -c passkey -n '__fish_seen_subcommand_from clone' -a '(__passkey_entries)' -d 'Source entry'
 complete -c passkey -n '__fish_seen_subcommand_from run mount' -a '(__passkey_entries)' -d 'Entry'
@@ -392,7 +394,8 @@ complete -c passkey -n '__fish_seen_subcommand_from find project' -l from-file -
 complete -c passkey -n '__fish_seen_subcommand_from request' -l reason -d 'Error or expiry reason for rotation prompt'
 complete -c passkey -n '__fish_seen_subcommand_from run exec init unwrap import' -l dry-run -d 'Validate or preview without side effects'
 complete -c passkey -n '__fish_seen_subcommand_from run' -l strict -d 'Fail if any requested entry is missing'
-complete -c passkey -n '__fish_seen_subcommand_from delete init audit' -s y -l yes -d 'Skip interactive confirmation'
+complete -c passkey -n '__fish_seen_subcommand_from delete init audit policy' -s y -l yes -d 'Skip interactive confirmation'
+complete -c passkey -n '__fish_seen_subcommand_from init request' -l policy -a 'allow session prompt' -d 'Access policy'
 complete -c passkey -n '__fish_seen_subcommand_from rotate' -l touch-only -d 'Update last_rotated without prompting'
 complete -c passkey -n '__fish_seen_subcommand_from mount' -l timeout -d 'Max seconds to wait for FIFO reader'
 complete -c passkey -n '__fish_seen_subcommand_from inject mount' -l force-git-exposed -d 'Allow non-gitignored path'

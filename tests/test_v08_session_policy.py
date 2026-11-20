@@ -203,3 +203,230 @@ class TestSessionScopedTouchIdPolicy:
         lease = peek_lease("vercel_sess")
         assert lease is not None
         assert lease["ttl_seconds"] == 300
+
+
+class TestDefaultPolicyAndBulkModes:
+    """Tests for v0.10 default-policy inheritance and passkey policy --all [--exclude-mcp]."""
+
+    def test_default_policy_inherited_by_new_request_and_net_new_upload(
+        self, monkeypatch, capsys
+    ):
+        from unittest.mock import MagicMock
+
+        from passkey.commands import cmd_new
+        from passkey.request_secret import request_secret
+        from passkey.settings import set_setting
+        from passkey.sharing import cmd_upload, encode_share_token
+
+        set_setting("default_policy", "session")
+
+        # 1. passkey new inherits default_policy='session'
+        text_answers = iter(["API_KEY=sk_live_new_inherit_123", ""])
+
+        def _fake_text(*args, **kwargs):
+            m = MagicMock()
+            m.ask.side_effect = lambda: next(text_answers)
+            return m
+
+        with (
+            patch("passkey.interactive.is_interactive", return_value=True),
+            patch("questionary.text", side_effect=_fake_text),
+        ):
+            cmd_new(name="stripe_new")
+
+        created_new = _get_entry("stripe_new", log_read=False)
+        assert created_new is not None
+        assert created_new.policy == "session"
+
+        # 2. passkey request (when --policy is omitted) inherits default_policy on net-new entry,
+        #    while preserving existing entry's policy when updating!
+        monkeypatch.setattr("passkey.request_secret.sys.platform", "darwin")
+        mock_proc = MagicMock(returncode=0, stdout="req_secret_val_999\n", stderr="")
+        with patch("passkey.request_secret.subprocess.run", return_value=mock_proc):
+            res_req = request_secret("aws_req", ["AWS_SECRET_ACCESS_KEY"], cooldown_seconds=0.0)
+        assert res_req["policy"] == "session"
+        assert _get_entry("aws_req", log_read=False).policy == "session"
+
+        save_entry(Entry(name="existing_allow", fields={"K1": "v1"}, policy="allow"))
+        with patch("passkey.request_secret.subprocess.run", return_value=mock_proc):
+            res_upd = request_secret("existing_allow", ["K2"], cooldown_seconds=0.0)
+        assert res_upd["policy"] == "allow"
+        assert _get_entry("existing_allow", log_read=False).policy == "allow"
+
+        # 3. passkey upload: net-new entry with default 'allow' inherits default_policy ('session'),
+        #    whereas sender's stricter 'prompt' policy is preserved!
+        tok_allow = encode_share_token(
+            Entry(name="shared_default", fields={"TOKEN": "tok_allow_123"}, policy="allow"),
+            passphrase=None,
+        )
+        with patch("passkey.interactive.prompt_secret", return_value=tok_allow):
+            cmd_upload()
+        uploaded_default = _get_entry("shared_default", log_read=False)
+        assert uploaded_default is not None
+        assert uploaded_default.policy == "session"
+
+        tok_prompt = encode_share_token(
+            Entry(name="shared_strict", fields={"TOKEN": "tok_strict_123"}, policy="prompt"),
+            passphrase=None,
+        )
+        with patch("passkey.interactive.prompt_secret", return_value=tok_prompt):
+            cmd_upload()
+        uploaded_strict = _get_entry("shared_strict", log_read=False)
+        assert uploaded_strict is not None
+        assert uploaded_strict.policy == "prompt"
+        capsys.readouterr()
+
+    def test_bulk_policy_all_and_exclude_mcp_preserves_metadata(self, tmp_path, capsys):
+        from passkey.keychain import get_entry_meta
+        from passkey.mcp_config import ADAPTERS, ToolAdapter
+
+        # Create CLI/agent entries + MCP entries (import-mcp, cursor-init, and actively wrapped)
+        save_entry(
+            Entry(
+                name="jamf",
+                fields={"JAMF_SECRET": "j_123"},
+                config={"JAMF_URL": "https://corp.jamfcloud.com"},
+                created="2026-01-10T00:00:00",
+                last_rotated="2026-02-10T00:00:00",
+                source="manual",
+                policy="allow",
+            )
+        )
+        save_entry(Entry(name="aws", fields={"AWS_KEY": "a_123"}, source="manual", policy="allow"))
+        save_entry(
+            Entry(name="gh_mcp", fields={"GH_TOKEN": "g_123"}, source="import-mcp", policy="allow")
+        )
+        save_entry(
+            Entry(
+                name="linear_mcp",
+                fields={"LINEAR_KEY": "l_123"},
+                source="cursor-init",
+                policy="allow",
+            )
+        )
+        save_entry(
+            Entry(
+                name="wrapped_manual",
+                fields={"SLACK_TOKEN": "s_123"},
+                source="manual",
+                policy="allow",
+            )
+        )
+
+        mcp_cfg = tmp_path / "claude.json"
+        mcp_cfg.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "slack": {
+                            "command": "passkey",
+                            "args": ["run", "--quiet", "wrapped_manual", "--", "slack-mcp"],
+                        }
+                    }
+                }
+            )
+        )
+        fake_adapter = ToolAdapter(
+            name="claude",
+            display_name="Claude Code",
+            root_key="mcpServers",
+            global_paths={sys.platform: mcp_cfg},
+        )
+
+        with (
+            patch.dict(ADAPTERS, {"claude": fake_adapter}, clear=True),
+            patch.object(
+                sys,
+                "argv",
+                ["passkey", "policy", "--all", "session", "--exclude-mcp", "--yes", "--json"],
+            ),
+        ):
+            main()
+
+        res = json.loads(capsys.readouterr().out)
+        assert res == {
+            "ok": True,
+            "policy": "session",
+            "updated_count": 2,
+            "unchanged_count": 0,
+            "excluded_mcp_count": 3,
+            "updated": ["aws", "jamf"],
+            "unchanged": [],
+            "excluded_mcp": ["gh_mcp", "linear_mcp", "wrapped_manual"],
+        }
+
+        # Verify both Keychain Entry (with whole-Entry metadata preserved!) and entries.json v2 index
+        jamf_after = _get_entry("jamf", log_read=False)
+        assert jamf_after is not None
+        assert jamf_after.policy == "session"
+        assert jamf_after.config == {"JAMF_URL": "https://corp.jamfcloud.com"}
+        assert jamf_after.created == "2026-01-10T00:00:00"
+        assert jamf_after.last_rotated == "2026-02-10T00:00:00"
+        assert get_entry_meta("jamf").policy == "session"
+        assert get_entry_meta("aws").policy == "session"
+
+        # MCP entries remained headless 'allow'
+        for mcp_name in ("gh_mcp", "linear_mcp", "wrapped_manual"):
+            assert _get_entry(mcp_name, log_read=False).policy == "allow"
+            assert get_entry_meta(mcp_name).policy == "allow"
+
+        # Switch ALL entries to YOLO 'allow' in one pass
+        with (
+            patch.dict(ADAPTERS, {"claude": fake_adapter}, clear=True),
+            patch.object(sys, "argv", ["passkey", "policy", "--all", "allow", "-y", "--json"]),
+        ):
+            main()
+
+        res_yolo = json.loads(capsys.readouterr().out)
+        assert res_yolo["updated"] == ["aws", "jamf"]
+        assert res_yolo["unchanged"] == ["gh_mcp", "linear_mcp", "wrapped_manual"]
+        assert get_entry_meta("jamf").policy == "allow"
+
+        # Non-interactive without --yes fails fast with exit code 2
+        with (
+            patch.object(sys, "argv", ["passkey", "--no-input", "policy", "--all", "session"]),
+            pytest.raises(SystemExit) as exc_ni,
+        ):
+            main()
+        assert exc_ni.value.code == 2
+        capsys.readouterr()
+
+        # Invalid flag combinations fail cleanly with exit code 1
+        for bad_argv in (
+            ["passkey", "policy", "jamf", "session", "--exclude-mcp"],
+            ["passkey", "policy", "--all", "jamf", "session", "--yes"],
+            ["passkey", "policy", "--all"],
+        ):
+            with patch.object(sys, "argv", bad_argv), pytest.raises(SystemExit) as exc_bad:
+                main()
+            assert exc_bad.value.code == 1
+            capsys.readouterr()
+
+    def test_bulk_policy_exclude_mcp_empty_targets_skips_prompt(self, capsys):
+        from passkey.commands import cmd_policy_all
+
+        save_entry(
+            Entry(name="only_mcp", fields={"GH_TOKEN": "g_123"}, source="import-mcp", policy="allow")
+        )
+
+        # Must NOT call input() when --exclude-mcp filters out all entries (even with yes=False)
+        with patch("builtins.input") as mock_input:
+            cmd_policy_all("session", exclude_mcp=True, yes=False, json_output=False)
+        mock_input.assert_not_called()
+        human_out = capsys.readouterr().out
+        assert "No matching non-MCP entries to update (1 MCP entry(s) excluded)." in human_out
+
+        with patch("builtins.input") as mock_input_json:
+            cmd_policy_all("session", exclude_mcp=True, yes=False, json_output=True)
+        mock_input_json.assert_not_called()
+        json_out = json.loads(capsys.readouterr().out)
+        assert json_out == {
+            "ok": True,
+            "policy": "session",
+            "updated_count": 0,
+            "unchanged_count": 0,
+            "excluded_mcp_count": 1,
+            "updated": [],
+            "unchanged": [],
+            "excluded_mcp": ["only_mcp"],
+        }

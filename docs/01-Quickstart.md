@@ -56,6 +56,14 @@ Running bare `passkey` in an interactive terminal adapts automatically to your m
 passkey
 ```
 
+On your very first run (before `<data_dir>/settings.json` records a `default-policy` choice), `passkey` asks once how you want AI agents authorized to use your credentials:
+
+1. **`Touch ID once per 10m agent session (Recommended — like 1Password)`** → `default-policy = session` *(macOS Touch ID default)*
+2. **`Auto-approve / YOLO (zero prompts — fastest for local dev & background MCP)`** → `default-policy = allow` *(Windows / headless Linux default)*
+3. **`Strict Touch ID on every single command (maximum lock-down)`** → `default-policy = prompt`
+
+Your choice is saved atomically to `settings.json` so onboarding never asks twice (change anytime via `passkey config default-policy <session|allow|prompt>`).
+
 | Machine State | What Bare `passkey` Does |
 | :--- | :--- |
 | **0 entries + plaintext MCP secrets detected** | Lists every exposed server (`Claude`, `Cursor`, `VS Code`, `Gemini`, etc.) and offers 1-step migration (`passkey init`). |
@@ -83,7 +91,8 @@ passkey init --tool cursor --yes
 
 1. **Extracts secrets** (keys matching `TOKEN`, `SECRET`, `API_KEY`, `PASSWORD`, `AUTH`, embedded `://user:pass@` URIs, or known token prefixes like `sk-`, `ghp_`, `xoxb-`, `AKIA`) into your OS keychain, while leaving non-secret variables (`NODE_ENV`, `PYTHONPATH`, `PROJECT_ID`) inline.
 2. **Saves a `0o600` timestamped backup** of the original config in `<data_dir>/backups/`—never cluttering your git workspace with `.backup` files.
-3. **Rewrites the server launch command** to inject credentials at runtime:
+3. **Keeps background stdio MCP servers boot-safe (`policy = allow`)** by default so launching Cursor, Claude Desktop, or VS Code never triggers concurrent Touch ID prompts across 6 servers at once—while printing a one-line tip showing how to gate high-privilege MCP servers (e.g., `passkey policy jamf session`) or pass `--policy session` explicitly.
+4. **Rewrites the server launch command** to inject credentials at runtime:
 
 ```json
 {
