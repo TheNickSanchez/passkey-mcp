@@ -136,13 +136,22 @@ class TestDocsWikiIntegrity:
             )
 
     def test_no_cli_argv_secret_antipattern_in_docs(self):
-        """Enforce Landmine #2: never document passing KEY=VALUE on passkey CLI argv."""
+        """Enforce Landmine #2: never document passing KEY=VALUE or pk1: tokens on passkey CLI argv."""
         bad_argv_re = re.compile(
             r"^\s*passkey\s+(?:new|edit|set-field|add)\s+\S+\s+[A-Z0-9_]+=\S+",
             re.MULTILINE,
         )
-        for filename in EXPECTED_WIKI_PAGES:
-            text = (DOCS_DIR / filename).read_text(encoding="utf-8")
+        bad_pk1_argv_re = re.compile(
+            r"^\s*passkey\s+(?:upload|receive)\s+['\"]?pk1:",
+            re.MULTILINE,
+        )
+        doc_targets = [REPO_ROOT / "README.md", *(DOCS_DIR / p for p in EXPECTED_WIKI_PAGES)]
+        for doc_path in doc_targets:
+            text = doc_path.read_text(encoding="utf-8")
+            rel = doc_path.relative_to(REPO_ROOT)
             assert not bad_argv_re.search(text), (
-                f"Found forbidden CLI argv KEY=VALUE example in docs/{filename}"
+                f"Found forbidden CLI argv KEY=VALUE example in {rel}"
+            )
+            assert not bad_pk1_argv_re.search(text), (
+                f"Found forbidden CLI argv pk1: token example in {rel}"
             )

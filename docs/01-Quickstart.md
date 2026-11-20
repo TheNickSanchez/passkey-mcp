@@ -26,7 +26,7 @@ Verify the CLI and MCP server binaries are on your `PATH`:
 
 ```bash
 passkey --version
-# passkey 0.8.x
+# passkey 0.9.x
 
 passkey doctor
 ```

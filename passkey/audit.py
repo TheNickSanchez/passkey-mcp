@@ -74,6 +74,7 @@ _SAFE_DETAIL_KEYS = frozenset(
         "resolved_references",
         "scope",
         "session_pid",
+        "shared",
         "skipped",
         "source",
         "trust_status",

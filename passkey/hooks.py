@@ -120,6 +120,18 @@ def _check_shell_command(command: str) -> tuple[bool, str]:
                         "at runtime with 'passkey run -q <entry> -- <command>'.",
                     )
 
+                # Block `passkey share`, `passkey upload`, `passkey receive` (interactive peer sharing)
+                if sub0 in ("share", "upload", "receive") or (
+                    sub0 == "entry" and sub1 in ("share", "upload", "receive")
+                ):
+                    cmd_label = sub1 if sub0 == "entry" else sub0
+                    return (
+                        False,
+                        f"Blocked by passkey hook: 'passkey {cmd_label}' is an interactive peer-sharing "
+                        "command and is disallowed for AI agents. Ask the user to run "
+                        f"'passkey {cmd_label}' directly in their terminal.",
+                    )
+
                 # Block `passkey generate --no-copy` (prints raw generated secret into agent stdout)
                 if (sub0 == "generate" or (sub0 == "entry" and sub1 == "generate")) and (
                     "--no-copy" in effective

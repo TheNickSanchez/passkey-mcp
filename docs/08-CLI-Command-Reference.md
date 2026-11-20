@@ -4,7 +4,7 @@
 
 # CLI Command Reference
 
-Complete reference for every `passkey` command, subcommand group, flag, setting, environment variable, and exit code in `v0.8.x`.
+Complete reference for every `passkey` command, subcommand group, flag, setting, environment variable, and exit code in `v0.9.x`.
 
 ---
 
@@ -120,8 +120,9 @@ Every subcommand below can be invoked either as `passkey entry <subcommand>` or 
 | :--- | :--- | :--- |
 | `passkey export` | `<file> [--entries <E...>] [--no-secrets] [--encrypt]` | Export entries to `0o600` JSON or an `AES-256-GCM` + `Scrypt` encrypted bundle (`--encrypt`). |
 | `passkey import` | `<file> [--mode auto\|passkey\|csv\|chrome] [--decrypt] [--dry-run] [--filter <prefix>] [--insecure]` | Import entries from JSON, encrypted bundle (`--decrypt`), CSV, or Chrome export. |
-| `passkey share` | `<entry> [-o\|--output <file>] [--shared-by <name>]` | Encrypt a single entry for a teammate with an auto-generated 8-word passphrase. |
-| `passkey receive` | `<file>` | Decrypt and import a shared `.enc` entry bundle into the OS keychain. |
+| `passkey share` | `[entry] [fields...] [-f\|--fields <F...>] [-o\|--output <file>] [--shared-by <name>] [--no-passphrase \| --prompt-passphrase] [--no-copy]` | Fuzzy-resolve an entry, optionally filter fields, and copy a compact AAD-authenticated `pk1:...` token (`120s` auto-clear; `60s` with `--no-passphrase`) + 8-word passphrase (or write a `PK01` `.enc` file with `-o`). |
+| `passkey upload` | `[file] [--as <name>] [--mode ask\|skip\|overwrite\|merge]` | Interactively paste a `pk1:...` token (or decrypt a `.enc` file), preview masked fields, resolve collisions, and save to the OS keychain. Refuses `pk1:` tokens in CLI `argv`. |
+| `passkey receive` | `[file] [--as <name>] [--mode ask\|skip\|overwrite\|merge]` | Alias for `passkey upload` supporting both interactive `pk1:...` token paste and `.enc` bundle files. |
 | `passkey config` | `[key] [value] [--json]` | View or update settings in `<data_dir>/settings.json`. |
 | `passkey completion` | `[--bash \| --zsh \| --fish]` | Print shell tab-completion script (or setup instructions if no flag given). |
 | `passkey help` | `[command...]` | Show help for `passkey` or any nested subcommand (e.g., `passkey help project init`). |

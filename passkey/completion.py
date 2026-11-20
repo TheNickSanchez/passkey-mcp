@@ -33,7 +33,7 @@ _passkey_completions() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    commands="new request list find get edit delete info entry clone set-field policy run exec project inject mount hook skill export import check audit mcp mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill help version"
+    commands="new request list find get edit delete info entry clone set-field policy run exec project inject mount hook skill export import check audit mcp mcp-serve init unwrap status doctor servers add config completion generate template share upload receive rotate lease plugin browser-fill help version"
     global_flags="--no-input --help --version"
 
     # First argument: complete subcommands, global flags, or entry names
@@ -144,6 +144,19 @@ _passkey_completions() {
             COMPREPLY=( $(compgen -W "$entries" -- "$cur") )
             return 0
             ;;
+        share)
+            entries=$(passkey list --names-only 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$entries --fields -f --output -o --shared-by --no-passphrase --prompt-passphrase --no-copy --no-input" -- "$cur") )
+            return 0
+            ;;
+        upload|receive)
+            COMPREPLY=( $(compgen -f -W "--as --mode --no-input" -- "$cur") )
+            return 0
+            ;;
+        --mode)
+            COMPREPLY=( $(compgen -W "ask skip overwrite merge auto passkey csv chrome" -- "$cur") )
+            return 0
+            ;;
         init)
             COMPREPLY=( $(compgen -W "claude gemini vscode cursor opencode windsurf cline zed --dry-run --yes --force --tool --no-input" -- "$cur") )
             return 0
@@ -174,7 +187,7 @@ _ZSH_SCRIPT = '''\
 
 _passkey() {
     local commands entries
-    commands=(new request list find get edit delete info entry clone set-field policy run exec project inject mount hook skill export import check audit mcp mcp-serve init unwrap status doctor servers add config completion generate template share receive rotate lease plugin browser-fill help version)
+    commands=(new request list find get edit delete info entry clone set-field policy run exec project inject mount hook skill export import check audit mcp mcp-serve init unwrap status doctor servers add config completion generate template share upload receive rotate lease plugin browser-fill help version)
 
     if (( CURRENT == 2 )); then
         local global_opts=(--no-input --help --version)
@@ -270,6 +283,17 @@ _passkey() {
                 entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
                 _describe 'entry' entries
                 ;;
+            share)
+                local opts=(--fields -f --output -o --shared-by --no-passphrase --prompt-passphrase --no-copy --no-input)
+                entries=(${(f)"$(passkey list --names-only 2>/dev/null)"})
+                _describe 'entry' entries
+                _describe 'option' opts
+                ;;
+            upload|receive)
+                local opts=(--as --mode --no-input)
+                _describe 'option' opts
+                _files
+                ;;
             init)
                 local tools=(claude gemini vscode cursor opencode windsurf cline zed --dry-run --yes --no-input)
                 _describe 'tool' tools
@@ -335,8 +359,9 @@ complete -c passkey -n '__fish_use_subcommand' -a servers -d 'List MCP servers'
 complete -c passkey -n '__fish_use_subcommand' -a add -d 'Add MCP server credentials'
 complete -c passkey -n '__fish_use_subcommand' -a generate -d 'Generate a random secret'
 complete -c passkey -n '__fish_use_subcommand' -a template -d 'Manage credential templates'
-complete -c passkey -n '__fish_use_subcommand' -a share -d 'Share an entry with someone'
-complete -c passkey -n '__fish_use_subcommand' -a receive -d 'Receive a shared entry'
+complete -c passkey -n '__fish_use_subcommand' -a share -d 'Share an entry via pk1: token or bundle'
+complete -c passkey -n '__fish_use_subcommand' -a upload -d 'Import a shared pk1: token or bundle'
+complete -c passkey -n '__fish_use_subcommand' -a receive -d 'Receive a shared entry (alias for upload)'
 complete -c passkey -n '__fish_use_subcommand' -a rotate -d 'Rotate an entry value'
 complete -c passkey -n '__fish_use_subcommand' -a lease -d 'Manage scoped entry leases'
 complete -c passkey -n '__fish_use_subcommand' -a plugin -d 'Zero-config CLI secret wrappers'
@@ -346,7 +371,15 @@ complete -c passkey -n '__fish_use_subcommand' -a help -d 'Show help for any com
 complete -c passkey -n '__fish_use_subcommand' -a version -d 'Show passkey version'
 
 # Entry completions for subcommands that take entry names
-complete -c passkey -n '__fish_seen_subcommand_from get edit delete info set-field policy check rotate browser-fill request' -a '(__passkey_entries)' -d 'Entry'
+complete -c passkey -n '__fish_seen_subcommand_from get edit delete info set-field policy check rotate browser-fill request share' -a '(__passkey_entries)' -d 'Entry'
+complete -c passkey -n '__fish_seen_subcommand_from share' -s f -l fields -d 'Specific field names to share'
+complete -c passkey -n '__fish_seen_subcommand_from share' -s o -l output -d 'Write encrypted .enc bundle file'
+complete -c passkey -n '__fish_seen_subcommand_from share' -l shared-by -d 'Sender identifier'
+complete -c passkey -n '__fish_seen_subcommand_from share' -l no-passphrase -d 'Embed random 256-bit key in pk1: token'
+complete -c passkey -n '__fish_seen_subcommand_from share' -l prompt-passphrase -d 'Prompt for custom passphrase'
+complete -c passkey -n '__fish_seen_subcommand_from share' -l no-copy -d 'Print pk1: token instead of copying'
+complete -c passkey -n '__fish_seen_subcommand_from upload receive' -l as -d 'Save imported entry under custom name'
+complete -c passkey -n '__fish_seen_subcommand_from upload receive' -l mode -a 'ask skip overwrite merge' -d 'Collision resolution mode'
 complete -c passkey -n '__fish_seen_subcommand_from policy' -a 'allow session prompt' -d 'Policy'
 complete -c passkey -n '__fish_seen_subcommand_from config' -a 'require-auth mcp-write-tools mcp-browser-broker agent-session-lease-ttl' -d 'Setting'
 complete -c passkey -n '__fish_seen_subcommand_from project' -a 'init status trust' -d 'Project subcommand'

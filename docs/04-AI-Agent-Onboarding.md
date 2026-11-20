@@ -76,6 +76,7 @@ This non-destructively writes:
 | :--- | :--- |
 | Reading `.env`, `.env.local`, `.env.production`, `*.backup`, `*.enc`, `*.passkey` (via File Read tools or `cat`/`grep`/`rg`/`sed`/`awk`/`head`/`tail`/`base64`/`curl`) | Read `.env.example`, `.env.template`, or `.env.passkey`, and run `passkey find` / `passkey exec` |
 | `passkey get` / `passkey entry get` (overwrites user clipboard) | `passkey info <entry> --json` + `passkey run -q <entry> -- <cmd>` |
+| `passkey share` / `passkey upload` / `passkey receive` (interactive peer-sharing commands) | Ask the user to run `passkey share` or `passkey upload` directly in their terminal |
 | Plaintext `passkey export <file>` or `passkey export -` | `passkey list --json` or `passkey export <file> --no-secrets` |
 | `passkey generate --no-copy` (prints raw secret to agent `stdout`) | `passkey request <entry> --fields <VAR>` |
 | `passkey inject --stdout` or `passkey inject -o -` | `passkey inject -i <tpl> -o <gitignored-file>` |

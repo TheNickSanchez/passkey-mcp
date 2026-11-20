@@ -67,7 +67,7 @@ Instead of scattering API tokens across `.env` files, `mcp.json` configs, `~/.zs
 * **[02 — Managing Secrets](02-Managing-Secrets.md):** Interactive masked input (`•` bullets + counter), `fields` vs. non-secret `config`, fuzzy lookup, rotation, templates, and `AES-256-GCM` + `Scrypt` bundles.
 * **[03 — Running & Injecting](03-Running-and-Injecting.md):** `passkey run`, zero-config `passkey exec`, `passkey://` URIs, `passkey inject`, ephemeral FIFO `.env` mounts, and `passkey plugin` wrappers.
 * **[04 — Onboarding AI Agents](04-AI-Agent-Onboarding.md):** Connect `passkey-mcp-server`, install guard hooks + `SKILL.md` rules, and test the 3-turn autonomous workflow (`find` → `request` → `exec`).
-* **[05 — Team Workflows](05-Team-Workflows.md):** Committable `.env.passkey` / `.passkey.toml` manifests, HMAC repo trust (`passkey project`), and 8-word encrypted peer sharing (`passkey share` / `receive`).
+* **[05 — Team Workflows](05-Team-Workflows.md):** Committable `.env.passkey` / `.passkey.toml` manifests, HMAC repo trust (`passkey project`), and inline `pk1:` encrypted peer sharing (`passkey share` / `upload` / `receive`).
 
 ### Security & Advanced
 * **[06 — Security & Biometrics](06-Security-and-Biometrics.md):** Threat model, OS keychain boundaries, `allow` / `session` / `prompt` Touch ID policies, scoped leases, and HMAC hash-chained `audit.log`.

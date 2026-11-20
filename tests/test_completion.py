@@ -39,6 +39,7 @@ class TestPrintCompletion:
                 "generate",
                 "template",
                 "share",
+                "upload",
                 "receive",
                 "rotate",
                 "policy",

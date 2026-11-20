@@ -19,7 +19,7 @@ Store API keys and credentials in your native OS Keychain (`macOS Keychain`, `Wi
 
 ---
 
-> **Positioning:** `passkey-mcp` is a local OS-keychain secret injector—**not** a team password manager, shared cloud vault, or 1Password replacement. No cloud sync, no background daemon, no telemetry. Alpha (`0.8.x`).
+> **Positioning:** `passkey-mcp` is a local OS-keychain secret injector—**not** a team password manager, shared cloud vault, or 1Password replacement. No cloud sync, no background daemon, no telemetry. Alpha (`0.9.x`).
 
 ## How It Works
 
@@ -144,6 +144,19 @@ passkey project init
 passkey exec -q -- pytest
 ```
 
+### 5. Peer-to-Peer Encrypted Token Sharing (`passkey share` + `passkey upload`)
+
+Hand a credential set to a teammate over Slack/Teams without writing files to disk or pasting plaintext keys:
+
+```bash
+# Sender: fuzzy-match entry, copy compact AAD-authenticated pk1:... token to clipboard (120s auto-clear),
+# and print a random 8-word Scrypt passphrase for a separate channel
+passkey share stripe_dev
+
+# Recipient: paste the pk1:... token & passphrase at masked prompts, preview fields, and save to keychain
+passkey upload
+```
+
 ---
 
 ## Security Model
@@ -168,9 +181,9 @@ passkey exec -q -- pytest
 ```
 
 * **OS Keychain at Rest:** Credentials and all three internal 256-bit HMAC keys (`__audit_hmac_key__`, `__lease_hmac_key__`, `__trust_hmac_key__`) live in your OS Keychain—`<data_dir>` (`0o700`) stores `0o600` metadata only.
-* **Authenticated Portability (`PK01`):** `passkey export --encrypt` and `passkey share` encrypt bundles with `AES-256-GCM` + `Scrypt` (`N=2^20, r=8, p=1`), `O_EXCL`, and `0o600` permissions.
+* **Authenticated Portability (`pk1:` & `PK01`):** `passkey share` / `passkey upload` exchange compact URL-safe `pk1:...` tokens authenticated with `AES-256-GCM` (`"pk1:" + header` AAD) + `Scrypt` (`N=2^20, r=8, p=1`), while `passkey export --encrypt` and `passkey share -o` write `O_EXCL`, `0o600` `PK01` bundles.
 * **Tamper-Evident Audit Chain:** Every operation records `actor` attribution (`human` vs. `agent` client) in an HMAC-SHA256 hash chain (`passkey audit --verify`).
-* **Pre-Execution Agent Guardrails:** `passkey hook check` blocks agent file/shell reads of `.env`, `*.backup`, `*.enc`, `passkey get`, and plaintext `passkey export` (exit code `2`).
+* **Pre-Execution Agent Guardrails:** `passkey hook check` blocks agent file/shell reads of `.env`, `*.backup`, `*.enc`, `passkey get`, `passkey share`/`upload`/`receive`, and plaintext `passkey export` (exit code `2`).
 * **Loopback-Only Browser Broker:** `passkey browser-fill` verifies exact `(scheme, host, port)` `ORIGIN` match over direct loopback CDP WebSockets (`127.0.0.1`) before injecting login fields outside LLM context.
 * **Honest Boundaries:** Same-UID processes on an unlocked machine share user-level OS privileges (and on macOS `pipx`/venv installs, Keychain ACLs bind to the underlying `python3` binary). See [SECURITY.md](SECURITY.md) for the full threat model and vulnerability reporting policy.
 
@@ -215,7 +228,7 @@ Explore the complete documentation in [`docs/Home.md`](docs/Home.md):
 | [**02 — Managing Secrets**](docs/02-Managing-Secrets.md) | Masked input shortcuts (`Ctrl+R`/`Tab`, `Ctrl+U`), `fields` vs. `config`, rotation, templates, and bundles |
 | [**03 — Running & Injecting**](docs/03-Running-and-Injecting.md) | `passkey run`, `passkey exec`, `passkey://` `$VAR` URIs, `inject`, ephemeral `.env` FIFOs, and CLI `plugin` wrappers |
 | [**04 — Onboarding AI Agents**](docs/04-AI-Agent-Onboarding.md) | Connecting `passkey-mcp-server`, guard hooks, 3-turn autonomous workflow, and verification prompt |
-| [**05 — Team Workflows**](docs/05-Team-Workflows.md) | Committable `.env.passkey` & `.passkey.toml` manifests, HMAC repo trust, and 8-word `share` / `receive` |
+| [**05 — Team Workflows**](docs/05-Team-Workflows.md) | Committable `.env.passkey` & `.passkey.toml` manifests, HMAC repo trust, and inline `pk1:` `share` / `upload` |
 | [**06 — Security & Biometrics**](docs/06-Security-and-Biometrics.md) | Threat model, OS boundaries, `allow` / `session` / `prompt` Touch ID policies, leases, and `audit.log` |
 | [**07 — Browser Agent Autofill**](docs/07-Browser-Agent-Autofill.md) | Loopback Chrome DevTools (`CDP`) login & cookie autofill (`passkey browser-fill`) |
 | [**08 — CLI Command Reference**](docs/08-CLI-Command-Reference.md) | All commands, subcommands, global flags, `PASSKEY_OUTPUT=json`, settings, and exit codes |
@@ -232,6 +245,8 @@ passkey project init                       # Generate committable .env.passkey f
 passkey exec -q -- <command>               # Auto-inject repo manifest secrets with output masking
 passkey run -q <entry> -- <command>        # Inject explicit entry secrets into any command
 passkey policy <entry> session             # Require 1 Touch ID tap per 10m agent session
+passkey share <entry>                      # Copy encrypted pk1: share token + 8-word passphrase
+passkey upload                             # Decrypt a pasted pk1: token into OS Keychain
 passkey init                               # Migrate plaintext MCP server tokens to OS Keychain
 passkey doctor --deep                      # Verify Keychain, PATH, configs, and HMAC audit chain
 passkey audit --verify                     # Cryptographically verify tamper-evident audit.log

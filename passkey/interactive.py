@@ -186,11 +186,14 @@ def parse_field_shorthand(raw: str) -> tuple[str, str | None]:
     return raw.strip(), None
 
 
-def _posix_read_token(fd: int) -> str:
-    """Read one logical keystroke or escape sequence from a raw POSIX fd."""
+def _posix_read_token(fd: int) -> str | None:
+    """Read one logical keystroke or escape sequence from a raw POSIX fd.
+
+    Returns ``None`` on true kernel EOF (``os.read`` returning ``b""``).
+    """
     b = os.read(fd, 1)
     if not b:
-        return "\x04"
+        return None
 
     if b == b"\x1b":
         ready, _, _ = select.select([fd], [], [], 0.025)
@@ -343,8 +346,22 @@ def prompt_secret(
         new_attrs[6][termios.VTIME] = 0
         termios.tcsetattr(posix_fd, termios.TCSADRAIN, new_attrs)
 
+    def _has_pending_input() -> bool:
+        if _getch is not None:
+            return False
+        if sys.platform == "win32":
+            import msvcrt  # type: ignore[import-not-found]
+
+            return bool(msvcrt.kbhit())
+        if posix_fd is not None:
+            ready, _, _ = select.select([posix_fd], [], [], 0)
+            return bool(ready)
+        return False
+
     try:
         _render()
+        dirty = False
+        drained_count = 0
         while True:
             if _getch is not None:
                 token = _getch()
@@ -354,58 +371,65 @@ def prompt_secret(
                 assert posix_fd is not None
                 token = _posix_read_token(posix_fd)
 
-            if token == "":
-                continue
-
-            if token in ("\r", "\n"):
-                _render(force_masked=True)
-                out.write("\n")
-                out.flush()
-                return "".join(buf)
-
-            if token == "\x03":  # Ctrl+C
-                _render(force_masked=True)
-                out.write("\n")
-                out.flush()
-                raise KeyboardInterrupt
-
-            if token == "\x04":  # Ctrl+D / EOF
-                if not buf:
-                    out.write("\n")
-                    out.flush()
-                    raise EOFError
-                continue
-
-            if token in ("\x7f", "\x08", "\x1b[3~"):  # Backspace / Delete
+            if token is None:  # True pipe/fd EOF (os.read returned b"")
                 if buf:
-                    buf.pop()
-                    _render()
-                continue
-
-            if token == "\x15":  # Ctrl+U (clear input)
-                if buf:
-                    buf.clear()
-                    _render()
-                continue
-
-            if token in ("\x12", "\t"):  # Ctrl+R or Tab (reveal/hide toggle)
-                revealed = not revealed
-                _render()
-                continue
-
-            # Support multi-char tokens (e.g., pasted chunks from custom _getch)
-            changed = False
-            for ch in token:
-                if ch in ("\r", "\n"):
                     _render(force_masked=True)
                     out.write("\n")
                     out.flush()
                     return "".join(buf)
-                if ord(ch) >= 32 and ch != "\x7f":
-                    buf.append(ch)
-                    changed = True
-            if changed:
+                out.write("\n")
+                out.flush()
+                raise EOFError
+
+            if token != "":
+                if token in ("\r", "\n"):
+                    _render(force_masked=True)
+                    out.write("\n")
+                    out.flush()
+                    return "".join(buf)
+
+                if token == "\x03":  # Ctrl+C
+                    _render(force_masked=True)
+                    out.write("\n")
+                    out.flush()
+                    raise KeyboardInterrupt
+
+                if token == "\x04":  # Ctrl+D / EOF
+                    if not buf:
+                        out.write("\n")
+                        out.flush()
+                        raise EOFError
+                elif token in ("\x7f", "\x08", "\x1b[3~"):  # Backspace / Delete
+                    if buf:
+                        buf.pop()
+                        dirty = True
+                elif token == "\x15":  # Ctrl+U (clear input)
+                    if buf:
+                        buf.clear()
+                        dirty = True
+                elif token in ("\x12", "\t"):  # Ctrl+R or Tab (reveal/hide toggle)
+                    revealed = not revealed
+                    dirty = True
+                else:
+                    # Support multi-char tokens (e.g., pasted chunks from custom _getch)
+                    for ch in token:
+                        if ch in ("\r", "\n"):
+                            _render(force_masked=True)
+                            out.write("\n")
+                            out.flush()
+                            return "".join(buf)
+                        if ord(ch) >= 32 and ch != "\x7f":
+                            buf.append(ch)
+                            dirty = True
+
+            drained_count += 1
+            if _has_pending_input() and drained_count < 4096:
+                continue
+
+            if dirty:
                 _render()
+                dirty = False
+            drained_count = 0
     finally:
         if posix_fd is not None and old_termios is not None:
             import termios
