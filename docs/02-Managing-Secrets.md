@@ -158,7 +158,7 @@ passkey import backup.passkey.enc --decrypt
 passkey import chrome-passwords.csv --mode chrome --filter github.com --insecure
 ```
 
-> **Tip:** To share a **single** entry with a teammate using an auto-generated 8-word passphrase, see `passkey share` and `passkey receive` in [05 — Team Workflows](05-Team-Workflows.md).
+> **Tip:** To share an entry inline over Slack/Teams using a compact AAD-authenticated `pk1:` token and an auto-generated 8-word passphrase (without writing temporary files to disk), see `passkey share` and `passkey upload` in [05 — Team Workflows](05-Team-Workflows.md).
 
 ---
 

@@ -64,6 +64,7 @@ _KNOWN_COMMANDS = frozenset(
         "generate",
         "template",
         "share",
+        "upload",
         "receive",
         "rotate",
         "unwrap",
@@ -537,28 +538,51 @@ def _dispatch_command(command: str | None, parser, args) -> None:
     elif command == "template":
         handle_template_command(args)
     elif command == "share":
+        from ..sharing import cmd_share, guard_no_token_in_argv
+
+        entry_arg = getattr(args, "entry", None)
+        merged_fields = [
+            *(getattr(args, "fields", None) or []),
+            *(getattr(args, "flag_fields", None) or []),
+        ]
+        guard_no_token_in_argv(entry_arg)
+        for f_arg in merged_fields:
+            guard_no_token_in_argv(f_arg)
+        human_cmd = f"passkey share {entry_arg}" if entry_arg else "passkey share"
         require_interactive(
             "passkey share",
-            human_command=f"passkey share {args.entry}",
+            human_command=human_cmd,
+            entry=entry_arg,
         )
         _require_auth("share secrets")
-        entry = resolve_entry(args.entry, "Select entry to share")
-        from ..sharing import cmd_share
+        entry = resolve_entry(entry_arg, "Select entry to share", fuzzy=True)
 
         cmd_share(
             entry.name,
             output_path=args.output,
             shared_by=args.shared_by,
+            fields=merged_fields or None,
+            no_passphrase=bool(getattr(args, "no_passphrase", False)),
+            prompt_passphrase=bool(getattr(args, "prompt_passphrase", False)),
+            no_copy=bool(getattr(args, "no_copy", False)),
         )
-    elif command == "receive":
+    elif command in ("upload", "receive"):
+        from ..sharing import cmd_receive, cmd_upload, guard_no_token_in_argv
+
+        file_arg = getattr(args, "file", None)
+        guard_no_token_in_argv(file_arg)
+        human_cmd = f"passkey {command} {file_arg}" if file_arg else f"passkey {command}"
         require_interactive(
-            "passkey receive",
-            human_command=f"passkey receive {args.file}",
+            f"passkey {command}",
+            human_command=human_cmd,
         )
         _require_auth("import secrets")
-        from ..sharing import cmd_receive
-
-        cmd_receive(args.file)
+        handler = cmd_upload if command == "upload" else cmd_receive
+        handler(
+            file_arg,
+            as_name=getattr(args, "as_name", None),
+            mode=getattr(args, "mode", "ask"),
+        )
     elif command == "rotate":
         touch_only = bool(getattr(args, "touch_only", False))
         field_arg = getattr(args, "field", None)
@@ -670,6 +694,9 @@ def main() -> None:
         ):
             entry_name = non_flag_shortcut[0]
             try:
+                from ..sharing import guard_no_token_in_argv
+
+                guard_no_token_in_argv(entry_name)
                 close_cmds = difflib.get_close_matches(
                     entry_name, sorted(_KNOWN_COMMANDS), n=1, cutoff=0.75
                 )

@@ -23,7 +23,7 @@ corporate approval.
 ## In scope
 
 - Secret leakage via the CLI, MCP tools, doctor, audit, or
-  export / import / share
+  export / import / share / upload
 - Local MCP config rewrite by `passkey_wrap_server` (local file write,
   not remote RCE)
 - Keychain and index handling (`entries.json` is names only; values live
@@ -48,8 +48,23 @@ corporate approval.
 This section must match `passkey/auth.py`, `passkey/mcp_server.py`,
 `passkey/keychain.py`, and `passkey/runner.py`.
 
-Secrets never appear in argv. Interactive input uses `getpass`. Do not
-document `KEY=VALUE` on the command line.
+Secrets never appear in argv. Interactive input uses `prompt_secret` /
+`getpass`, and `passkey upload` / `receive` explicitly refuse `pk1:` share
+tokens passed on the command line. Do not document `KEY=VALUE` or `pk1:`
+tokens on CLI argv.
+
+Inline peer sharing (`passkey share` / `passkey upload`) encodes compact
+`pk1:...` URL-safe tokens encrypted with `AES-256-GCM` using `"pk1:" + header`
+bound as Associated Authenticated Data (AAD) and `Scrypt` (`N=2^20, r=8, p=1`)
+key derivation from a generated 8-word passphrase (or custom passphrase).
+Post-GCM `zlib` decompression is strictly bounded to `256 KiB` to prevent
+decompression-bomb abuse. When a sender explicitly opts into `--no-passphrase`,
+a random 256-bit key is embedded in the token frame with a stderr warning and a
+shortened `60s` clipboard auto-clear window; anyone holding that `pk1:` string
+can decrypt it. File-based sharing (`passkey share -o` / `export --encrypt`)
+writes `PK01` bundles atomically with `O_EXCL` and `0o600` permissions. Both
+`share` and `upload` / `receive` fail fast in headless/agent sessions and are
+blocked by `passkey hook check`.
 
 MCP tools (`passkey_list`, `passkey_fields`, `passkey_status`,
 `passkey_doctor`, `passkey_wrap_server`, `passkey_validate_references`,

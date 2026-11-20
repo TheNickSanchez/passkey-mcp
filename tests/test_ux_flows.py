@@ -350,6 +350,7 @@ class TestHelpGroupingAndBackwardsCompat:
             "export",
             "import",
             "share",
+            "upload",
             "receive",
             "config",
             "completion",

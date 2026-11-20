@@ -18,7 +18,7 @@ SUBPARSER_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Portability & Config",
-        ["export", "import", "share", "receive", "config", "completion"],
+        ["export", "import", "share", "upload", "receive", "config", "completion"],
     ),
 ]
 
@@ -959,14 +959,71 @@ def create_parser() -> argparse.ArgumentParser:
         "--insecure", action="store_true", help="Allow importing plaintext CSV files"
     )
 
-    share_parser = _add_primary("share", "Share a single entry via an encrypted bundle")
-    share_parser.add_argument("entry", help="Entry name")
-    share_parser.add_argument("--output", "-o", help="Output file path")
+    share_parser = _add_primary(
+        "share", "Share an entry via an inline encrypted pk1: token or bundle"
+    )
+    share_parser.add_argument(
+        "entry", nargs="?", help="Entry name or fuzzy query (opens picker if omitted)"
+    )
+    share_parser.add_argument(
+        "fields", nargs="*", help="Optional specific field names to share"
+    )
+    share_parser.add_argument(
+        "--fields",
+        "-f",
+        dest="flag_fields",
+        nargs="+",
+        metavar="FIELDS",
+        help="Specific field name(s) to share (comma- or space-separated)",
+    )
+    share_parser.add_argument(
+        "--output", "-o", help="Write encrypted .enc bundle file instead of inline pk1: token"
+    )
     share_parser.add_argument("--shared-by", help="Identifier for the sharer")
+    share_pass_group = share_parser.add_mutually_exclusive_group()
+    share_pass_group.add_argument(
+        "--no-passphrase",
+        action="store_true",
+        help="Embed random 256-bit key inside pk1: token (inline token only)",
+    )
+    share_pass_group.add_argument(
+        "--prompt-passphrase",
+        action="store_true",
+        help="Prompt for a custom passphrase instead of generating an 8-word passphrase",
+    )
+    share_parser.add_argument(
+        "--no-copy",
+        action="store_true",
+        help="Print pk1: token to stdout instead of copying to clipboard",
+    )
     share_parser.completer = _entry_completer  # type: ignore[attr-defined]
 
-    receive_parser = _add_primary("receive", "Import a shared entry bundle")
-    receive_parser.add_argument("file", help="Bundle file path")
+    def _configure_upload_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+        p.add_argument(
+            "file",
+            nargs="?",
+            help="Optional .enc bundle file path (omit to paste a pk1: token interactively)",
+        )
+        p.add_argument(
+            "--as",
+            dest="as_name",
+            metavar="NAME",
+            help="Save imported entry under a custom name",
+        )
+        p.add_argument(
+            "--mode",
+            choices=["ask", "skip", "overwrite", "merge"],
+            default="ask",
+            help="Collision behavior when entry already exists (default: ask)",
+        )
+        return p
+
+    _configure_upload_parser(
+        _add_primary("upload", "Import a shared pk1: token or .enc bundle into keychain")
+    )
+    _configure_upload_parser(
+        _add_primary("receive", "Import a shared entry token or bundle (alias for upload)")
+    )
 
     config_parser = _add_primary("config", "View or update passkey settings")
     config_parser.add_argument("key", nargs="?", help="Setting name")

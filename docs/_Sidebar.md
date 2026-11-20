@@ -1,4 +1,4 @@
-### Passkey Wiki (`v0.8.x`)
+### Passkey Wiki (`v0.9.x`)
 
 <details open>
 <summary><strong>Getting Started</strong></summary>

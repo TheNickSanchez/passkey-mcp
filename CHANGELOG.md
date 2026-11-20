@@ -8,9 +8,27 @@
 
 ## [Unreleased]
 
+## 0.9.0 (2026-11-20)
+
 ### Added
 
+- **Inline encrypted token sharing (`passkey share`, `passkey upload`, `pk1:` format)**: share full entries or selective fields (`--fields` / positional field names) without touching disk via compact URL-safe `pk1:` tokens authenticated with `AES-256-GCM` (`"pk1:" + header` AAD) + `Scrypt` (`N=2^20, r=8, p=1`), optional `zlib` compression, `120s` clipboard auto-clear, and a random 8-word passphrase (`--no-passphrase` embeds a 256-bit key; `--prompt-passphrase` accepts a custom secret; `-o`/`--output` preserves `PK01` `.enc` file mode).
+- **`passkey upload` & upgraded `passkey receive` alias**: import pasted `pk1:` tokens or `.enc` bundles interactively with masked prompts, space/newline/case-tolerant 8-word passphrase normalization, pre-save field-name previews, `--as <name>` renaming, and `--mode ask|skip|overwrite|merge` collision handling.
 - **v0.9 architecture & implementation plan (`docs/plans/v0.9-sharing-and-windows.md`)**: documented the 5-phase engineering specification for inline encrypted token sharing (`passkey share` / `passkey upload` `pk1:` format) and first-class Windows parity (`WinVaultKeyring` chunking, `credui.dll` native prompts, Win32 process lineage, PowerShell wrappers, and Windows CI).
+
+### Changed
+
+- **Paste-burst input coalescing in `prompt_secret`**: batches pending terminal paste bytes (`select` / `msvcrt.kbhit`) before redrawing masked `•` bullets so multi-hundred-character `pk1:` tokens paste cleanly in a single render pass.
+- **Permanent 6-step release gate (`AGENTS.md`)**: codified mandatory version/lockfile sync, `CHANGELOG.md` promotion, full CLI/MCP/Wiki documentation parity, unpinned install strings, wheel build + global install smoke verification, and annotated `vX.Y.Z` tag + Wiki sync output for every `0.x.0` and `0.x.y` release.
+
+### Security
+
+- **Agent hook & `argv` guards for peer sharing**: `passkey hook check` blocks AI agents from running interactive peer-sharing commands (`passkey share`, `passkey upload`, `passkey receive`, and `passkey entry` equivalents), and CLI invocations refuse `pk1:` tokens passed on the command line so ciphertext/embedded-key tokens never enter process `argv`.
+
+## 0.8.1 (2026-11-19)
+
+### Added
+
 - **Comprehensive multi-page Wiki (`docs/`) & link integrity suite (`tests/test_docs_links.py`)**: added `docs/_Sidebar.md`, `docs/Home.md`, and 10 guides (`01-Quickstart.md` through `10-Troubleshooting-and-FAQ.md`) covering human workflows, zero-config `passkey exec`, AI agent onboarding, `session` Touch ID policies, CDP browser autofill, and full CLI/MCP references, verified automatically against `parser.py` and `mcp_server.py`.
 
 ### Changed

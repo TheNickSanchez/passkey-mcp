@@ -90,29 +90,55 @@ passkey project trust --revoke
 
 ---
 
-## 4. Peer-to-Peer Encrypted Entry Sharing (`passkey share` & `receive`)
+## 4. Peer-to-Peer Encrypted Entry Sharing (`passkey share` & `passkey upload`)
 
-Need to hand a staging credential set (`stripe_dev`) to a teammate without pasting keys into Slack or setting up PGP?
+Need to hand a staging credential set (`stripe_dev`) to a teammate over Slack, Teams, or Discord without writing `.enc` files to disk or pasting plaintext keys?
 
-### Sender: Create an Encrypted `.enc` Bundle + 8-Word Passphrase
+### Default Workflow: Inline Authenticated `pk1:` Token + 8-Word Passphrase
 
 ```bash
+# Fuzzy-match entry (or run bare `passkey share` to open the fuzzy picker)
+passkey share stripe_dev --shared-by nick
+
+# Share specific fields only (positional or -f/--fields)
+passkey share jamf CLIENT_ID CLIENT_SECRET
+passkey share jamf -f CLIENT_ID,CLIENT_SECRET
+```
+
+1. **Zero-Friction Defaults:** Single-field entries select their field automatically; multi-field entries pre-check all fields (`Enter` confirms all in 1 keystroke).
+2. **Authenticated Wire Frame:** `passkey` generates a random **8-word passphrase** (~64 bits of entropy from a 256-word curated list), compresses the payload, encrypts with `AES-256-GCM` + `Scrypt` (`N=2^20`, binding `"pk1:" + header` as AAD), and copies a compact URL-safe `pk1:...` token (~200–300 chars) to your clipboard with **120-second auto-clear**.
+3. **Out-of-Band Split:** Paste the `pk1:...` token in Slack/Teams and send the 8-word passphrase over a **separate** channel (e.g., Signal, voice call, or 1-on-1 DM). *(Pass `--prompt-passphrase` to supply a custom passphrase, or `--no-passphrase` for a self-contained token with a 60s clipboard auto-clear when sending over an already end-to-end encrypted channel.)*
+
+### Recipient: Masked Paste, Preview & Collision Resolution (`passkey upload`)
+
+```bash
+# Prompts via masked input for the pk1:... token and passphrase
+passkey upload
+
+# Optional: save under a custom name or pre-select collision behavior
+passkey upload --as stripe_staging
+passkey upload --mode merge
+```
+
+> **Security Note:** Never pass `pk1:...` tokens on the command line—`passkey upload` and `passkey receive` strictly refuse `pk1:` strings in CLI `argv` (`error_code: "INVALID_USAGE"`) so tokens never land in shell history or `ps`. Always run bare `passkey upload` and paste at the masked prompt.
+
+1. **Resilient Paste:** Surrounding quotes, Slack line wraps, and space-separated 8-word passphrases normalize automatically; `256 KiB` bounded decompression runs strictly *after* GCM tag verification.
+2. **Safe Preview & Collision Menu:** Before writing to the OS keychain, `passkey upload` displays the entry name, sender/timestamp, policy, and masked field previews `(36 chars, sk_…9a2)`. If `<entry>` already exists (`--mode ask` default), choose interactively:
+   * **Merge / update fields** (updates shared fields while preserving existing `created`, `policy`, `config`, `last_rotated`, and unshared fields)
+   * **Overwrite** (replaces secret fields while preserving `created`, `policy`, `source`, `last_rotated`, and unshared `config`)
+   * **Save as a new entry name...**
+   * **Cancel**
+
+### File-Based `.enc` Bundle Mode (Backwards-Compatible)
+
+Prefer sending an encrypted binary file (`PK01`, `O_EXCL`, `0o600`)? Pass `-o` / `--output`:
+
+```bash
+# Sender: write an encrypted .enc bundle file
 passkey share stripe_dev --shared-by nick -o stripe_dev-nick.enc
-```
 
-1. Select which secret fields to include (interactive checkbox when multiple fields exist).
-2. `passkey` generates a random **8-word passphrase** (~64 bits of entropy from a 256-word curated list, e.g. `alpine-falcon-quartz-beacon-ember-lunar-spruce-cobalt`) and encrypts the single entry with `AES-256-GCM` + `Scrypt` (`N=2^20`).
-3. Send `stripe_dev-nick.enc` over Slack/email and send the 8-word passphrase over a **separate** channel (e.g., voice call, Signal, or 1-on-1 DM).
-
-### Recipient: Import Straight into OS Keychain
-
-```bash
-passkey receive stripe_dev-nick.enc
-```
-
-`passkey receive` verifies bundle integrity, displays who shared the entry and which field names it contains, saves the credentials straight into the recipient's OS keychain, and reminds them to delete the `.enc` file:
-
-```bash
+# Recipient: import from file via `passkey upload` or its alias `passkey receive`
+passkey upload stripe_dev-nick.enc
 rm stripe_dev-nick.enc
 ```
 

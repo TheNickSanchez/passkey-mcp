@@ -19,7 +19,7 @@ Secrets for this workspace are stored in the OS keychain via `passkey`—never i
 
 ### Golden Rules
 1. **Never request raw secrets in chat:** Never ask the user to paste API keys, tokens, or passwords into the conversation. Capture missing credentials out-of-band via MCP `passkey_request_secret` or `passkey request <entry> --fields <FIELD> --policy session --json`, or ask the user to run `passkey new <entry>` in their own terminal.
-2. **Never run interactive commands:** Do not run bare `passkey`, `passkey new`, `passkey edit`, `passkey get`, or `passkey rotate` (without `--touch-only`). Pass `--no-input` if unsure.
+2. **Never run interactive commands:** Do not run bare `passkey`, `passkey new`, `passkey edit`, `passkey get`, `passkey share`, `passkey upload`, `passkey receive`, or `passkey rotate` (without `--touch-only`). Pass `--no-input` if unsure.
 3. **Zero-guesswork discovery via `find`, `project status`, `--json`, or MCP tools:**
    - Reverse-lookup which entry owns an env var: `passkey find <ENV_VAR> --json` or `passkey find --from-file .env.example --json` (MCP `passkey_find`)
    - Check repo manifest & trust readiness: `passkey project status --json` (MCP `passkey_project_status`)
