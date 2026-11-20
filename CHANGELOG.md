@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+## 0.9.2 (2026-11-20)
+
+### Fixed
+
+- **Collision-proof menu sentinels in interactive pickers (`passkey get` & entry/field selectors)**: fixed `KeyError: '(cancel)'` in `passkey get <entry>` and `"(cancel)"` string leakage in `select_entry` / `select_field` caused by `questionary.Choice(..., value=None)` falling back to the choice title, replacing cancel and copy-all sentinels with unique object identities that cannot collide with real field names.
+- **Clean cancellation in multi-field `passkey rotate`**: selecting `(cancel)` in the interactive `passkey rotate <entry>` field picker now exits cleanly without prompting, stamping `last_rotated`, or re-saving the entry.
+
 ## 0.9.1 (2026-11-20)
 
 ### Changed

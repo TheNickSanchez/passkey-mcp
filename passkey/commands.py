@@ -22,6 +22,9 @@ from .keychain import (
 )
 from .models import ENTRY_NAME_PATTERN, RESERVED_NAMES, VALID_POLICIES, Entry, EntryMeta
 
+_CANCEL = object()
+_COPY_ALL = object()
+
 
 def cmd_get_interactive(entry: Entry) -> None:
     """Interactive key picker — auto-copies single fields or uses arrow-key picker."""
@@ -57,8 +60,8 @@ def cmd_get_interactive(entry: Entry) -> None:
         choices.extend(
             [
                 questionary.Separator(),
-                questionary.Choice("Copy all fields (KEY='value')", value="__all__"),
-                questionary.Choice("(cancel)", value=None),
+                questionary.Choice("Copy all fields (KEY='value')", value=_COPY_ALL),
+                questionary.Choice("(cancel)", value=_CANCEL),
             ]
         )
 
@@ -70,9 +73,9 @@ def cmd_get_interactive(entry: Entry) -> None:
             use_jk_keys=False,
         ).ask()
 
-        if selected is None:
+        if selected is None or selected is _CANCEL:
             return
-        if selected == "__all__":
+        if selected is _COPY_ALL:
             cmd_get_all(entry)
             return
 

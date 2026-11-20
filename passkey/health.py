@@ -47,6 +47,9 @@ def cmd_rotate(
             target_field = select_field(
                 entry_name, prompt="Select field to rotate", allow_empty=True
             )
+            if target_field is None:
+                print("Cancelled")
+                return
         else:
             raise PasskeyError(
                 f"Multiple fields in '{entry_name}' ({', '.join(sorted(entry.fields))}). "
