@@ -153,7 +153,7 @@ def passkey_entry_info(entry_name: str) -> dict:
         entry_name: Name of the passkey entry (e.g., "stripe")
 
     Returns:
-        Dictionary with exists, policy ('allow' or 'prompt'), has_active_lease,
+        Dictionary with exists, policy ('allow', 'session', or 'prompt'), has_active_lease,
         will_prompt_biometric, fields (secret key names), config_keys, and timestamps.
     """
     from .leases import peek_lease
@@ -452,7 +452,7 @@ def passkey_request_secret(
     Args:
         entry_name: Keychain entry name to create or update (e.g., "stripe_dev")
         fields: Environment variable / field names to capture (max 10)
-        policy: Optional access policy ('allow', 'session', or 'prompt')
+        policy: Optional access policy ('allow', 'session', or 'prompt'; defaults to default-policy)
         hint: Optional short hint shown in the dialog (e.g., where to find the key)
         reason: Optional error/expiry reason (e.g., "401 Unauthorized: token expired")
         timeout: Seconds to wait before timing out (5-300, default: 120)

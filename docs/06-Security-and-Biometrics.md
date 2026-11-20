@@ -31,17 +31,26 @@ How `passkey-mcp` layers OS keychain ACLs, native macOS Touch ID (`LAContext`), 
 
 ## 2. Per-Entry Access Policies (`allow` vs. `session` vs. `prompt`)
 
-Configure per-entry biometric gating with `passkey policy <entry> [allow|session|prompt]`:
+Configure your global default for newly created entries (`passkey new`, `passkey request`, and net-new `passkey upload` entries) with `passkey config default-policy`, set per-entry policies with `passkey policy <entry> <mode>`, or bulk-switch your entire keychain with `passkey policy --all`:
 
 ```bash
-# Default: headless access (ideal for background MCP servers and low-risk dev keys)
-passkey policy resend allow
+# Set global default policy for newly created entries ('session' on macOS Touch ID, 'allow' headless)
+passkey config default-policy session
 
 # Recommended for agentic coding: 1 Touch ID prompt per AI agent / terminal session
 passkey policy stripe_dev session
 
+# Headless access (default for background MCP servers wrapped by 'passkey init')
+passkey policy resend allow
+
 # Maximum lock-down: Touch ID prompt on EVERY access unless an explicit lease is granted
 passkey policy aws_prod prompt
+
+# Bulk-switch all CLI/agent entries to Session Touch ID while skipping MCP servers
+passkey policy --all session --exclude-mcp --yes
+
+# Bulk-switch all entries to zero-prompt YOLO mode (and back anytime)
+passkey policy --all allow --yes --json
 
 # Inspect current policy and active lease status
 passkey policy stripe_dev --json
@@ -49,9 +58,9 @@ passkey policy stripe_dev --json
 
 | Policy | Headless MCP Startup? | Touch ID Behavior | Best For |
 | :--- | :---: | :--- | :--- |
-| **`allow`** *(default)* | Yes | Never prompts `LAContext` | Everyday dev API keys & background MCP servers |
-| **`session`** | Prompts once | Prompts `"Passkey: unlock '<entry>' for <agent> (10m session)"` on first use, then caches for the calling session | Cloud/staging keys used across multi-turn AI coding sessions |
-| **`prompt`** | Requires lease | Prompts Touch ID on **every single invocation** unless a manual `passkey lease grant` is active | Production databases, billing, or root cloud credentials |
+| **`session`** *(macOS Touch ID default)* | Prompts once | Prompts `"Passkey: unlock '<entry>' for <agent> (10m session)"` on first use, then caches for the calling session | Cloud/staging/CLI keys (`stripe`, `aws`, `jamf`, `gh`) across multi-turn AI coding sessions |
+| **`allow`** *(MCP & Windows/Linux default)* | Yes | Never prompts `LAContext` | Background stdio MCP servers (`passkey init`) & fastest YOLO local dev |
+| **`prompt`** *(Strict Step-Up)* | Requires lease | Prompts Touch ID on **every single invocation** unless a manual `passkey lease grant` is active | Production databases, billing, or root cloud credentials |
 
 ### How `policy = session` Prevents PID-Reuse & Cross-Terminal Hijacking
 

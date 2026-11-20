@@ -685,13 +685,18 @@ def _apply_uploaded_entry(
 ) -> dict:
     """Preview incoming entry, resolve collisions preserving existing metadata, and save."""
     from .interactive import PASSKEY_STYLE, is_interactive
+    from .settings import get_default_policy
 
     target_name = _validate_entry_name(as_name or entry.name)
     entry.name = target_name
+    incoming_policy = entry.policy
+
+    existing = get_entry(target_name)
+    if existing is None and incoming_policy == "allow":
+        entry.policy = get_default_policy()
 
     _print_share_preview(entry, meta)
 
-    existing = get_entry(target_name)
     effective_mode = mode
 
     while existing is not None and effective_mode == "ask":
@@ -742,6 +747,8 @@ def _apply_uploaded_entry(
             target_name = _validate_entry_name(raw_new)
             entry.name = target_name
             existing = get_entry(target_name)
+            if existing is None and incoming_policy == "allow":
+                entry.policy = get_default_policy()
             continue
 
         effective_mode = action

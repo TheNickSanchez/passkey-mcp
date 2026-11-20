@@ -18,7 +18,7 @@ _CORE_RULES_BODY = """\
 Secrets for this workspace are stored in the OS keychain via `passkey`—never in `.env` files, shell history, or chat transcripts. Set `PASSKEY_OUTPUT=json` for deterministic JSON responses and structured `error_code` envelopes.
 
 ### Golden Rules
-1. **Never request raw secrets in chat:** Never ask the user to paste API keys, tokens, or passwords into the conversation. Capture missing credentials out-of-band via MCP `passkey_request_secret` or `passkey request <entry> --fields <FIELD> --policy session --json`, or ask the user to run `passkey new <entry>` in their own terminal.
+1. **Never request raw secrets in chat:** Never ask the user to paste API keys, tokens, or passwords into the conversation. Capture missing credentials out-of-band via MCP `passkey_request_secret` or `passkey request <entry> --fields <FIELD> --json` (inherits the user's `default-policy`), or ask the user to run `passkey new <entry>` in their own terminal.
 2. **Never run interactive commands:** Do not run bare `passkey`, `passkey new`, `passkey edit`, `passkey get`, `passkey share`, `passkey upload`, `passkey receive`, or `passkey rotate` (without `--touch-only`). Pass `--no-input` if unsure.
 3. **Zero-guesswork discovery via `find`, `project status`, `--json`, or MCP tools:**
    - Reverse-lookup which entry owns an env var: `passkey find <ENV_VAR> --json` or `passkey find --from-file .env.example --json` (MCP `passkey_find`)
@@ -30,8 +30,9 @@ Secrets for this workspace are stored in the OS keychain via `passkey`—never i
    - Explicit entry injection: `passkey run -q --strict <entry> -- <command>`
    - Gitignored template rendering: `passkey inject -i .env.template -o .env`
 5. **Respect `session` & `prompt` policies:**
-   - `policy = session` prompts Touch ID once and unlocks the entry for your current agent session (bound to ancestor PID + start time).
+   - `policy = session` prompts Touch ID once and unlocks the entry for your current agent session (bound to ancestor PID + start time; default `10m` via `agent-session-lease-ttl`).
    - `policy = prompt` prompts Touch ID on every invocation unless the user grants a scoped lease: `passkey lease grant <entry> --ttl 15m`.
+   - Never silently downgrade a user's `session` or `prompt` policy (`passkey policy` / `passkey policy --all`) without explicit user instruction.
 """
 
 _CLAUDE_OR_GEMINI_SKILL = (

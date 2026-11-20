@@ -80,6 +80,7 @@ This non-destructively writes:
 | Plaintext `passkey export <file>` or `passkey export -` | `passkey list --json` or `passkey export <file> --no-secrets` |
 | `passkey generate --no-copy` (prints raw secret to agent `stdout`) | `passkey request <entry> --fields <VAR>` |
 | `passkey inject --stdout` or `passkey inject -o -` | `passkey inject -i <tpl> -o <gitignored-file>` |
+| `passkey policy <entry> <mode>`, `passkey policy --all ...`, or `passkey config default-policy <mode>` (policy downgrade/mutation) | Read-only `passkey policy <entry> --json` / `passkey config default-policy --json`, or ask the user to change policies in their terminal |
 
 ---
 

@@ -8,6 +8,24 @@
 
 ## [Unreleased]
 
+## 0.10.0 (2026-11-20)
+
+### Added
+
+- **Platform-aware global `default-policy` setting (`passkey config default-policy`)**: added `default-policy` (`allow`, `session`, or `prompt`) to `<data_dir>/settings.json`—defaulting to `session` on macOS when `LocalAuthentication` (`LAContext`) is available and `allow` on headless, Linux, or Windows hosts—and inherited automatically by net-new entries created via `passkey new`, `passkey template apply`, `passkey request` / MCP `passkey_request_secret` (when `--policy` is omitted), and `passkey upload` / `receive` (when the incoming token carries the default `"allow"` policy).
+- **First-run agent authorization onboarding (`passkey` FTUE)**: interactive first-run onboarding now prompts once to choose between 1-tap `10m` Session Touch ID (`session`), zero-prompt headless/YOLO (`allow`), or per-command Touch ID (`prompt`) whenever `settings.json` has not yet recorded an explicit `default_policy` choice.
+- **Bulk policy switching & MCP server exclusion (`passkey policy --all`)**: added `passkey policy --all <allow|session|prompt> [--exclude-mcp] [-y|--yes] [--json]` to switch access policies across all keychain entries and sync the `entries.json` v2 index in one pass while optionally keeping wrapped or MCP-migrated background servers headless (`--exclude-mcp`).
+- **Explicit `--policy` flag on `passkey init` (`passkey mcp init --policy`)**: added `--policy allow|session|prompt` to `passkey init` while keeping migrated background stdio MCP servers on `policy = "allow"` by default so parallel IDE startup never triggers concurrent Touch ID prompts.
+
+### Changed
+
+- **Atomic `settings.json` persistence & `Entry` metadata preservation on updates**: `set_setting` now writes `<data_dir>/settings.json` atomically (`0o600` temp file + `os.replace`) without materializing an unchosen `default_policy` when unrelated settings change, and in-place updates via `passkey new`, `passkey template apply`, and `passkey init` preserve existing `Entry` metadata (`config`, `created`, `source`, `policy`, `last_rotated`).
+- **Agent skill & guardrail rules (`passkey/skills.py`)**: updated installed agent rules so `passkey request` inherits the user's `default-policy` and agents never silently downgrade `session` or `prompt` policies without explicit user instruction.
+
+### Security
+
+- **Pre-execution hook guardrail against agent policy downgrades (`passkey/hooks.py`)**: `passkey hook check` now blocks AI agents from mutating entry or global authorization policies (`passkey [entry] policy <entry> <mode>`, `passkey policy --all ...`, and `passkey config default-policy <mode>`) while continuing to allow read-only policy inspection (`passkey policy <entry> --json`, `passkey config default-policy --json`).
+
 ## 0.9.2 (2026-11-20)
 
 ### Fixed

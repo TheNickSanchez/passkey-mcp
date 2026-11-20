@@ -154,6 +154,35 @@ def _check_shell_command(command: str) -> tuple[bool, str]:
                         "Write to a gitignored file instead: 'passkey inject -i <tpl> -o <outfile>'.",
                     )
 
+                # Block mutating `passkey policy` / `passkey entry policy` (allow read-only inspection)
+                if sub0 == "policy" or (sub0 == "entry" and sub1 == "policy"):
+                    pol_args = effective[2:] if sub0 == "entry" else effective[1:]
+                    pol_pos = [a for a in pol_args if not a.startswith("-")]
+                    has_all = any(a == "--all" or a.startswith("--all=") for a in pol_args)
+                    if has_all or len(pol_pos) >= 2:
+                        return (
+                            False,
+                            "Blocked by passkey hook: AI agents cannot modify entry access policies "
+                            "('passkey policy <entry> <mode>' / 'passkey policy --all'). "
+                            "Inspect policies with 'passkey policy <entry> --json' or ask the user "
+                            "to update policies in their terminal.",
+                        )
+
+                # Block mutating `passkey config default-policy <value>` (allow read-only inspection)
+                if sub0 == "config":
+                    cfg_pos = [a for a in effective[1:] if not a.startswith("-")]
+                    if cfg_pos:
+                        norm_cfg_key = cfg_pos[0].strip().lower().replace("-", "_")
+                        if norm_cfg_key.startswith("default_policy=") or (
+                            norm_cfg_key == "default_policy" and len(cfg_pos) >= 2
+                        ):
+                            return (
+                                False,
+                                "Blocked by passkey hook: AI agents cannot modify 'default-policy'. "
+                                "Inspect settings with 'passkey config default-policy --json' or ask "
+                                "the user to run 'passkey config default-policy <mode>' in their terminal.",
+                            )
+
         # Block shell file-reading utilities targeting .env, *.backup, *.enc
         if exe in _READ_SHELL_VERBS:
             for arg in rest:

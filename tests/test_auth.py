@@ -139,3 +139,79 @@ class TestRequireAuth:
         with patch("passkey.auth.authenticate", return_value=False), \
              pytest.raises(PasskeyError, match="test operation"):
             require_auth("test operation")
+
+
+class TestIsLAContextAvailable:
+    def test_false_when_disabled_or_non_darwin(self, monkeypatch):
+        from passkey.auth import is_lacontext_available
+
+        # Disabled via PASSKEY_DISABLE_LACONTEXT=1 (default in conftest)
+        assert is_lacontext_available() is False
+
+        monkeypatch.setenv("PASSKEY_DISABLE_LACONTEXT", "0")
+        monkeypatch.setattr(sys, "platform", "linux")
+        assert is_lacontext_available() is False
+
+        monkeypatch.setattr(sys, "platform", "darwin")
+        with patch("passkey.auth.ctypes.CDLL", side_effect=OSError("missing framework")):
+            assert is_lacontext_available() is False
+
+    @pytest.mark.parametrize(
+        "can_eval_result,expected",
+        [
+            (True, True),
+            (False, False),
+            (RuntimeError("coreauthd failure"), False),
+        ],
+    )
+    def test_mocked_cdll_can_evaluate_policy_and_finally_release(
+        self, monkeypatch, can_eval_result, expected
+    ):
+        import ctypes as _ctypes
+
+        from passkey.auth import _LA_POLICY_DEVICE_OWNER_AUTH, is_lacontext_available
+
+        monkeypatch.setenv("PASSKEY_DISABLE_LACONTEXT", "0")
+        monkeypatch.setattr(sys, "platform", "darwin")
+
+        fake_objc = MagicMock()
+        fake_objc.objc_getClass.return_value = 0x1000
+        selectors = {
+            b"alloc": 101,
+            b"init": 102,
+            b"release": 103,
+            b"canEvaluatePolicy:error:": 104,
+        }
+        fake_objc.sel_registerName.side_effect = lambda name: selectors[name]
+
+        eval_calls: list[tuple[int, int, int]] = []
+        release_calls: list[tuple[int, int]] = []
+
+        def _fake_cfunctype(restype, *argtypes):
+            def _bind(_addr):
+                if restype is _ctypes.c_void_p:
+                    return lambda receiver, sel: 0x2000 if sel == 101 else 0x3000
+                if restype is None:
+                    return lambda receiver, sel: release_calls.append((receiver, sel))
+                if restype is _ctypes.c_bool:
+                    def _can_eval(ctx, sel, policy, _err_ptr):
+                        eval_calls.append((ctx, sel, policy))
+                        if isinstance(can_eval_result, Exception):
+                            raise can_eval_result
+                        return can_eval_result
+
+                    return _can_eval
+                raise AssertionError(f"Unexpected restype: {restype}")
+
+            return _bind
+
+        with (
+            patch("passkey.auth.ctypes.CDLL", side_effect=[fake_objc, MagicMock()]),
+            patch("passkey.auth.ctypes.cast", return_value=MagicMock(value=0xCAFEBABE)),
+            patch("passkey.auth.ctypes.CFUNCTYPE", side_effect=_fake_cfunctype),
+        ):
+            assert is_lacontext_available() is expected
+
+        assert eval_calls == [(0x3000, 104, _LA_POLICY_DEVICE_OWNER_AUTH)]
+        # LAContext instance must always be released in finally, even on error
+        assert release_calls == [(0x3000, 103)]

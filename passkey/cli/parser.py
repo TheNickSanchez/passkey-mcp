@@ -314,6 +314,12 @@ def _configure_init_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParse
     )
     p.add_argument("--backup", help="Custom backup file path")
     p.add_argument(
+        "--policy",
+        choices=["allow", "session", "prompt"],
+        default=None,
+        help="Access policy for migrated MCP server entries (default: 'allow' for headless IDE startup)",
+    )
+    p.add_argument(
         "-y",
         "--yes",
         action="store_true",
@@ -876,9 +882,14 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     policy_parser = _add_primary(
-        "policy", "Show or set an entry's access policy (allow, session, or prompt)"
+        "policy",
+        "Show or set entry access policy (single entry or --all bulk mode)",
     )
-    policy_parser.add_argument("entry", help="Entry name")
+    policy_parser.add_argument(
+        "entry",
+        nargs="?",
+        help="Entry name (or target policy 'allow'|'session'|'prompt' when --all is set)",
+    )
     policy_parser.add_argument(
         "policy_value",
         nargs="?",
@@ -886,10 +897,29 @@ def create_parser() -> argparse.ArgumentParser:
         help="Access policy: 'allow' (headless), 'session' (1 Touch ID per agent session), or 'prompt' (every access)",
     )
     policy_parser.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_entries",
+        help="Apply policy across all entries in one pass",
+    )
+    policy_parser.add_argument(
+        "--exclude-mcp",
+        action="store_true",
+        dest="exclude_mcp",
+        help="Skip MCP server entries (with --all) so IDE background servers stay headless",
+    )
+    policy_parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        dest="yes",
+        help="Apply bulk policy update without interactive confirmation prompt",
+    )
+    policy_parser.add_argument(
         "--json",
         action="store_true",
         dest="json_output",
-        help="Output entry policy as JSON",
+        help="Output entry or bulk policy status as JSON",
     )
     policy_parser.completer = _entry_completer  # type: ignore[attr-defined]
 

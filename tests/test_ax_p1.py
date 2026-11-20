@@ -376,12 +376,37 @@ class TestSkillInstallerHooksAndInjectGitGuard:
             "passkey inject -i .env.template --stdout",
             "passkey inject -i .env.template -o -",
             "passkey inject -i .env.template --out-file=-",
+            "passkey policy stripe allow",
+            "passkey --no-input policy stripe session --json",
+            "passkey entry policy stripe prompt",
+            "passkey policy --all allow --yes",
+            "passkey policy --all session --exclude-mcp",
+            "passkey config default-policy allow",
+            "passkey config default_policy session --json",
         ],
     )
     def test_hardened_hook_blocks_secret_exfiltrating_passkey_subcommands(self, cmd):
         allowed, reason = evaluate_hook_payload({"tool_input": {"command": cmd}})
         assert allowed is False, f"Expected hook to block: {cmd}"
         assert "Blocked by passkey hook" in reason
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "passkey policy stripe",
+            "passkey policy stripe --json",
+            "passkey --no-input policy stripe --json",
+            "passkey entry policy stripe --json",
+            "passkey config",
+            "passkey config --json",
+            "passkey config default-policy",
+            "passkey config default-policy --json",
+            "passkey config default_policy --json",
+        ],
+    )
+    def test_hook_allows_readonly_policy_and_default_policy_inspection(self, cmd):
+        allowed, reason = evaluate_hook_payload({"tool_input": {"command": cmd}})
+        assert allowed is True, f"Expected hook to allow read-only command '{cmd}', got: {reason}"
 
     def test_inject_blocks_unignored_git_output_unless_gitignored_or_forced(self, tmp_path, capsys):
         subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)

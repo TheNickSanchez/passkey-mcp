@@ -12,6 +12,8 @@ from .audit import clear_logs, get_recent_logs, log_operation, verify_audit_log
 from .clipboard import copy_with_autoclear
 from .keychain import (
     PasskeyError,
+    _get_entry,
+    bulk_update_policies,
     delete_entry,
     get_all_entries,
     get_all_entry_metas,
@@ -426,7 +428,18 @@ def cmd_new(name: str | None = None, template_name: str | None = None) -> None:
         if not fields:
             raise PasskeyError("No fields entered, operation cancelled.")
         _print_entry_summary(name, fields)
-        entry = Entry(name=name, fields=fields)
+        from .settings import get_default_policy
+
+        existing_ent = _get_entry(name, log_read=False) if is_update else None
+        entry = Entry(
+            name=name,
+            fields=fields,
+            config=existing_ent.config.copy() if existing_ent else {},
+            created=existing_ent.created if existing_ent else None,
+            source=existing_ent.source if existing_ent else None,
+            last_rotated=existing_ent.last_rotated if existing_ent else None,
+            policy=existing_ent.policy if existing_ent else get_default_policy(),
+        )
         save_entry(entry, is_update=is_update)
         print(f"Saved '{name}' with {len(fields)} field(s)")
         return
@@ -482,8 +495,21 @@ def cmd_new(name: str | None = None, template_name: str | None = None) -> None:
     if final_name != name and final_name in all_entry_names:
         raise PasskeyError(f"Entry '{final_name}' already exists.")
 
-    entry = Entry(name=final_name, fields=fields, config=config)
-    save_entry(entry, is_update=(is_update if final_name == name else False))
+    from .settings import get_default_policy
+
+    updating_existing = is_update and final_name == name
+    existing_ent = _get_entry(final_name, log_read=False) if updating_existing else None
+    merged_config = {**(existing_ent.config if existing_ent else {}), **config}
+    entry = Entry(
+        name=final_name,
+        fields=fields,
+        config=merged_config,
+        created=existing_ent.created if existing_ent else None,
+        source=existing_ent.source if existing_ent else None,
+        last_rotated=existing_ent.last_rotated if existing_ent else None,
+        policy=existing_ent.policy if existing_ent else get_default_policy(),
+    )
+    save_entry(entry, is_update=updating_existing)
     print(f"Saved '{final_name}' with {len(fields)} field(s)")
 
 
@@ -493,10 +519,12 @@ def cmd_template_apply(template: dict, entry_name: str) -> None:
     from .keychain import list_entries
     from .keychain import save_entry as _save
     from .models import Entry
+    from .settings import get_default_policy
 
     all_names = list_entries()
+    is_update = entry_name in all_names
 
-    if entry_name in all_names:
+    if is_update:
         if is_interactive():
             import questionary
 
@@ -518,8 +546,17 @@ def cmd_template_apply(template: dict, entry_name: str) -> None:
         raise PasskeyError("No fields entered, operation cancelled.")
 
     _print_entry_summary(entry_name, fields)
-    entry = Entry(name=entry_name, fields=fields, source=f"template:{template['name']}")
-    _save(entry, is_update=entry_name in all_names)
+    existing_ent = _get_entry(entry_name, log_read=False) if is_update else None
+    entry = Entry(
+        name=entry_name,
+        fields=fields,
+        config=existing_ent.config.copy() if existing_ent else {},
+        created=existing_ent.created if existing_ent else None,
+        source=f"template:{template['name']}",
+        last_rotated=existing_ent.last_rotated if existing_ent else None,
+        policy=existing_ent.policy if existing_ent else get_default_policy(),
+    )
+    _save(entry, is_update=is_update)
     print(
         f"Created entry '{entry_name}' from template '{template['name']}' with {len(fields)} field(s)"
     )
@@ -1012,6 +1049,162 @@ def cmd_policy(
         )
         return
     print(f"Set policy for '{target_entry.name}' to '{normalized}'")
+
+
+def _get_wrapped_mcp_entry_names() -> set[str]:
+    """Return entry names currently wrapped by passkey run in detected MCP configs."""
+    from .mcp_config import (
+        ADAPTERS,
+        MCPConfigError,
+        get_mcp_servers,
+        get_wrapped_entry_name,
+        is_passkey_wrapped,
+        load_config,
+    )
+
+    wrapped: set[str] = set()
+    for adapter in ADAPTERS.values():
+        for config_path in adapter.get_all_existing_paths():
+            try:
+                config = load_config(config_path)
+            except (FileNotFoundError, MCPConfigError, OSError):
+                continue
+            servers = get_mcp_servers(config, adapter)
+            for server_name, server_cfg in servers.items():
+                if is_passkey_wrapped(server_cfg):
+                    wrapped.add(get_wrapped_entry_name(server_cfg) or server_name)
+    return wrapped
+
+
+def _is_mcp_entry(
+    entry_name: str,
+    source: str | None,
+    wrapped_mcp_entries: set[str],
+) -> bool:
+    """Return True if an entry originated from MCP import/init/add or wraps an MCP server."""
+    if entry_name in wrapped_mcp_entries:
+        return True
+    if not source:
+        return False
+    tokens = [tok.strip() for tok in source.split("+") if tok.strip()]
+    return any(tok == "import-mcp" or tok.endswith(("-init", "-add")) for tok in tokens)
+
+
+def cmd_policy_all(
+    policy_value: str,
+    *,
+    exclude_mcp: bool = False,
+    yes: bool = False,
+    json_output: bool = False,
+) -> None:
+    """Bulk-update access policy across all entries (optionally skipping MCP servers)."""
+    normalized = policy_value.strip().lower()
+    if normalized not in VALID_POLICIES:
+        raise PasskeyError(
+            f"Invalid policy '{policy_value}'. Expected one of: {', '.join(sorted(VALID_POLICIES))}",
+            error_code="INVALID_USAGE",
+        )
+
+    metas = get_all_entry_metas(hydrate_unmigrated=True)
+    if not metas:
+        if json_output:
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "policy": normalized,
+                        "updated_count": 0,
+                        "unchanged_count": 0,
+                        "excluded_mcp_count": 0,
+                        "updated": [],
+                        "unchanged": [],
+                        "excluded_mcp": [],
+                    },
+                    indent=2,
+                )
+            )
+            return
+        print("No entries found")
+        return
+
+    wrapped_names = _get_wrapped_mcp_entry_names() if exclude_mcp else set()
+    target_names: list[str] = []
+    excluded_mcp: list[str] = []
+    for meta in metas:
+        if exclude_mcp and _is_mcp_entry(meta.name, meta.source, wrapped_names):
+            excluded_mcp.append(meta.name)
+        else:
+            target_names.append(meta.name)
+
+    if not target_names:
+        if json_output:
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "policy": normalized,
+                        "updated_count": 0,
+                        "unchanged_count": 0,
+                        "excluded_mcp_count": len(excluded_mcp),
+                        "updated": [],
+                        "unchanged": [],
+                        "excluded_mcp": excluded_mcp,
+                    },
+                    indent=2,
+                )
+            )
+            return
+        print(
+            f"No matching non-MCP entries to update ({len(excluded_mcp)} MCP entry(s) excluded)."
+        )
+        return
+
+    if not yes:
+        excl_note = f" (skipping {len(excluded_mcp)} MCP entry(s))" if excluded_mcp else ""
+        confirm = (
+            input(
+                f"Set policy to '{normalized}' for {len(target_names)} entry(s){excl_note}? [Y/n]: "
+            )
+            .strip()
+            .lower()
+        )
+        if confirm not in ("", "y", "yes"):
+            print("Cancelled")
+            return
+
+    updated, unchanged = bulk_update_policies(target_names, normalized)
+    log_operation(
+        "policy",
+        details={
+            "bulk": True,
+            "policy": normalized,
+            "updated": len(updated),
+            "skipped": len(unchanged) + len(excluded_mcp),
+        },
+    )
+
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "policy": normalized,
+                    "updated_count": len(updated),
+                    "unchanged_count": len(unchanged),
+                    "excluded_mcp_count": len(excluded_mcp),
+                    "updated": updated,
+                    "unchanged": unchanged,
+                    "excluded_mcp": excluded_mcp,
+                },
+                indent=2,
+            )
+        )
+        return
+
+    summary = f"Set policy='{normalized}': {len(updated)} updated, {len(unchanged)} unchanged"
+    if exclude_mcp:
+        summary += f", {len(excluded_mcp)} MCP entry(s) excluded"
+    print(summary)
 
 
 def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: bool = False) -> None:
