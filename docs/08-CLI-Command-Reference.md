@@ -50,7 +50,7 @@ Complete reference for every `passkey` command, subcommand group, flag, setting,
 | `passkey new` | `[name] [-t\|--template <tpl>]` | Create a new secret entry via masked interactive input. |
 | `passkey request` | `<entry> -f\|--fields <VAR...> [--policy allow\|session\|prompt] [--hint <str>] [--reason <str>] [--timeout 5..300] [--overwrite] [--json]` | Capture or rotate secrets via out-of-band native OS hidden dialog (`osascript` / `zenity`) with popup cooldown rate-limiting. |
 | `passkey get` | `[entry] [-a\|--all]` | Interactive field picker (copies 1 field to clipboard for 30s; `--all` copies `KEY='value'` lines). |
-| `passkey list` | `[-n\|--names-only] [--json]` | List saved entries (`--json` emits secret-free metadata array). |
+| `passkey list` | `[-n\|--names-only] [--json]` | List saved entries from the secret-free `entries.json` index with zero Keychain reads (`--names-only` fast-paths `<TAB>` completion; `--json` emits metadata array). |
 | `passkey find` | `[vars...] [--from-file <path>] [--json]` | Reverse-lookup which entry owns given env var name(s) across exact keys and service aliases. |
 | `passkey edit` | `[entry]` | Interactive editor to add/modify/remove fields, edit `config`, or rename an entry. |
 | `passkey delete` | `<entry> [-y\|--yes]` | Delete an entry from the OS keychain (`--yes` skips confirmation). |

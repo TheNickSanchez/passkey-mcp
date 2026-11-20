@@ -5,8 +5,8 @@ import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from .keychain import PasskeyError, _get_entry, get_entry
-from .models import Entry, is_valid_name
+from .keychain import PasskeyError, _get_entry, get_entry, get_entry_meta
+from .models import Entry, EntryMeta, is_valid_name
 
 REFERENCE_SCHEME = "passkey://"
 _ENV_INTERP_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
@@ -235,7 +235,7 @@ def validate_references_in_file(
     active_leases = peek_all_leases()
     content = path.read_text(encoding="utf-8")
     uris = extract_references_from_text(content)
-    cache: dict[str, Entry | None] = {}
+    cache: dict[str, EntryMeta | None] = {}
     missing: list[dict[str, str]] = []
     prompt_without_lease: set[str] = set()
 
@@ -247,21 +247,21 @@ def validate_references_in_file(
             continue
 
         if entry_name not in cache:
-            cache[entry_name] = _get_entry(entry_name, log_read=False)
-        entry = cache[entry_name]
-        if entry is None:
+            cache[entry_name] = get_entry_meta(entry_name)
+        meta = cache[entry_name]
+        if meta is None:
             missing.append({"reference": uri, "reason": f"entry '{entry_name}' not found"})
-        elif field_name not in entry.fields and field_name not in entry.config:
+        elif field_name not in meta.fields and field_name not in meta.config_keys:
             missing.append(
                 {
                     "reference": uri,
                     "reason": f"field '{field_name}' not found in entry '{entry_name}'",
                 }
             )
-        elif getattr(entry, "policy", "allow") in ("prompt", "session") and (
+        elif getattr(meta, "policy", "allow") in ("prompt", "session") and (
             entry_name not in active_leases
             or (
-                getattr(entry, "policy", "allow") == "prompt"
+                getattr(meta, "policy", "allow") == "prompt"
                 and active_leases[entry_name].get("lease_kind") == "session"
             )
         ):

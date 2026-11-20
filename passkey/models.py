@@ -200,3 +200,66 @@ class Entry:
         """Mark entry as rotated by updating the last_rotated timestamp."""
         self.last_rotated = datetime.now().isoformat()
         self.touch()
+
+
+@dataclass
+class EntryMeta:
+    """Secret-free cached metadata for an entry stored in entries.json v2.
+
+    Never stores secret field values or config values. Authoritative access
+    policies at secret-release time always come from the OS Keychain Entry.
+    """
+
+    name: str
+    fields: list[str] = field(default_factory=list)
+    config_keys: list[str] = field(default_factory=list)
+    policy: str = "allow"
+    created: str | None = None
+    modified: str | None = None
+    last_rotated: str | None = None
+    source: str | None = None
+    hydrated: bool = True
+
+    @classmethod
+    def from_entry(cls, entry: Entry) -> "EntryMeta":
+        """Build a hydrated EntryMeta from an authoritative Keychain Entry."""
+        return cls(
+            name=entry.name,
+            fields=sorted(entry.fields.keys()),
+            config_keys=sorted(entry.config.keys()),
+            policy=entry.policy if entry.policy in VALID_POLICIES else "allow",
+            created=entry.created,
+            modified=entry.modified,
+            last_rotated=entry.last_rotated,
+            source=entry.source,
+            hydrated=True,
+        )
+
+    def to_index_dict(self) -> dict[str, object]:
+        """Serialize secret-free metadata row for entries.json v2."""
+        return {
+            "fields": list(self.fields),
+            "config_keys": list(self.config_keys),
+            "policy": self.policy if self.policy in VALID_POLICIES else "allow",
+            "created": self.created,
+            "modified": self.modified,
+            "last_rotated": self.last_rotated,
+            "source": self.source,
+            "hydrated": bool(self.hydrated),
+        }
+
+    def to_export_dict(self) -> dict[str, object]:
+        """Convert metadata to a secret-free export dictionary (--no-secrets)."""
+        result: dict[str, object] = {
+            "name": self.name,
+            "fields": {},
+            "config": {k: "" for k in self.config_keys},
+            "created": self.created,
+            "modified": self.modified,
+            "source": self.source,
+            "policy": self.policy,
+        }
+        if self.last_rotated:
+            result["last_rotated"] = self.last_rotated
+        return result
+

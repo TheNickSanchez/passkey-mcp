@@ -10,9 +10,9 @@ from pathlib import Path
 
 from .audit import log_operation
 from .interactive import is_agent_subprocess
-from .keychain import PasskeyError, _get_entry, get_entry
+from .keychain import PasskeyError, get_entry, get_entry_meta
 from .masking import SecretMasker
-from .models import Entry
+from .models import Entry, EntryMeta
 from .references import is_reference, parse_dotenv_file, parse_reference, resolve_reference
 
 _SELECT_POLL_SECONDS = 0.1
@@ -112,7 +112,7 @@ def preflight_run(
     from .leases import peek_all_leases
 
     active_leases = peek_all_leases()
-    entry_cache: dict[str, Entry | None] = {}
+    meta_cache: dict[str, EntryMeta | None] = {}
     entries_found: list[dict] = []
     entries_missing: list[str] = []
     injected_vars: set[str] = set()
@@ -125,9 +125,9 @@ def preflight_run(
         interp_env.update(extra_env)
 
     for name in entries:
-        entry = _get_entry(name, log_read=False)
-        entry_cache[name] = entry
-        if entry is None:
+        meta = get_entry_meta(name)
+        meta_cache[name] = meta
+        if meta is None:
             entries_missing.append(name)
             remediation.append(
                 f"Ask the user to run 'passkey new {name}' in their terminal "
@@ -135,7 +135,7 @@ def preflight_run(
             )
             continue
 
-        policy = getattr(entry, "policy", "allow")
+        policy = getattr(meta, "policy", "allow")
         lease_rec = active_leases.get(name)
         has_lease = lease_rec is not None and (
             policy != "prompt" or lease_rec.get("lease_kind") != "session"
@@ -144,12 +144,10 @@ def preflight_run(
         if will_prompt:
             prompt_without_lease.add(name)
 
-        secret_keys = sorted(entry.fields.keys())
-        config_keys = sorted(entry.config.keys())
+        secret_keys = sorted(meta.fields)
+        config_keys = sorted(meta.config_keys)
         injected_vars.update(secret_keys)
         injected_vars.update(config_keys)
-        # Non-secret config values may participate in $VAR interpolation; never expose in output
-        interp_env.update(entry.config)
 
         entries_found.append(
             {
@@ -203,10 +201,10 @@ def preflight_run(
             )
             continue
 
-        if ref_entry_name not in entry_cache:
-            entry_cache[ref_entry_name] = _get_entry(ref_entry_name, log_read=False)
-        ref_entry = entry_cache[ref_entry_name]
-        if ref_entry is None:
+        if ref_entry_name not in meta_cache:
+            meta_cache[ref_entry_name] = get_entry_meta(ref_entry_name)
+        ref_meta = meta_cache[ref_entry_name]
+        if ref_meta is None:
             references_invalid.append(
                 {
                     "env_var": env_var,
@@ -219,7 +217,7 @@ def preflight_run(
             )
             continue
 
-        ref_policy = getattr(ref_entry, "policy", "allow")
+        ref_policy = getattr(ref_meta, "policy", "allow")
         ref_lease_rec = active_leases.get(ref_entry_name)
         ref_has_lease = ref_lease_rec is not None and (
             ref_policy != "prompt" or ref_lease_rec.get("lease_kind") != "session"
@@ -227,7 +225,7 @@ def preflight_run(
         if ref_policy in ("prompt", "session") and not ref_has_lease:
             prompt_without_lease.add(ref_entry_name)
 
-        if ref_field in ref_entry.fields:
+        if ref_field in ref_meta.fields:
             injected_vars.add(env_var)
             references_valid.append(
                 {
@@ -238,7 +236,7 @@ def preflight_run(
                     "kind": "secret",
                 }
             )
-        elif ref_field in ref_entry.config:
+        elif ref_field in ref_meta.config_keys:
             injected_vars.add(env_var)
             references_valid.append(
                 {

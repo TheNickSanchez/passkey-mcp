@@ -64,6 +64,60 @@ def resolve_entry(
     return final_entry
 
 
+def resolve_entry_meta(
+    entry_arg: str | None,
+    prompt: str = "Select an entry",
+    fuzzy: bool = True,
+):
+    """Resolve secret-free EntryMeta without touching the OS Keychain when hydrated."""
+    from ..interactive import (
+        InteractiveRequiredError,
+        can_prompt_interactively,
+        select_entry,
+    )
+    from ..keychain import get_entry_meta
+
+    resolved_name = None
+
+    if entry_arg:
+        meta = get_entry_meta(entry_arg)
+        if meta:
+            return meta
+        if not fuzzy or not can_prompt_interactively():
+            raise PasskeyError(
+                f"Entry '{entry_arg}' not found. "
+                f"Ask the user to run 'passkey new {entry_arg}' in their terminal "
+                "(never ask them to paste secrets into chat).",
+                error_code="ENTRY_NOT_FOUND",
+                entry=entry_arg,
+                remediation_command=f"passkey new {entry_arg}",
+            )
+        resolved_name = entry_arg
+    else:
+        if not can_prompt_interactively():
+            raise InteractiveRequiredError(
+                "No entry name specified in non-interactive mode.\n"
+                "  Pass an explicit <entry> name, or run 'passkey list --json' to discover entries.",
+                error_code="INTERACTIVE_REQUIRED",
+                remediation_command="passkey list --json",
+            )
+
+    resolved_name = select_entry(prompt, filter_prefix=resolved_name if fuzzy else "")
+
+    final_meta = get_entry_meta(resolved_name)
+    if not final_meta:
+        raise PasskeyError(
+            f"Entry '{resolved_name}' not found. "
+            f"Ask the user to run 'passkey new {resolved_name}' in their terminal "
+            "(never ask them to paste secrets into chat).",
+            error_code="ENTRY_NOT_FOUND",
+            entry=resolved_name,
+            remediation_command=f"passkey new {resolved_name}",
+        )
+
+    return final_meta
+
+
 def _print_preflight_report(report: dict) -> None:
     """Render a human-readable preflight summary for ``passkey run --dry-run``."""
     status_label = "READY" if report["ready"] else "NOT READY"

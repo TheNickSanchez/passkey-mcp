@@ -67,7 +67,7 @@ class TestAuditSummary:
         ])
 
         # Keep the oldest-entry lookup off the real keychain
-        with patch("passkey.health.get_all_entries", return_value=[]):
+        with patch("passkey.health.get_all_entry_metas", return_value=[]):
             cmd_audit_summary()
         out = capsys.readouterr().out
 
@@ -99,7 +99,7 @@ class TestAuditSummary:
              "success": True},
         ])
 
-        with patch("passkey.health.get_all_entries", return_value=[]):
+        with patch("passkey.health.get_all_entry_metas", return_value=[]):
             cmd_audit_summary()
         out = capsys.readouterr().out
         assert "delete" in out

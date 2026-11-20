@@ -6,24 +6,42 @@ from unittest.mock import patch
 import pytest
 
 from passkey.cli import create_parser, main
-from passkey.models import Entry
+from passkey.models import Entry, EntryMeta
 
 
 @pytest.fixture
 def mock_keychain():
     """Mock keychain module functions."""
     with patch("passkey.commands.get_all_entries") as mock_all, \
+         patch("passkey.commands.get_all_entry_metas") as mock_all_metas, \
          patch("passkey.commands.list_entries") as mock_list, \
          patch("passkey.commands.get_entry") as mock_get, \
+         patch("passkey.commands.get_entry_meta") as mock_get_meta_cmd, \
          patch("passkey.commands.save_entry") as mock_save, \
          patch("passkey.commands.delete_entry") as mock_delete, \
          patch("passkey.keychain.get_entry") as mock_get_keychain, \
+         patch("passkey.keychain.get_entry_meta") as mock_get_meta_keychain, \
          patch("passkey.dirs.run_migration_if_needed"):
         mock_get_keychain.side_effect = lambda name: mock_get.return_value
+        mock_all_metas.side_effect = lambda **kw: [
+            EntryMeta.from_entry(e) if isinstance(e, Entry) else e
+            for e in (mock_all.return_value or [])
+        ]
+
+        def _meta_from_get(name):
+            val = mock_get.return_value
+            if isinstance(val, Entry):
+                return EntryMeta.from_entry(val)
+            return val
+
+        mock_get_meta_cmd.side_effect = _meta_from_get
+        mock_get_meta_keychain.side_effect = _meta_from_get
         yield {
             "all": mock_all,
+            "all_metas": mock_all_metas,
             "list": mock_list,
             "get": mock_get,
+            "get_meta": mock_get_meta_keychain,
             "save": mock_save,
             "delete": mock_delete,
         }

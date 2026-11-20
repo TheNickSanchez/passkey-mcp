@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+## 0.9.1 (2026-11-20)
+
+### Changed
+
+- **Secret-free `entries.json` v2 metadata index**: stores non-sensitive entry metadata (secret and config key names, policy, timestamps, and source — never secret or config values) at `0o600` so metadata queries stay instant and prompt-free, with transparent lazy hydration for legacy v1 indexes.
+- **macOS Keychain ACL troubleshooting guide**: documented `Always Allow` vs single-run `Allow` dialogs and `uv tool install --python <version> passkey-mcp` interpreter pinning so Homebrew Python upgrades do not rotate binary code signatures and re-trigger Keychain prompts.
+
+### Fixed
+
+- **Zero-Keychain discovery, preflight & diagnostics**: read-only CLI commands (`list`, `info`, `check`, `find`, `policy <entry>`, `export --no-secrets`, `run --dry-run`, `project status`, `status`, `doctor`, `audit --summary`, `lease list`), shell tab-completion, and MCP discovery/preflight tools now read from the `entries.json` metadata index without triggering OS Keychain access prompts.
+
+### Security
+
+- **Authoritative Keychain policy enforcement & self-healing index**: policy-gated secret-release paths (`run`, `exec`, `inject`, `mount`, `plugin run`, `browser-fill`) hydrate from the OS Keychain and enforce the Keychain payload's authoritative `policy` via `authorize_entry_access` (preventing disk edits to `entries.json` from downgrading `prompt` or `session` protection and automatically repairing drifted metadata), and interactive secret readers (`get`, `export`, `share`) likewise read payloads directly from the OS Keychain rather than `entries.json`.
+
 ## 0.9.0 (2026-11-20)
 
 ### Added

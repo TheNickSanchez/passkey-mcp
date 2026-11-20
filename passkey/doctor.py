@@ -9,7 +9,7 @@ not a fork.
 from datetime import datetime
 from pathlib import Path
 
-from .keychain import PasskeyError, get_all_entries, list_entries
+from .keychain import PasskeyError, get_all_entry_metas, list_entries
 from .mcp_config import (
     ADAPTERS,
     BACKUP_SUFFIX,
@@ -148,8 +148,8 @@ def run_diagnostics(deep: bool = False) -> dict:
 
 def _deep_checks(checks: list[dict], issues: list[str], recommendations: list[str]) -> None:
     """Deep-only checks: entry age analysis and bundle file permissions."""
-    # Entry age analysis
-    all_entries = get_all_entries()
+    # Entry age analysis (from secret-free v2 metadata index)
+    all_entries = get_all_entry_metas(hydrate_unmigrated=False)
     stale_entries = []
     now = datetime.now()
 

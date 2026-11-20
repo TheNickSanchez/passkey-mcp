@@ -12,7 +12,7 @@ from passkey.mcp_server import (
     passkey_status,
     passkey_wrap_server,
 )
-from passkey.models import Entry
+from passkey.models import Entry, EntryMeta
 
 
 class TestPasskeyListEntries:
@@ -41,24 +41,23 @@ class TestPasskeyListEntries:
 class TestPasskeyGetEntryFields:
     """Tests for passkey_fields tool."""
 
-    @patch('passkey.mcp_server._get_entry')
-    def test_returns_field_names(self, mock_get):
-        mock_entry = Entry(name="test", fields={"TOKEN": "secret", "KEY": "value"})
-        mock_get.return_value = mock_entry
+    @patch('passkey.mcp_server.get_entry_meta')
+    def test_returns_field_names(self, mock_get_meta):
+        mock_get_meta.return_value = EntryMeta(name="test", fields=["KEY", "TOKEN"])
         result = passkey_fields("test")
         assert set(result) == {"TOKEN", "KEY"}
-        mock_get.assert_called_once_with("test", log_read=False)
+        mock_get_meta.assert_called_once_with("test")
 
-    @patch('passkey.mcp_server._get_entry')
-    def test_raises_for_missing_entry(self, mock_get):
-        mock_get.return_value = None
+    @patch('passkey.mcp_server.get_entry_meta')
+    def test_raises_for_missing_entry(self, mock_get_meta):
+        mock_get_meta.return_value = None
         with pytest.raises(Exception, match="not found"):
             passkey_fields("nonexistent")
 
-    @patch('passkey.mcp_server._get_entry')
-    def test_raises_on_keychain_error(self, mock_get):
+    @patch('passkey.mcp_server.get_entry_meta')
+    def test_raises_on_keychain_error(self, mock_get_meta):
         from passkey.keychain import PasskeyError
-        mock_get.side_effect = PasskeyError("Access denied")
+        mock_get_meta.side_effect = PasskeyError("Access denied")
         with pytest.raises(Exception, match="Failed to access keychain"):
             passkey_fields("test")
 

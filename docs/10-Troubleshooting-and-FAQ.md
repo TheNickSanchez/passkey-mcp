@@ -129,6 +129,26 @@ passkey audit --clear --yes
 
 ---
 
+## 8. macOS Keychain Prompts (`Always Allow` vs `Allow` & Pinning `--python`)
+
+**How discovery stays prompt-free:** All discovery, tab-completion (`passkey list --names-only`), `list`, `info`, `check`, `find`, `policy <entry>`, `run --dry-run`, `project status`, and `doctor` commands read from the secret-free `<data_dir>/entries.json` metadata index with **zero OS Keychain reads**.
+
+**Symptom:** When releasing or saving actual secrets (`passkey run`, `passkey exec`, `passkey new`), macOS displays `python3 wants to use your confidential information stored in "passkey" in your keychain`.
+
+**Why:** On macOS, `keyring` talks to the login Keychain through the Python interpreter binary, so macOS Keychain binds each item's Access Control List (ACL) to that specific `python3` executable path and code signature.
+
+**Fix:**
+* **`Always Allow` vs `Allow`:** Clicking **Allow** grants access for that single process invocation only, so macOS prompts again on the next run. Click **Always Allow** once per entry so macOS Keychain authorizes your `python3` binary permanently (your per-entry `session` and `prompt` Touch ID policies remain enforced by `passkey`).
+* **Pinning `--python` against Homebrew upgrades:** If your global `passkey` environment symlinks to Homebrew Python and `brew upgrade` bumps Python (for example, `3.13` → `3.14` or a new Cellar path), macOS treats the new interpreter binary as a different application and re-prompts. Install `passkey-mcp` against a `uv`-managed pinned interpreter so `brew upgrade` never rotates the underlying binary:
+
+```bash
+uv tool install --python 3.13 passkey-mcp
+# or
+uv tool install --python 3.14 passkey-mcp
+```
+
+---
+
 ## FAQ
 
 **Q: If I upgrade `passkey-mcp` via `pipx upgrade passkey-mcp` or `uv tool upgrade passkey-mcp`, do I lose my keys?**
