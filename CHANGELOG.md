@@ -10,6 +10,7 @@
 
 ### Added
 
+- **v0.9 architecture & implementation plan (`docs/plans/v0.9-sharing-and-windows.md`)**: documented the 5-phase engineering specification for inline encrypted token sharing (`passkey share` / `passkey upload` `pk1:` format) and first-class Windows parity (`WinVaultKeyring` chunking, `credui.dll` native prompts, Win32 process lineage, PowerShell wrappers, and Windows CI).
 - **Comprehensive multi-page Wiki (`docs/`) & link integrity suite (`tests/test_docs_links.py`)**: added `docs/_Sidebar.md`, `docs/Home.md`, and 10 guides (`01-Quickstart.md` through `10-Troubleshooting-and-FAQ.md`) covering human workflows, zero-config `passkey exec`, AI agent onboarding, `session` Touch ID policies, CDP browser autofill, and full CLI/MCP references, verified automatically against `parser.py` and `mcp_server.py`.
 
 ### Changed
