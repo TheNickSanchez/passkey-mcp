@@ -32,6 +32,7 @@ _HEADLESS_AGENT_ENV_VARS: tuple[str, ...] = (
 )
 
 _NO_INPUT_FORCED: bool = False
+_CANCEL = object()
 
 
 class InteractiveRequiredError(PasskeyError):
@@ -547,7 +548,7 @@ def select_entry(
     # Build choices
     choices = entries.copy()
     if allow_empty:
-        choices.append(questionary.Choice(title="(cancel)", value=None))
+        choices.append(questionary.Choice(title="(cancel)", value=_CANCEL))
 
     # Show interactive selector
     result = questionary.select(
@@ -558,6 +559,8 @@ def select_entry(
         use_jk_keys=False,  # Don't use j/k for navigation (conflicts with typing)
     ).ask()
 
+    if result is _CANCEL:
+        return None
     if result is None and not allow_empty:
         raise PasskeyError("Cancelled.")
 
@@ -603,7 +606,7 @@ def select_field(
 
     choices = fields.copy()
     if allow_empty:
-        choices.append(questionary.Choice(title="(cancel)", value=None))
+        choices.append(questionary.Choice(title="(cancel)", value=_CANCEL))
 
     result = questionary.select(
         prompt,
@@ -612,6 +615,8 @@ def select_field(
         instruction="(Use arrow keys)",
     ).ask()
 
+    if result is _CANCEL:
+        return None
     if result is None and not allow_empty:
         raise PasskeyError("Cancelled.")
 
