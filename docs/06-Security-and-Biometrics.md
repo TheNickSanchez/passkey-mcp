@@ -18,6 +18,7 @@ How `passkey-mcp` layers OS keychain ACLs, native macOS Touch ID (`LAContext`), 
 | Secrets exposed in `ps` process `argv` or shell history | **Yes** | CLI never accepts secret values or `pk1:` share tokens on `argv`; interactive input uses masked TTY (`prompt_secret`) / `getpass`, and `passkey request` uses `osascript -` stdin + env attributes. |
 | Untrusted repo `.env.passkey` / `.passkey.toml` exfiltration | **Yes** | SHA-256 manifest digest verified against HMAC-signed `trusted_projects.json` (`__trust_hmac_key__` in keychain); requires Touch ID / human approval. |
 | Agent editing `leases.json`, `trusted_projects.json`, or `audit.log` | **Yes** | All three stores are authenticated with independent 256-bit HMAC-SHA256 keys stored in the OS keychain (`0o600` on disk). |
+| Local tampering of `entries.json` (`policy` downgrade to `allow`) | **Yes** | `entries.json` caches secret-free discovery metadata only; all secret-releasing paths (`run`, `exec`, `inject`, `mount`, `plugin run`, `browser-fill`) enforce the authoritative `policy` inside the OS Keychain payload and self-heal `entries.json`. |
 | Same-UID malware / root compromise on an unlocked machine | **No (OS boundary)** | Same-UID processes can inspect child `/proc/<pid>/environ` or call `keyring` under the same Python binary ACL on macOS. Use `policy = prompt` / `session` for defense-in-depth. |
 
 ### Platform Keychain & Auth Reality

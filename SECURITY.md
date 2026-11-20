@@ -26,8 +26,9 @@ corporate approval.
   export / import / share / upload
 - Local MCP config rewrite by `passkey_wrap_server` (local file write,
   not remote RCE)
-- Keychain and index handling (`entries.json` is names only; values live
-  in the OS keychain)
+- Keychain and index handling (`entries.json` stores non-sensitive metadata and
+  key names only — never secret or config values; values and authoritative
+  access policies live in the OS keychain)
 - `passkey run` environment injection (child-process env exposure)
 - Docs and install commands that advertise an unpublished PyPI package
 
@@ -94,10 +95,12 @@ binary). macOS Keychain ACLs (app prompt / login keychain) are the strong
 case. Linux Secret Service and Windows Credential Manager are **best-effort**
 by comparison; Linux also needs a running, unlocked keyring daemon.
 
-The entry index `entries.json`, HMAC-chained `audit.log`, and HMAC-signed
-`leases.json` (data dir) store metadata only, written at `0o600`. Secret
-payloads and HMAC signing keys (`__audit_hmac_key__`, `__lease_hmac_key__`)
-live in the OS keychain, not on disk.
+The entry index `entries.json` (key names and non-sensitive metadata only),
+HMAC-chained `audit.log`, and HMAC-signed `leases.json` (data dir) store
+metadata only, written at `0o600`. Secret payloads, config values,
+authoritative per-entry access policies at secret-release time, and HMAC
+signing keys (`__audit_hmac_key__`, `__lease_hmac_key__`) live in the OS
+keychain, not on disk.
 
 `passkey_wrap_server` rewrites local MCP configs (`.json` / `.jsonc`, user
 paths; it skips system prefixes including `/etc/`, `/private/etc/`, and

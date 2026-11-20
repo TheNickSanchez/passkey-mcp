@@ -12,14 +12,15 @@ from .audit import clear_logs, get_recent_logs, log_operation, verify_audit_log
 from .clipboard import copy_with_autoclear
 from .keychain import (
     PasskeyError,
-    _get_entry,
     delete_entry,
     get_all_entries,
-    get_entry,  # noqa: F401 (re-exported for callers and test mocks)
+    get_all_entry_metas,
+    get_entry,
+    get_entry_meta,
     list_entries,
     save_entry,
 )
-from .models import ENTRY_NAME_PATTERN, RESERVED_NAMES, VALID_POLICIES, Entry
+from .models import ENTRY_NAME_PATTERN, RESERVED_NAMES, VALID_POLICIES, Entry, EntryMeta
 
 
 def cmd_get_interactive(entry: Entry) -> None:
@@ -522,60 +523,72 @@ def cmd_template_apply(template: dict, entry_name: str) -> None:
 
 
 def cmd_list(names_only: bool = False, *, json_output: bool = False) -> None:
-    """List all entries with field count and age."""
-    entries = get_all_entries()
-    entries.sort(key=lambda e: e.name)
+    """List all entries with field count and age using the secret-free metadata index."""
+    if names_only and not json_output:
+        for name in list_entries():
+            print(name)
+        return
+
+    metas = get_all_entry_metas(hydrate_unmigrated=False)
+    metas.sort(key=lambda m: m.name)
 
     if json_output:
         from .leases import peek_all_leases
 
         active_leases = peek_all_leases()
-        payload = [
-            {
-                "name": e.name,
-                "field_count": len(e.fields),
-                "config_count": len(e.config),
-                "fields": sorted(e.fields.keys()),
-                "config_keys": sorted(e.config.keys()),
-                "policy": e.policy,
-                "has_active_lease": (
-                    e.name in active_leases
-                    and (
-                        e.policy != "prompt"
-                        or active_leases[e.name].get("lease_kind") != "session"
-                    )
-                ),
-                "created": e.created,
-                "modified": e.modified,
-                "last_rotated": e.last_rotated,
-                "source": e.source,
-            }
-            for e in entries
-        ]
+        payload = []
+        for m in metas:
+            is_hydrated = getattr(m, "hydrated", True)
+            f_keys = sorted(m.fields.keys() if isinstance(m.fields, dict) else m.fields)
+            c_keys = sorted(
+                m.config_keys if hasattr(m, "config_keys") else m.config.keys()
+            )
+            payload.append(
+                {
+                    "name": m.name,
+                    "field_count": len(f_keys) if is_hydrated else None,
+                    "config_count": len(c_keys) if is_hydrated else None,
+                    "fields": f_keys,
+                    "config_keys": c_keys,
+                    "policy": m.policy,
+                    "has_active_lease": (
+                        m.name in active_leases
+                        and (
+                            m.policy != "prompt"
+                            or active_leases[m.name].get("lease_kind") != "session"
+                        )
+                    ),
+                    "created": m.created,
+                    "modified": m.modified,
+                    "last_rotated": m.last_rotated,
+                    "source": m.source,
+                    "hydrated": is_hydrated,
+                }
+            )
         print(json.dumps(payload, indent=2))
         return
 
-    if not entries:
-        if not names_only:
-            print("No entries found")
+    if not metas:
+        print("No entries found")
         return
 
-    if names_only:
-        for e in entries:
-            print(e.name)
-        return
-
-    name_w = max(len(e.name) for e in entries)
+    name_w = max(len(m.name) for m in metas)
     now = datetime.now()
 
-    for e in entries:
-        field_count = len(e.fields) + len(e.config)
-        fields_str = f"{field_count} field{'s' if field_count != 1 else ''}"
+    for m in metas:
+        is_hydrated = getattr(m, "hydrated", True)
+        if not is_hydrated:
+            fields_str = "—"
+        else:
+            f_cnt = len(m.fields)
+            c_cnt = len(m.config_keys if hasattr(m, "config_keys") else m.config)
+            field_count = f_cnt + c_cnt
+            fields_str = f"{field_count} field{'s' if field_count != 1 else ''}"
 
         age_str = ""
-        if e.modified:
+        if m.modified:
             try:
-                modified = datetime.fromisoformat(e.modified)
+                modified = datetime.fromisoformat(m.modified)
                 days = (now - modified).days
                 if days == 0:
                     age_str = "today"
@@ -586,7 +599,7 @@ def cmd_list(names_only: bool = False, *, json_output: bool = False) -> None:
             except ValueError:
                 pass
 
-        parts = [f"{e.name:<{name_w}}", f"  {fields_str:<12}"]
+        parts = [f"{m.name:<{name_w}}", f"  {fields_str:<12}"]
         if age_str:
             parts.append(f"  {age_str}")
         print("".join(parts))
@@ -790,15 +803,15 @@ def cmd_check(
     *,
     json_output: bool = False,
 ) -> int:
-    """Verify an entry has all required fields.
+    """Verify an entry has all required fields via the metadata index.
 
     Returns:
         0 if all required fields are present, 1 otherwise
         (the CLI layer owns sys.exit).
     """
-    entry = _get_entry(entry_name, log_read=False)
+    meta = get_entry_meta(entry_name)
 
-    if entry is None:
+    if meta is None:
         remediation = (
             f"Ask the user to run 'passkey new {entry_name}' in their terminal "
             "(never ask them to paste secrets into chat)."
@@ -829,7 +842,7 @@ def cmd_check(
             )
         return 1
 
-    all_fields = set(entry.fields) | set(entry.config)
+    all_fields = set(meta.fields) | set(meta.config_keys)
     present = [f for f in required_fields if f in all_fields]
     missing = [f for f in required_fields if f not in all_fields]
 
@@ -877,7 +890,7 @@ def cmd_check(
     return 0
 
 
-def cmd_info(entry: Entry, *, json_output: bool = False) -> None:
+def cmd_info(entry: EntryMeta | Entry, *, json_output: bool = False) -> None:
     """Show entry details including metadata and field names."""
     if not entry:
         raise PasskeyError("Entry not found")
@@ -886,8 +899,12 @@ def cmd_info(entry: Entry, *, json_output: bool = False) -> None:
 
     lease = peek_lease(entry.name, allow_session=(entry.policy != "prompt"))
     has_lease = lease is not None
-    secret_keys = sorted(entry.fields.keys())
-    config_keys = sorted(entry.config.keys())
+    secret_keys = sorted(
+        entry.fields.keys() if isinstance(entry.fields, dict) else entry.fields
+    )
+    config_keys = sorted(
+        entry.config_keys if hasattr(entry, "config_keys") else entry.config.keys()
+    )
 
     if json_output:
         payload = {
@@ -930,12 +947,12 @@ def cmd_info(entry: Entry, *, json_output: bool = False) -> None:
 
 
 def cmd_policy(
-    entry: Entry,
+    entry: EntryMeta | Entry,
     policy_value: str | None = None,
     *,
     json_output: bool = False,
 ) -> None:
-    """Show or update an entry's access policy ('allow' or 'prompt')."""
+    """Show or update an entry's access policy ('allow', 'session', or 'prompt')."""
     if not entry:
         raise PasskeyError("Entry not found")
 
@@ -965,15 +982,24 @@ def cmd_policy(
             f"Invalid policy '{policy_value}'. Expected one of: {', '.join(sorted(VALID_POLICIES))}"
         )
 
-    entry.policy = normalized
-    save_entry(entry, is_update=True)
-    log_operation("policy", entry.name, details={"policy": normalized})
+    target_entry: Entry
+    if isinstance(entry, Entry):
+        target_entry = entry
+    else:
+        loaded = get_entry(entry.name)
+        if loaded is None:
+            raise PasskeyError("Entry not found")
+        target_entry = loaded
+
+    target_entry.policy = normalized
+    save_entry(target_entry, is_update=True)
+    log_operation("policy", target_entry.name, details={"policy": normalized})
     if json_output:
-        lease = peek_lease(entry.name, allow_session=(normalized != "prompt"))
+        lease = peek_lease(target_entry.name, allow_session=(normalized != "prompt"))
         print(
             json.dumps(
                 {
-                    "entry": entry.name,
+                    "entry": target_entry.name,
                     "policy": normalized,
                     "has_active_lease": lease is not None,
                     "updated": True,
@@ -982,7 +1008,7 @@ def cmd_policy(
             )
         )
         return
-    print(f"Set policy for '{entry.name}' to '{normalized}'")
+    print(f"Set policy for '{target_entry.name}' to '{normalized}'")
 
 
 def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: bool = False) -> None:
@@ -993,22 +1019,34 @@ def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: boo
             "Use a file path, --encrypt, or --no-secrets instead."
         )
 
-    all_entries = get_all_entries()
-    if not all_entries:
-        print("No entries to export")
-        return
-
-    if entries:
-        entry_set = set(entries)
-        all_entries = [e for e in all_entries if e.name in entry_set]
+    if no_secrets:
+        all_metas = get_all_entry_metas(hydrate_unmigrated=True)
+        if not all_metas:
+            print("No entries to export")
+            return
+        if entries:
+            entry_set = set(entries)
+            all_metas = [m for m in all_metas if m.name in entry_set]
+            if not all_metas:
+                raise PasskeyError("No matching entries found for export.")
+        export_items = [m.to_export_dict() for m in all_metas]
+    else:
+        all_entries = get_all_entries()
         if not all_entries:
-            raise PasskeyError("No matching entries found for export.")
+            print("No entries to export")
+            return
+        if entries:
+            entry_set = set(entries)
+            all_entries = [e for e in all_entries if e.name in entry_set]
+            if not all_entries:
+                raise PasskeyError("No matching entries found for export.")
+        export_items = [e.to_export_dict(False) for e in all_entries]
 
     export_data = {
         "version": "1.0",
         "exported_at": datetime.now().isoformat(),
-        "entry_count": len(all_entries),
-        "entries": [e.to_export_dict(no_secrets) for e in all_entries],
+        "entry_count": len(export_items),
+        "entries": export_items,
     }
 
     json_str = json.dumps(export_data, indent=2)
@@ -1038,7 +1076,7 @@ def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: boo
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w") as f:
                 f.write(json_str)
-            print(f"Exported {len(all_entries)} entry(s) to {path}")
+            print(f"Exported {len(export_items)} entry(s) to {path}")
             if not no_secrets:
                 print(
                     "Warning: Export contains secrets. File permissions set to 600 (owner only)."
@@ -1050,7 +1088,8 @@ def cmd_export(file_path: str, entries: list[str] | None = None, no_secrets: boo
         except OSError as e:
             raise PasskeyError(f"Error writing to file: {e}") from e
 
-    log_operation("export", details={"count": len(all_entries), "no_secrets": no_secrets})
+    if not no_secrets:
+        log_operation("export", details={"count": len(export_items), "no_secrets": False})
 
 
 def cmd_inject(

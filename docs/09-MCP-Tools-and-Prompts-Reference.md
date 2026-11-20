@@ -12,7 +12,7 @@
 
 ## 1. Read-Only Discovery & Diagnostic Tools (10 Tools)
 
-All 10 read-only tools carry `ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)` and never trigger Touch ID or decrement active lease uses.
+All 10 read-only tools carry `ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)`, read entry schemas from the secret-free `entries.json` metadata index (zero OS Keychain prompts on hydrated entries), and never trigger Touch ID or decrement active lease uses.
 
 | Tool Name | Parameters | Return Schema Highlights | Purpose |
 | :--- | :--- | :--- | :--- |

@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from .hooks import is_sensitive_secret_path
-from .keychain import PasskeyError, get_all_entries
+from .keychain import PasskeyError, get_all_entry_metas
 from .leases import peek_all_leases
 from .plugins import PLUGIN_SPECS
 from .references import parse_dotenv_file
@@ -124,7 +124,7 @@ def find_env_vars(
             remediation_command="passkey find <ENV_VAR> --json",
         )
 
-    entries = get_all_entries(log_read=False)
+    entries = get_all_entry_metas(hydrate_unmigrated=True)
     entries.sort(key=lambda e: e.name)
     active_leases = peek_all_leases()
 
@@ -187,13 +187,13 @@ def find_env_vars(
         for ent in entries:
             if target_var in ent.fields:
                 _record_hit(target_var, var_hits, seen_entry_field, ent, target_var, "secret", "exact")
-            elif target_var in ent.config:
+            elif target_var in ent.config_keys:
                 _record_hit(target_var, var_hits, seen_entry_field, ent, target_var, "config", "exact")
             else:
                 for k in sorted(ent.fields):
                     if k.upper() == target_upper:
                         _record_hit(target_var, var_hits, seen_entry_field, ent, k, "secret", "exact")
-                for k in sorted(ent.config):
+                for k in sorted(ent.config_keys):
                     if k.upper() == target_upper:
                         _record_hit(target_var, var_hits, seen_entry_field, ent, k, "config", "exact")
 
@@ -204,7 +204,7 @@ def find_env_vars(
                 for k in sorted(ent.fields):
                     if k.upper() in specific_alts:
                         _record_hit(target_var, var_hits, seen_entry_field, ent, k, "secret", "alias")
-                for k in sorted(ent.config):
+                for k in sorted(ent.config_keys):
                     if k.upper() in specific_alts:
                         _record_hit(target_var, var_hits, seen_entry_field, ent, k, "config", "alias")
 
@@ -217,7 +217,7 @@ def find_env_vars(
                     for alt in generic_alts:
                         if alt in ent.fields:
                             _record_hit(target_var, var_hits, seen_entry_field, ent, alt, "secret", "entry_alias")
-                        elif alt in ent.config:
+                        elif alt in ent.config_keys:
                             _record_hit(target_var, var_hits, seen_entry_field, ent, alt, "config", "entry_alias")
 
             if "_" in target_upper:
@@ -231,7 +231,7 @@ def find_env_vars(
                             for k in sorted(ent.fields):
                                 if k.upper() == generic_suffix:
                                     _record_hit(target_var, var_hits, seen_entry_field, ent, k, "secret", "entry_alias")
-                            for k in sorted(ent.config):
+                            for k in sorted(ent.config_keys):
                                 if k.upper() == generic_suffix:
                                     _record_hit(target_var, var_hits, seen_entry_field, ent, k, "config", "entry_alias")
 

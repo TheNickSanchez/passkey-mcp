@@ -11,7 +11,7 @@ from ..interactive import (
     require_interactive,
     set_no_input,
 )
-from ..keychain import PasskeyError, _get_entry
+from ..keychain import PasskeyError, get_entry_meta
 from .handlers import (
     handle_exec_command,
     handle_onboarding_or_help,
@@ -19,6 +19,7 @@ from .handlers import (
     handle_template_command,
     print_project_status,
     resolve_entry,
+    resolve_entry_meta,
 )
 from .parser import create_parser
 
@@ -226,7 +227,7 @@ def _dispatch_command(command: str | None, parser, args) -> None:
         commands.cmd_delete(entry.name, yes=yes)
     elif command == "info":
         commands.cmd_info(
-            resolve_entry(getattr(args, "entry", None), "Select entry to view"),
+            resolve_entry_meta(getattr(args, "entry", None), "Select entry to view"),
             json_output=json_out,
         )
     elif command == "clone":
@@ -245,9 +246,11 @@ def _dispatch_command(command: str | None, parser, args) -> None:
     elif command == "policy":
         if args.policy_value is not None:
             _require_auth("update entry policy")
-        entry = resolve_entry(args.entry, "Select entry for policy", fuzzy=False)
+            target = resolve_entry(args.entry, "Select entry for policy", fuzzy=False)
+        else:
+            target = resolve_entry_meta(args.entry, "Select entry for policy", fuzzy=False)
         commands.cmd_policy(
-            entry,
+            target,
             args.policy_value,
             json_output=json_out,
         )
@@ -700,7 +703,7 @@ def main() -> None:
                 close_cmds = difflib.get_close_matches(
                     entry_name, sorted(_KNOWN_COMMANDS), n=1, cutoff=0.75
                 )
-                if close_cmds and _get_entry(entry_name, log_read=False) is None:
+                if close_cmds and get_entry_meta(entry_name) is None:
                     raise PasskeyError(
                         f"Unknown command '{entry_name}'. Did you mean 'passkey {close_cmds[0]}'?",
                         error_code="UNKNOWN_COMMAND",

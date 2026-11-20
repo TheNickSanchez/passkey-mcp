@@ -445,3 +445,101 @@ class TestRedTeamMcpWriteLockAndPathTraversal:
         ref_res = passkey_validate_references(forbidden_path)
         assert ref_res["valid"] is False
         assert ref_res["missing"]
+
+
+class TestRedTeamMetadataIndexTamperingAndZeroLeakage:
+    """Scenario 7: Tampering with entries.json policy cannot bypass Keychain policy at secret release."""
+
+    def test_entries_json_contains_zero_values_and_policy_tampering_cannot_bypass_auth(
+        self, tmp_path, isolated_data_dir, monkeypatch
+    ):
+        from passkey.keychain import _get_index_path, get_entry_meta
+        from passkey.project import exec_with_project, trust_project
+
+        secret_value = "sk_live_ULTRA_SENSITIVE_PROD_KEY_8888"
+        config_value = "https://vault-internal.corp.secret.example"
+        save_entry(
+            Entry(
+                name="prod_payments",
+                fields={"STRIPE_SECRET_KEY": secret_value},
+                config={"INTERNAL_ENDPOINT": config_value},
+                policy="prompt",
+            )
+        )
+
+        # 1. Verify entries.json on disk is 0o600 and contains zero secret or config values
+        idx_path = _get_index_path()
+        raw_index = idx_path.read_text(encoding="utf-8")
+        if sys.platform != "win32":
+            assert (idx_path.stat().st_mode & 0o777) == 0o600
+        assert secret_value not in raw_index
+        assert config_value not in raw_index
+
+        # 2. Attacker manually edits entries.json on disk: downgrades "policy": "prompt" -> "allow"
+        tampered_doc = json.loads(raw_index)
+        assert tampered_doc["entries"]["prod_payments"]["policy"] == "prompt"
+        tampered_doc["entries"]["prod_payments"]["policy"] = "allow"
+        idx_path.write_text(json.dumps(tampered_doc, indent=2), encoding="utf-8")
+
+        # Cached metadata reflects the local file, NOT authoritative Keychain policy
+        cached = get_entry_meta("prod_payments")
+        assert cached is not None and cached.policy == "allow"
+
+        # 3a. run_with_secrets MUST read authoritative Keychain Entry (policy="prompt") and block!
+        marker_file = tmp_path / "pwned_child_ran.txt"
+        with (
+            patch("passkey.auth.authenticate", return_value=False) as mock_auth,
+            pytest.raises(PasskeyError) as exc_run,
+        ):
+            run_with_secrets(
+                ["prod_payments"],
+                [
+                    sys.executable,
+                    "-c",
+                    f"import pathlib; pathlib.Path({str(marker_file)!r}).write_text('pwned')",
+                ],
+                quiet=True,
+            )
+        assert exc_run.value.error_code == "BIOMETRIC_DENIED"
+        mock_auth.assert_called_once()
+        assert not marker_file.exists()
+
+        # Reading from Keychain automatically self-heals the tampered entries.json policy back to "prompt"
+        repaired_meta = get_entry_meta("prod_payments")
+        assert repaired_meta is not None and repaired_meta.policy == "prompt"
+        assert json.loads(idx_path.read_text(encoding="utf-8"))["entries"]["prod_payments"]["policy"] == "prompt"
+
+        # Re-tamper entries.json before testing cmd_inject and exec_with_project
+        tampered_doc["entries"]["prod_payments"]["policy"] = "allow"
+        idx_path.write_text(json.dumps(tampered_doc, indent=2), encoding="utf-8")
+
+        # 3b. cmd_inject MUST read authoritative Keychain Entry (policy="prompt") and block!
+        tpl_path = tmp_path / "secret.tpl"
+        out_path = tmp_path / "secret.out"
+        tpl_path.write_text("KEY={{ passkey://prod_payments/STRIPE_SECRET_KEY }}\n", encoding="utf-8")
+        with (
+            patch("passkey.auth.authenticate", return_value=False) as mock_auth_inj,
+            pytest.raises(PasskeyError) as exc_inj,
+        ):
+            cmd_inject(str(tpl_path), str(out_path))
+        assert exc_inj.value.error_code == "BIOMETRIC_DENIED"
+        mock_auth_inj.assert_called_once()
+        assert not out_path.exists()
+
+        # 3c. exec_with_project (dry_run=False) MUST also enforce authoritative Keychain policy!
+        repo = tmp_path / "trusted_repo"
+        (repo / ".git").mkdir(parents=True)
+        (repo / ".env.passkey").write_text(
+            "STRIPE_SECRET_KEY=passkey://prod_payments/STRIPE_SECRET_KEY\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("passkey.project.can_prompt_interactively", lambda: True)
+        trust_project(repo)
+
+        with (
+            patch("passkey.auth.authenticate", return_value=False) as mock_auth_exec,
+            pytest.raises(PasskeyError) as exc_exec,
+        ):
+            exec_with_project([sys.executable, "-c", "pass"], project_dir=repo, quiet=True)
+        assert exc_exec.value.error_code == "BIOMETRIC_DENIED"
+        mock_auth_exec.assert_called_once()

@@ -1,10 +1,11 @@
 """Keychain CRUD operations for passkey entries.
 
 Secrets live in the OS keychain (one keychain item per entry). The entry
-*index* — the list of entry names — lives in a plain file
-(``entries.json`` in the data dir) with atomic writes, guarded by a
-PID-aware lock file. Older versions stored the index in the keychain as
-the ``__entries__`` item; it is migrated to the file on first read.
+*index* — secret-free v2 metadata (key names, timestamps, cached policy) —
+lives in a plain file (``entries.json`` in the data dir) with atomic
+``0o600`` writes, guarded by a PID-aware lock file. Older versions stored
+either a v1 ``list[str]`` in ``entries.json`` or ``__entries__`` in the
+keychain; both upgrade seamlessly without eager N+1 Keychain reads.
 """
 
 import contextlib
@@ -20,10 +21,11 @@ from keyring.errors import KeyringError, PasswordDeleteError
 
 from .audit import log_operation
 from .dirs import ensure_data_dir, get_data_dir
-from .models import RESERVED_NAMES, Entry
+from .models import RESERVED_NAMES, VALID_POLICIES, Entry, EntryMeta
 
 SERVICE = "passkey"
 METADATA_KEY = "__entries__"  # legacy keychain-held index (migrated to file)
+INDEX_VERSION = 2
 
 # --- Concurrency Lock ---
 LOCK_TIMEOUT = 10  # seconds
@@ -177,17 +179,63 @@ def _keyring_error_message(e: Exception) -> str:
     )
 
 
-# --- Entry index (file-based, atomic writes) ---
+# --- Entry index (file-based v2 metadata, atomic 0o600 writes) ---
 
 
-def _write_index_nolock(names: list[str]) -> None:
-    """Atomically write the entry index (temp file + os.replace, 0o600)."""
+def _parse_meta_row(name: str, raw: object, path: Path) -> EntryMeta:
+    """Validate and parse a single entries.json v2 metadata row."""
+    if not isinstance(raw, dict):
+        raise EntryCorruptedError(
+            f"Entry index is corrupted (invalid metadata row for '{name}'): '{path}'"
+        )
+    raw_fields = raw.get("fields", [])
+    raw_cfg = raw.get("config_keys", [])
+    raw_policy = raw.get("policy", "allow")
+    hydrated = raw.get("hydrated", True)
+    if (
+        not isinstance(raw_fields, list)
+        or not all(isinstance(x, str) for x in raw_fields)
+        or not isinstance(raw_cfg, list)
+        or not all(isinstance(x, str) for x in raw_cfg)
+        or not isinstance(raw_policy, str)
+        or not isinstance(hydrated, bool)
+    ):
+        raise EntryCorruptedError(
+            f"Entry index is corrupted (malformed field types for '{name}'): '{path}'"
+        )
+    for opt_key in ("created", "modified", "last_rotated", "source"):
+        val = raw.get(opt_key)
+        if val is not None and not isinstance(val, str):
+            raise EntryCorruptedError(
+                f"Entry index is corrupted (invalid '{opt_key}' for '{name}'): '{path}'"
+            )
+
+    policy = raw_policy if raw_policy in VALID_POLICIES else "allow"
+    return EntryMeta(
+        name=name,
+        fields=list(raw_fields),
+        config_keys=list(raw_cfg),
+        policy=policy,
+        created=raw.get("created"),
+        modified=raw.get("modified"),
+        last_rotated=raw.get("last_rotated"),
+        source=raw.get("source"),
+        hydrated=hydrated,
+    )
+
+
+def _write_index_nolock(meta_map: dict[str, EntryMeta]) -> None:
+    """Atomically write the v2 entry metadata index (temp file + os.replace, 0o600)."""
     path = _get_index_path()
     ensure_data_dir()
+    payload = {
+        "version": INDEX_VERSION,
+        "entries": {name: meta_map[name].to_index_dict() for name in sorted(meta_map)},
+    }
     fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=".entries-", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write(json.dumps(names))
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, indent=2) + "\n")
         os.chmod(tmp_path, 0o600)
         os.replace(tmp_path, path)
     except BaseException:
@@ -196,14 +244,14 @@ def _write_index_nolock(names: list[str]) -> None:
         raise
 
 
-def _migrate_legacy_index() -> list[str]:
-    """One-time migration: move the keychain-held ``__entries__`` index to a file."""
+def _migrate_legacy_index() -> dict[str, EntryMeta]:
+    """One-time migration: move the keychain-held ``__entries__`` index to entries.json v2."""
     try:
         legacy = keyring.get_password(SERVICE, METADATA_KEY)
     except KeyringError as e:
         raise KeychainAccessError(_keyring_error_message(e)) from e
     if not legacy:
-        return []
+        return {}
     try:
         names = json.loads(legacy)
     except json.JSONDecodeError as e:
@@ -211,50 +259,70 @@ def _migrate_legacy_index() -> list[str]:
             f"Entry metadata is corrupted. Consider deleting '{METADATA_KEY}' "
             f"from Keychain Access app and re-creating entries. Error: {e}"
         ) from e
-    _write_index_nolock(names)
+    if not isinstance(names, list) or not all(isinstance(x, str) for x in names):
+        raise EntryCorruptedError(
+            f"Entry metadata '{METADATA_KEY}' is corrupted (expected list of strings)."
+        )
+    meta_map = {name: EntryMeta(name=name, hydrated=False) for name in sorted(names)}
+    _write_index_nolock(meta_map)
     with contextlib.suppress(Exception):
         keyring.delete_password(SERVICE, METADATA_KEY)
-    log_operation("metadata_migration", details={"count": len(names), "format": "file-index"})
-    return names
+    log_operation("metadata_migration", details={"count": len(meta_map), "format": "file-index-v2"})
+    return meta_map
 
 
-def _read_index_nolock() -> list[str]:
-    """Read the entry index file (migrating the legacy keychain index if needed)."""
+def _read_index_nolock() -> dict[str, EntryMeta]:
+    """Read the entry index file (accepting both legacy v1 list and v2 metadata dict)."""
     path = _get_index_path()
     if not path.exists():
         return _migrate_legacy_index()
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         raise EntryCorruptedError(
             f"Entry index is corrupted. Fix or delete '{path}'. Error: {e}"
         ) from e
-    if not isinstance(data, list):
-        raise EntryCorruptedError(f"Entry index is corrupted (not a list): '{path}'")
-    return data
+
+    # Legacy v1 format: ["entry1", "entry2"] -> unhydrated EntryMeta with 0 Keychain calls
+    if isinstance(data, list):
+        if not all(isinstance(x, str) for x in data):
+            raise EntryCorruptedError(f"Entry index is corrupted (invalid v1 list): '{path}'")
+        return {name: EntryMeta(name=name, hydrated=False) for name in data}
+
+    # Current v2 format: {"version": 2, "entries": {"<name>": {...}}}
+    if isinstance(data, dict):
+        if data.get("version") != INDEX_VERSION or not isinstance(data.get("entries"), dict):
+            raise EntryCorruptedError(
+                f"Entry index is corrupted (invalid v2 structure): '{path}'"
+            )
+        meta_map: dict[str, EntryMeta] = {}
+        for ename, raw_meta in data["entries"].items():
+            if not isinstance(ename, str):
+                raise EntryCorruptedError(f"Entry index is corrupted: '{path}'")
+            meta_map[ename] = _parse_meta_row(ename, raw_meta, path)
+        return meta_map
+
+    raise EntryCorruptedError(f"Entry index is corrupted: '{path}'")
 
 
 def list_entries() -> list[str]:
-    """Get list of all stored entry names.
+    """Get sorted list of all stored entry names with 0 Keychain reads.
 
     This function is thread-safe and acquires a lock.
 
     Returns:
-        List of entry names, empty list if none exist.
+        Sorted list of entry names, empty list if none exist.
 
     Raises:
-        KeychainAccessError: If Keychain access fails.
+        KeychainAccessError: If Keychain access fails during legacy migration.
         EntryCorruptedError: If the entry index is corrupted.
     """
     with _metadata_lock():
-        return _read_index_nolock()
+        return sorted(_read_index_nolock().keys())
 
 
 def save_entry(entry: Entry, is_update: bool = False) -> None:
-    """Save entry to Keychain.
-
-    Stores the entry's fields as JSON and updates the file index
-    to track the entry name.
+    """Save entry to Keychain and atomically update secret-free v2 metadata in entries.json.
 
     Args:
         entry: The Entry to save
@@ -270,14 +338,12 @@ def save_entry(entry: Entry, is_update: bool = False) -> None:
         # Set the password for the entry itself (outside the lock)
         keyring.set_password(SERVICE, entry.name, entry.to_json())
 
-        # Now, atomically update the index
+        # Atomically persist hydrated v2 metadata (both on create and on update)
         with _metadata_lock():
-            current_entries = _read_index_nolock()
-            is_new = entry.name not in current_entries
-            if is_new:
-                current_entries.append(entry.name)
-                current_entries.sort()
-                _write_index_nolock(current_entries)
+            meta_map = _read_index_nolock()
+            is_new = entry.name not in meta_map
+            meta_map[entry.name] = EntryMeta.from_entry(entry)
+            _write_index_nolock(meta_map)
 
         # Audit log: label by what actually happened, not the caller's hint
         log_operation(
@@ -293,6 +359,17 @@ def save_entry(entry: Entry, is_update: bool = False) -> None:
         raise KeychainAccessError(f"Failed to save '{entry.name}': {e}") from e
 
 
+def _backfill_entry_meta(entry: Entry) -> None:
+    """Best-effort lazy hydration and drift repair of entries.json v2 metadata."""
+    fresh = EntryMeta.from_entry(entry)
+    with contextlib.suppress(Exception), _metadata_lock():
+        meta_map = _read_index_nolock()
+        existing = meta_map.get(entry.name)
+        if existing != fresh:
+            meta_map[entry.name] = fresh
+            _write_index_nolock(meta_map)
+
+
 def _get_entry(name: str, *, log_read: bool) -> Entry | None:
     """Retrieve entry from Keychain by name (internal; read logging optional)."""
     if name in RESERVED_NAMES:
@@ -306,6 +383,7 @@ def _get_entry(name: str, *, log_read: bool) -> Entry | None:
             return None
 
         entry = Entry.from_json(name, data)
+        _backfill_entry_meta(entry)
         if log_read:
             log_operation("read", name)
         return entry
@@ -337,8 +415,49 @@ def get_entry(name: str) -> Entry | None:
     return _get_entry(name, log_read=True)
 
 
+def get_entry_meta(name: str) -> EntryMeta | None:
+    """Retrieve secret-free EntryMeta from entries.json (0 Keychain calls when hydrated)."""
+    if name in RESERVED_NAMES:
+        raise PasskeyError(f"'{name}' is a reserved internal key")
+
+    with _metadata_lock():
+        meta_map = _read_index_nolock()
+        meta = meta_map.get(name)
+
+    if meta is None:
+        return None
+    if meta.hydrated:
+        return meta
+
+    # Lazy one-time hydration for legacy v1 index entries
+    entry = _get_entry(name, log_read=False)
+    if entry is None:
+        return None
+    return EntryMeta.from_entry(entry)
+
+
+def get_all_entry_metas(*, hydrate_unmigrated: bool = False) -> list[EntryMeta]:
+    """Return sorted EntryMeta list from entries.json (0 Keychain calls when hydrated)."""
+    with _metadata_lock():
+        meta_map = _read_index_nolock()
+
+    if not hydrate_unmigrated:
+        return [meta_map[k] for k in sorted(meta_map)]
+
+    results: list[EntryMeta] = []
+    for name in sorted(meta_map):
+        meta = meta_map[name]
+        if meta.hydrated:
+            results.append(meta)
+        else:
+            entry = _get_entry(name, log_read=False)
+            if entry is not None:
+                results.append(EntryMeta.from_entry(entry))
+    return results
+
+
 def delete_entry(name: str) -> bool:
-    """Delete entry from Keychain.
+    """Delete entry from Keychain and remove its metadata row from entries.json.
 
     Args:
         name: The entry identifier to delete
@@ -365,15 +484,13 @@ def delete_entry(name: str) -> bool:
     # Update the index atomically
     try:
         with _metadata_lock():
-            entries = _read_index_nolock()
-            if name in entries:
-                entries.remove(name)
-                _write_index_nolock(entries)
-                # If we thought it was deleted, but it wasn't in the index, it wasn't really
+            meta_map = _read_index_nolock()
+            if name in meta_map:
+                del meta_map[name]
+                _write_index_nolock(meta_map)
                 deleted = True
             elif deleted:
                 # We deleted a password but it wasn't in our index.
-                # This implies a dangling password. Log it.
                 log_operation("delete_dangling", name)
     except KeyringError as e:
         log_operation("delete", name, {"error": str(e)}, success=False)
@@ -410,11 +527,11 @@ def rename_entry(old_name: str, new_entry: Entry) -> None:
 
 
 def get_all_entries(*, log_read: bool = True) -> list[Entry]:
-    """Get all entries with full data.
+    """Get all entries with full data from the OS Keychain.
 
-    Reads every entry without logging a per-entry "read" (that made
-    ``passkey list`` spam the audit log); a single bulk read is logged
-    when ``log_read`` is True.
+    Reads every entry without logging a per-entry "read" (a single bulk read
+    is logged when ``log_read`` is True). Discovery and preflight paths
+    should call ``get_all_entry_metas()`` instead.
 
     Returns:
         List of all Entry objects.

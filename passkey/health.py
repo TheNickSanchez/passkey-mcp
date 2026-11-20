@@ -7,7 +7,7 @@ entry point; there is no separate deep-doctor implementation here.
 from datetime import datetime, timedelta
 
 from .audit import get_recent_logs
-from .keychain import PasskeyError, get_all_entries, get_entry
+from .keychain import PasskeyError, get_all_entry_metas, get_entry
 
 
 def cmd_rotate(
@@ -98,8 +98,8 @@ def cmd_audit_summary(*, json_output: bool = False) -> None:
         if ts >= cutoff:
             recent.append(log)
 
-    # Get oldest entry regardless of recent logs
-    all_entries = get_all_entries()
+    # Get oldest entry regardless of recent logs (0 Keychain reads)
+    all_entries = get_all_entry_metas(hydrate_unmigrated=False)
     oldest_entry = None
     oldest_date = None
 

@@ -23,7 +23,7 @@ from .audit import (
     log_operation,
 )
 from .dirs import ensure_data_dir, get_data_dir
-from .keychain import KeychainAccessError, PasskeyError, _get_entry
+from .keychain import KeychainAccessError, PasskeyError, get_entry_meta
 from .models import Entry, is_valid_name
 
 LEASE_HMAC_SERVICE = "passkey"
@@ -219,7 +219,7 @@ def grant_lease(
     if not is_valid_name(entry_name):
         raise PasskeyError(f"Invalid entry name '{entry_name}'")
 
-    entry = _get_entry(entry_name, log_read=False)
+    entry = get_entry_meta(entry_name)
     if entry is None:
         raise PasskeyError(f"Entry '{entry_name}' not found")
 
@@ -348,6 +348,8 @@ def consume_lease(entry_name: str, *, allow_session: bool = True) -> bool:
 
 def list_leases() -> list[dict]:
     """Return all currently active leases visible to the current caller."""
+    if not get_leases_path().exists():
+        return []
     leases_map, key = _load_leases_store()
     now = time.time()
     if _prune_expired(leases_map, now):

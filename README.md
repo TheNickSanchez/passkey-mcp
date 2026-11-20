@@ -180,7 +180,7 @@ passkey upload
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-* **OS Keychain at Rest:** Credentials and all three internal 256-bit HMAC keys (`__audit_hmac_key__`, `__lease_hmac_key__`, `__trust_hmac_key__`) live in your OS Keychain—`<data_dir>` (`0o700`) stores `0o600` metadata only.
+* **OS Keychain at Rest:** Credentials, config values, authoritative per-entry policies, and all three internal 256-bit HMAC keys (`__audit_hmac_key__`, `__lease_hmac_key__`, `__trust_hmac_key__`) live in your OS Keychain—`<data_dir>` (`0o700`) stores `0o600` secret-free metadata (`entries.json` v2) so discovery, `<TAB>` completion, and `--dry-run` preflight trigger zero Keychain prompts.
 * **Authenticated Portability (`pk1:` & `PK01`):** `passkey share` / `passkey upload` exchange compact URL-safe `pk1:...` tokens authenticated with `AES-256-GCM` (`"pk1:" + header` AAD) + `Scrypt` (`N=2^20, r=8, p=1`), while `passkey export --encrypt` and `passkey share -o` write `O_EXCL`, `0o600` `PK01` bundles.
 * **Tamper-Evident Audit Chain:** Every operation records `actor` attribution (`human` vs. `agent` client) in an HMAC-SHA256 hash chain (`passkey audit --verify`).
 * **Pre-Execution Agent Guardrails:** `passkey hook check` blocks agent file/shell reads of `.env`, `*.backup`, `*.enc`, `passkey get`, `passkey share`/`upload`/`receive`, and plaintext `passkey export` (exit code `2`).
@@ -233,7 +233,7 @@ Explore the complete documentation in [`docs/Home.md`](docs/Home.md):
 | [**07 — Browser Agent Autofill**](docs/07-Browser-Agent-Autofill.md) | Loopback Chrome DevTools (`CDP`) login & cookie autofill (`passkey browser-fill`) |
 | [**08 — CLI Command Reference**](docs/08-CLI-Command-Reference.md) | All commands, subcommands, global flags, `PASSKEY_OUTPUT=json`, settings, and exit codes |
 | [**09 — MCP Tools & Prompts**](docs/09-MCP-Tools-and-Prompts-Reference.md) | All 13 FastMCP tools, schemas, `ToolAnnotations`, config gates, and 3 `@mcp.prompt()` playbooks |
-| [**10 — Troubleshooting & FAQ**](docs/10-Troubleshooting-and-FAQ.md) | Fixes for macOS Seatbelt sandboxes, Linux headless keyrings, stale FIFOs, and `unwrap` recovery |
+| [**10 — Troubleshooting & FAQ**](docs/10-Troubleshooting-and-FAQ.md) | Fixes for macOS Keychain ACL prompts, Seatbelt sandboxes, Linux keyrings, stale FIFOs, and `unwrap` recovery |
 
 ### Essential Commands Cheat Sheet
 

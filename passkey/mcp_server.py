@@ -11,7 +11,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from .keychain import PasskeyError, _get_entry, get_entry, list_entries
+from .keychain import PasskeyError, get_entry, get_entry_meta, list_entries
 from .mcp_config import (
     ADAPTERS,
     MCPConfigError,
@@ -130,14 +130,14 @@ def passkey_fields(entry_name: str) -> list[str]:
         Exception: If entry not found or keychain access fails
     """
     try:
-        entry = _get_entry(entry_name, log_read=False)
-        if entry is None:
+        meta = get_entry_meta(entry_name)
+        if meta is None:
             safe = _sanitize(entry_name)
             raise Exception(
                 f"Entry '{safe}' not found. Ask the user to run 'passkey new {safe}' "
                 "in their terminal (never ask them to paste secrets into chat)."
             )
-        return list(entry.fields.keys())
+        return list(meta.fields)
     except PasskeyError as e:
         raise Exception(f"Failed to access keychain: {e}") from e
 
@@ -160,11 +160,11 @@ def passkey_entry_info(entry_name: str) -> dict:
 
     safe = _sanitize(entry_name)
     try:
-        entry = _get_entry(entry_name, log_read=False)
+        meta = get_entry_meta(entry_name)
     except PasskeyError as e:
         raise Exception(f"Failed to access keychain: {e}") from e
 
-    if entry is None:
+    if meta is None:
         return {
             "exists": False,
             "name": safe,
@@ -174,27 +174,27 @@ def passkey_entry_info(entry_name: str) -> dict:
             ),
         }
 
-    lease = peek_lease(entry.name, allow_session=(entry.policy != "prompt"))
+    lease = peek_lease(meta.name, allow_session=(meta.policy != "prompt"))
     has_lease = lease is not None
-    secret_keys = sorted(entry.fields.keys())
-    config_keys = sorted(entry.config.keys())
+    secret_keys = sorted(meta.fields)
+    config_keys = sorted(meta.config_keys)
 
     return {
         "exists": True,
-        "name": entry.name,
-        "policy": entry.policy,
+        "name": meta.name,
+        "policy": meta.policy,
         "has_active_lease": has_lease,
         "lease_seconds_remaining": lease["seconds_remaining"] if lease else None,
         "lease_remaining_uses": lease.get("remaining_uses") if lease else None,
-        "will_prompt_biometric": entry.policy in ("prompt", "session") and not has_lease,
+        "will_prompt_biometric": meta.policy in ("prompt", "session") and not has_lease,
         "fields": secret_keys,
         "config_keys": config_keys,
         "field_count": len(secret_keys),
         "config_count": len(config_keys),
-        "created": entry.created,
-        "modified": entry.modified,
-        "last_rotated": entry.last_rotated,
-        "source": entry.source,
+        "created": meta.created,
+        "modified": meta.modified,
+        "last_rotated": meta.last_rotated,
+        "source": meta.source,
     }
 
 

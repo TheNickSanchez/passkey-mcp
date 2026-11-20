@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .audit import log_operation
 from .interactive import format_secret_preview, parse_field_shorthand, prompt_secret
-from .keychain import PasskeyError, get_entry, list_entries, save_entry
+from .keychain import PasskeyError, get_all_entry_metas, get_entry, list_entries, save_entry
 from .mcp_config import (
     ADAPTERS,
     MCPConfigError,
@@ -380,19 +380,12 @@ def cmd_status(
         return
 
     try:
-        passkey_entries = list_entries()
+        metas = get_all_entry_metas(hydrate_unmigrated=False)
     except PasskeyError as e:
         raise PasskeyError(str(e)) from e
 
-    # Get entry field counts
-    entry_field_counts = {}
-    for entry_name in passkey_entries:
-        try:
-            entry = get_entry(entry_name)
-            if entry:
-                entry_field_counts[entry_name] = len(entry.fields)
-        except PasskeyError:
-            pass
+    passkey_entries = [m.name for m in metas]
+    entry_field_counts = {m.name: len(m.fields) for m in metas if m.hydrated}
 
     all_results = []
 
@@ -494,10 +487,6 @@ def cmd_doctor(deep: bool = False, *, json_output: bool = False) -> int:
     checks = result["checks"]
     issues = result["issues"]
     recommendations = result["recommendations"]
-
-    log_operation(
-        "doctor", details={"checks": len(checks), "issues": len(issues), "deep": deep}
-    )
 
     if json_output:
         print(json.dumps(result, indent=2))
