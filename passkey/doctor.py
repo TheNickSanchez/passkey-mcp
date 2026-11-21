@@ -209,6 +209,32 @@ def _deep_checks(checks: list[dict], issues: list[str], recommendations: list[st
             "message": "No insecure bundle files detected",
         })
 
+    # Policy store HMAC & Keychain anchor integrity (when initialized)
+    from .keychain import is_policy_store_initialized, verify_policy_store
+
+    if is_policy_store_initialized():
+        try:
+            verified_policies = verify_policy_store()
+            checks.append({
+                "name": "policy_integrity",
+                "status": "pass",
+                "message": (
+                    f"Policy store HMAC & Keychain anchor valid "
+                    f"({len(verified_policies)} policy record(s) verified)"
+                ),
+            })
+        except PasskeyError as e:
+            checks.append({
+                "name": "policy_integrity",
+                "status": "fail",
+                "message": f"Policy store integrity check failed: {e}",
+            })
+            issues.append(f"Policy store tampering, rollback, or deletion detected: {e}")
+            recommendations.append(
+                "Run 'passkey policy --all session' (or allow/prompt) in your terminal "
+                "to re-authenticate and rebuild policies.json"
+            )
+
     # Audit log HMAC chain integrity
     from .audit import verify_audit_log
 

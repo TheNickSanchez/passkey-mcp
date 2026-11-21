@@ -26,9 +26,11 @@ corporate approval.
   export / import / share / upload
 - Local MCP config rewrite by `passkey_wrap_server` (local file write,
   not remote RCE)
-- Keychain and index handling (`entries.json` stores non-sensitive metadata and
-  key names only — never secret or config values; values and authoritative
-  access policies live in the OS keychain)
+- Keychain, index, and policy-store handling (`entries.json` stores
+  non-sensitive metadata and key names only — never secret or config values;
+  secret payloads live in the OS keychain, and authoritative policy overrides
+  in `policies.json` are HMAC-SHA256 signed and digest-anchored in the OS
+  keychain under `__policy_hmac_key__`)
 - `passkey run` environment injection (child-process env exposure)
 - Docs and install commands that advertise an unpublished PyPI package
 
@@ -106,11 +108,13 @@ case. Linux Secret Service and Windows Credential Manager are **best-effort**
 by comparison; Linux also needs a running, unlocked keyring daemon.
 
 The entry index `entries.json` (key names and non-sensitive metadata only),
-HMAC-chained `audit.log`, and HMAC-signed `leases.json` (data dir) store
-metadata only, written at `0o600`. Secret payloads, config values,
-authoritative per-entry access policies at secret-release time, and HMAC
-signing keys (`__audit_hmac_key__`, `__lease_hmac_key__`) live in the OS
-keychain, not on disk.
+HMAC-chained `audit.log`, HMAC-signed `leases.json`, HMAC-signed
+`trusted_projects.json`, and HMAC-signed `policies.json` (data dir) store
+metadata only, written atomically at `0o600`. Secret payloads, config values,
+and all four 256-bit HMAC signing keys (`__audit_hmac_key__`,
+`__lease_hmac_key__`, `__trust_hmac_key__`, and `__policy_hmac_key__`, which
+also anchors the SHA-256 digest and entry count of `policies.json` against
+edit, rollback, and deletion attacks) live in the OS keychain, not on disk.
 
 `passkey_wrap_server` rewrites local MCP configs (`.json` / `.jsonc`, user
 paths; it skips system prefixes including `/etc/`, `/private/etc/`, and

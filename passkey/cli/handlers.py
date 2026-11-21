@@ -68,6 +68,8 @@ def resolve_entry_meta(
     entry_arg: str | None,
     prompt: str = "Select an entry",
     fuzzy: bool = True,
+    *,
+    hydrate: bool = True,
 ):
     """Resolve secret-free EntryMeta without touching the OS Keychain when hydrated."""
     from ..interactive import (
@@ -80,7 +82,7 @@ def resolve_entry_meta(
     resolved_name = None
 
     if entry_arg:
-        meta = get_entry_meta(entry_arg)
+        meta = get_entry_meta(entry_arg) if hydrate else get_entry_meta(entry_arg, hydrate=False)
         if meta:
             return meta
         if not fuzzy or not can_prompt_interactively():
@@ -104,7 +106,11 @@ def resolve_entry_meta(
 
     resolved_name = select_entry(prompt, filter_prefix=resolved_name if fuzzy else "")
 
-    final_meta = get_entry_meta(resolved_name)
+    final_meta = (
+        get_entry_meta(resolved_name)
+        if hydrate
+        else get_entry_meta(resolved_name, hydrate=False)
+    )
     if not final_meta:
         raise PasskeyError(
             f"Entry '{resolved_name}' not found. "

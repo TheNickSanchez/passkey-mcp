@@ -543,3 +543,222 @@ class TestRedTeamMetadataIndexTamperingAndZeroLeakage:
             exec_with_project([sys.executable, "-c", "pass"], project_dir=repo, quiet=True)
         assert exc_exec.value.error_code == "BIOMETRIC_DENIED"
         mock_auth_exec.assert_called_once()
+
+    def test_policies_json_tamper_rollback_and_deletion_blocked_and_surfaced_by_doctor(
+        self, tmp_path, isolated_data_dir, capsys
+    ):
+        from passkey.cli import main
+        from passkey.doctor import run_diagnostics
+        from passkey.keychain import _get_index_path, get_entry_meta, get_policies_path
+        from passkey.leases import authorize_entry_access
+        from passkey.mcp_config import ADAPTERS
+
+        # Originally saved with policy="allow" inside the Keychain secret payload
+        save_entry(
+            Entry(
+                name="prod_jamf",
+                fields={"JAMF_CLIENT_SECRET": "jamf_ultra_secret_9999"},
+                policy="allow",
+            )
+        )
+
+        # Snapshot 1: valid policies.json where prod_jamf = 'allow' (signed under __policy_hmac_key__)
+        with patch.object(sys, "argv", ["passkey", "policy", "prod_jamf", "allow", "--json"]):
+            main()
+        capsys.readouterr()
+        pol_path = get_policies_path()
+        snapshot_allow_bytes = pol_path.read_bytes()
+
+        # Upgrade prod_jamf to 'prompt' via zero-Keychain policy command (raw Keychain secret payload STILL has 'allow'!)
+        with patch.object(sys, "argv", ["passkey", "policy", "prod_jamf", "prompt", "--json"]):
+            main()
+        capsys.readouterr()
+        snapshot_prompt_bytes = pol_path.read_bytes()
+
+        # Baseline: doctor --deep reports policy_integrity == 'pass'
+        with (
+            patch.dict(ADAPTERS, {}, clear=True),
+            patch("passkey.doctor.find_passkey_command", return_value="/usr/local/bin/passkey"),
+        ):
+            diag_ok = run_diagnostics(deep=True)
+        assert any(
+            c["name"] == "policy_integrity" and c["status"] == "pass" for c in diag_ok["checks"]
+        )
+
+        marker = tmp_path / "should_never_run.txt"
+        child_cmd = [
+            sys.executable,
+            "-c",
+            f"import pathlib; pathlib.Path({str(marker)!r}).write_text('pwned')",
+        ]
+
+        # Attack A: Direct edit of policies.json ('prompt' -> 'allow') -> HMAC mismatch!
+        tampered = json.loads(snapshot_prompt_bytes.decode("utf-8"))
+        tampered["policies"]["prod_jamf"] = "allow"
+        pol_path.write_text(json.dumps(tampered, indent=2), encoding="utf-8")
+
+        with pytest.raises(PasskeyError) as exc_tamper:
+            run_with_secrets(["prod_jamf"], child_cmd, quiet=True)
+        assert exc_tamper.value.error_code == "POLICY_STORE_TAMPERED"
+        assert not marker.exists()
+
+        with (
+            patch.dict(ADAPTERS, {}, clear=True),
+            patch("passkey.doctor.find_passkey_command", return_value="/usr/local/bin/passkey"),
+        ):
+            diag_tamper = run_diagnostics(deep=True)
+        assert diag_tamper["summary"]["failed"] > 0
+        assert any(
+            c["name"] == "policy_integrity" and c["status"] == "fail"
+            for c in diag_tamper["checks"]
+        )
+
+        # Attack B: Rollback / Replay attack (replay older valid HMAC-signed snapshot_allow_bytes!)
+        pol_path.write_bytes(snapshot_allow_bytes)
+
+        with pytest.raises(PasskeyError) as exc_rollback:
+            run_with_secrets(["prod_jamf"], child_cmd, quiet=True)
+        assert exc_rollback.value.error_code == "POLICY_STORE_TAMPERED"
+        assert "rollback" in str(exc_rollback.value).lower()
+        assert not marker.exists()
+
+        with (
+            patch.dict(ADAPTERS, {}, clear=True),
+            patch("passkey.doctor.find_passkey_command", return_value="/usr/local/bin/passkey"),
+        ):
+            diag_rollback = run_diagnostics(deep=True)
+        assert any(
+            c["name"] == "policy_integrity" and c["status"] == "fail"
+            for c in diag_rollback["checks"]
+        )
+
+        # Attack C: Deletion attack (rm <data_dir>/policies.json)
+        pol_path.unlink()
+        assert not pol_path.exists()
+
+        # Even if caller passes Entry(policy="allow") from the older Keychain payload,
+        # authorize_entry_access detects Keychain anchor count > 0 with missing policies.json!
+        with pytest.raises(PasskeyError) as exc_del_direct:
+            authorize_entry_access(Entry(name="prod_jamf", fields={"K": "V"}, policy="allow"))
+        assert exc_del_direct.value.error_code == "POLICY_STORE_TAMPERED"
+        assert "deletion" in str(exc_del_direct.value).lower()
+
+        with pytest.raises(PasskeyError) as exc_del_run:
+            run_with_secrets(["prod_jamf"], child_cmd, quiet=True)
+        assert exc_del_run.value.error_code == "POLICY_STORE_TAMPERED"
+        assert not marker.exists()
+
+        with (
+            patch.dict(ADAPTERS, {}, clear=True),
+            patch("passkey.doctor.find_passkey_command", return_value="/usr/local/bin/passkey"),
+        ):
+            diag_del = run_diagnostics(deep=True)
+        assert any(
+            c["name"] == "policy_integrity" and c["status"] == "fail"
+            for c in diag_del["checks"]
+        )
+
+        # Attack D: Restore valid snapshot_prompt_bytes, tamper entries.json -> enforced & self-healed!
+        pol_path.write_bytes(snapshot_prompt_bytes)
+        idx_path = _get_index_path()
+        idx_doc = json.loads(idx_path.read_text(encoding="utf-8"))
+        idx_doc["entries"]["prod_jamf"]["policy"] = "allow"
+        idx_path.write_text(json.dumps(idx_doc, indent=2), encoding="utf-8")
+        assert get_entry_meta("prod_jamf").policy == "allow"
+
+        with (
+            patch("passkey.auth.authenticate", return_value=False) as mock_auth,
+            pytest.raises(PasskeyError) as exc_bio,
+        ):
+            run_with_secrets(["prod_jamf"], child_cmd, quiet=True)
+        assert exc_bio.value.error_code == "BIOMETRIC_DENIED"
+        mock_auth.assert_called_once()
+        assert not marker.exists()
+        # Self-healed entries.json back to 'prompt' from verified policies.json!
+        assert get_entry_meta("prod_jamf").policy == "prompt"
+
+    def test_single_policy_fails_closed_while_authenticated_policy_all_reanchors_cleanly(
+        self, isolated_data_dir, capsys
+    ):
+        from passkey.cli import main
+        from passkey.doctor import run_diagnostics
+        from passkey.keychain import get_entry, get_entry_meta, get_policies_path, set_entry_policy
+        from passkey.mcp_config import ADAPTERS
+
+        save_entry(Entry(name="prod_aws", fields={"AWS_KEY": "aws_sec"}, source="manual", policy="allow"))
+        save_entry(
+            Entry(name="bg_mcp", fields={"MCP_KEY": "mcp_sec"}, source="cursor-init", policy="allow")
+        )
+
+        set_entry_policy("prod_aws", "prompt")
+        pol_path = get_policies_path()
+        pol_path.unlink()  # Delete policies.json while .policies_initialized & Keychain anchor exist!
+
+        # 1. Interactive read helper get_entry() also catches rm policies.json via is_policy_store_initialized()
+        with pytest.raises(PasskeyError) as exc_get:
+            get_entry("prod_aws")
+        assert exc_get.value.error_code == "POLICY_STORE_TAMPERED"
+
+        # 2. Single-entry set_entry_policy fails closed with exact remediation_command
+        with pytest.raises(PasskeyError) as exc_single:
+            set_entry_policy("prod_aws", "session")
+        assert exc_single.value.error_code == "POLICY_STORE_TAMPERED"
+        assert exc_single.value.remediation_command == "passkey policy --all session"
+        assert "passkey policy --all" in str(exc_single.value)
+
+        # 3. Doctor --deep recommends 'passkey policy --all session' recovery
+        with (
+            patch.dict(ADAPTERS, {}, clear=True),
+            patch("passkey.doctor.find_passkey_command", return_value="/usr/local/bin/passkey"),
+        ):
+            diag_bad = run_diagnostics(deep=True)
+        assert diag_bad["summary"]["failed"] > 0
+        assert any("passkey policy --all session" in r for r in diag_bad["recommendations"])
+
+        # 4. Unapproved OS auth blocks --all recovery
+        with (
+            patch.dict(ADAPTERS, {}, clear=True),
+            patch("passkey.auth.authenticate", return_value=False) as mock_deny,
+            patch.object(
+                sys,
+                "argv",
+                ["passkey", "policy", "--all", "session", "--exclude-mcp", "--yes", "--json"],
+            ),
+            pytest.raises(SystemExit) as exc_denied,
+        ):
+            main()
+        assert exc_denied.value.code == 1
+        mock_deny.assert_called_once()
+        capsys.readouterr()
+
+        # 5. Approved OS auth via require_auth rebuilds policies.json cleanly & returns doctor to green!
+        with (
+            patch.dict(ADAPTERS, {}, clear=True),
+            patch("passkey.auth.require_auth") as mock_req_auth,
+            patch.object(
+                sys,
+                "argv",
+                ["passkey", "policy", "--all", "session", "--exclude-mcp", "--yes", "--json"],
+            ),
+        ):
+            main()
+        mock_req_auth.assert_called_once_with("rebuild corrupted or tampered policies.json")
+        rec_out = json.loads(capsys.readouterr().out)
+        assert rec_out["ok"] is True
+        assert rec_out["updated"] == ["prod_aws"]
+        assert rec_out["excluded_mcp"] == ["bg_mcp"]
+        assert pol_path.is_file()
+        assert get_entry_meta("prod_aws").policy == "session"
+        assert get_entry_meta("bg_mcp").policy == "allow"
+        assert get_entry("prod_aws").policy == "session"
+
+        with (
+            patch.dict(ADAPTERS, {}, clear=True),
+            patch("passkey.doctor.find_passkey_command", return_value="/usr/local/bin/passkey"),
+        ):
+            diag_recovered = run_diagnostics(deep=True)
+        assert diag_recovered["summary"]["failed"] == 0
+        assert any(
+            c["name"] == "policy_integrity" and c["status"] == "pass"
+            for c in diag_recovered["checks"]
+        )

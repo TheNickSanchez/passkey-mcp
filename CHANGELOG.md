@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+## 0.10.1 (2026-11-20)
+
+### Fixed
+
+- **Zero-secret-Keychain `O(1)` policy updates (`passkey policy` & `passkey policy --all`)**: single-entry and bulk policy changes now update `<data_dir>/policies.json` and `entries.json` v2 under a single metadata lock without reading, hydrating, or rewriting individual secret Keychain items, eliminating `N` back-to-back macOS `securityd` ACL popups (`-128 Keychain Access Denied`) when managing entries created under an older Python binary.
+
+### Security
+
+- **Keychain-anchored HMAC policy store (`__policy_hmac_key__`) & `policy_integrity` diagnostics**: `<data_dir>/policies.json` (`0o600`, atomic temp + `os.replace`) is signed with `HMAC-SHA256` and digest/count-anchored in a single OS Keychain item (`__policy_hmac_key__`), enforcing tamper, rollback, and file-deletion detection on every secret-release path (`authorize_entry_access`), keeping lifecycle state synced across `save_entry`/`delete_entry`, and adding `policy_integrity` verification to `passkey doctor --deep`.
+
 ## 0.10.0 (2026-11-20)
 
 ### Added

@@ -296,7 +296,9 @@ def _dispatch_command(command: str | None, parser, args) -> None:
                 )
             if args.policy_value is not None:
                 _require_auth("update entry policy")
-                target = resolve_entry(args.entry, "Select entry for policy", fuzzy=False)
+                target = resolve_entry_meta(
+                    args.entry, "Select entry for policy", fuzzy=False, hydrate=False
+                )
             else:
                 target = resolve_entry_meta(args.entry, "Select entry for policy", fuzzy=False)
             commands.cmd_policy(

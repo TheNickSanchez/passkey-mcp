@@ -429,6 +429,11 @@ def revoke_lease(entry_name: str | None = None, *, revoke_all: bool = False) -> 
 
 def authorize_entry_access(entry: Entry, *, operation: str = "inject secrets") -> None:
     """Enforce entry.policy ('allow', 'session', or 'prompt') via lease or OS auth."""
+    from .keychain import verify_policy_store
+
+    policies_map = verify_policy_store()
+    if entry.name in policies_map:
+        entry.policy = policies_map[entry.name]
     policy = getattr(entry, "policy", "allow")
     if policy == "allow":
         return
