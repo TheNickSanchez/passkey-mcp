@@ -17,10 +17,13 @@ from .keychain import (
     delete_entry,
     get_all_entries,
     get_all_entry_metas,
-    get_entry,
     get_entry_meta,
     list_entries,
     save_entry,
+    set_entry_policy,
+)
+from .keychain import (
+    get_entry as get_entry,
 )
 from .models import ENTRY_NAME_PATTERN, RESERVED_NAMES, VALID_POLICIES, Entry, EntryMeta
 
@@ -1022,24 +1025,16 @@ def cmd_policy(
             f"Invalid policy '{policy_value}'. Expected one of: {', '.join(sorted(VALID_POLICIES))}"
         )
 
-    target_entry: Entry
+    set_entry_policy(entry.name, normalized)
     if isinstance(entry, Entry):
-        target_entry = entry
-    else:
-        loaded = get_entry(entry.name)
-        if loaded is None:
-            raise PasskeyError("Entry not found")
-        target_entry = loaded
-
-    target_entry.policy = normalized
-    save_entry(target_entry, is_update=True)
-    log_operation("policy", target_entry.name, details={"policy": normalized})
+        entry.policy = normalized
+    log_operation("policy", entry.name, details={"policy": normalized})
     if json_output:
-        lease = peek_lease(target_entry.name, allow_session=(normalized != "prompt"))
+        lease = peek_lease(entry.name, allow_session=(normalized != "prompt"))
         print(
             json.dumps(
                 {
-                    "entry": target_entry.name,
+                    "entry": entry.name,
                     "policy": normalized,
                     "has_active_lease": lease is not None,
                     "updated": True,
@@ -1048,7 +1043,7 @@ def cmd_policy(
             )
         )
         return
-    print(f"Set policy for '{target_entry.name}' to '{normalized}'")
+    print(f"Set policy for '{entry.name}' to '{normalized}'")
 
 
 def _get_wrapped_mcp_entry_names() -> set[str]:
@@ -1105,7 +1100,7 @@ def cmd_policy_all(
             error_code="INVALID_USAGE",
         )
 
-    metas = get_all_entry_metas(hydrate_unmigrated=True)
+    metas = get_all_entry_metas(hydrate_unmigrated=False)
     if not metas:
         if json_output:
             print(
@@ -1172,7 +1167,17 @@ def cmd_policy_all(
             print("Cancelled")
             return
 
-    updated, unchanged = bulk_update_policies(target_names, normalized)
+    try:
+        updated, unchanged = bulk_update_policies(target_names, normalized)
+    except PasskeyError as e:
+        if e.error_code != "POLICY_STORE_TAMPERED":
+            raise
+        from .auth import require_auth
+
+        require_auth("rebuild corrupted or tampered policies.json")
+        updated, unchanged = bulk_update_policies(
+            target_names, normalized, reanchor=True
+        )
     log_operation(
         "policy",
         details={

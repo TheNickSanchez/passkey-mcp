@@ -12,6 +12,7 @@ RESERVED_NAMES = frozenset(
         "__audit_hmac_key__",
         "__lease_hmac_key__",
         "__trust_hmac_key__",
+        "__policy_hmac_key__",
         "help",
         "version",
     }

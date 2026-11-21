@@ -430,3 +430,183 @@ class TestDefaultPolicyAndBulkModes:
             "unchanged": [],
             "excluded_mcp": ["only_mcp"],
         }
+
+
+class TestZeroKeychainPolicyStore:
+    """Verify O(1) zero-secret-touch policy updates across 10+ hydrated & unhydrated entries."""
+
+    def test_single_and_bulk_policy_touch_zero_user_secret_keychain_items(
+        self, tmp_path, isolated_data_dir, capsys
+    ):
+        import keyring as kr
+        from keyring.errors import KeyringError
+
+        from passkey.commands import cmd_policy_all
+        from passkey.keychain import (
+            POLICY_HMAC_KEY_NAME,
+            KeychainAccessError,
+            _get_index_path,
+            delete_entry,
+            get_entry,
+            get_entry_meta,
+            get_policies_path,
+        )
+        from passkey.mcp_config import ADAPTERS, ToolAdapter
+        from passkey.models import RESERVED_NAMES, is_valid_name
+
+        assert POLICY_HMAC_KEY_NAME in RESERVED_NAMES
+        assert is_valid_name(POLICY_HMAC_KEY_NAME) is False
+
+        # Create 12 user entries + 1 MCP entry, then mark 2 entries as unhydrated (hydrated=False)
+        for i in range(12):
+            save_entry(
+                Entry(
+                    name=f"svc_{i}",
+                    fields={f"KEY_{i}": f"secret_val_{i}"},
+                    config={f"URL_{i}": f"https://svc-{i}.example.com"},
+                    policy="allow",
+                )
+            )
+        save_entry(
+            Entry(name="mcp_bg", fields={"MCP_TOKEN": "mcp_123"}, source="cursor-init", policy="allow")
+        )
+
+        idx_path = _get_index_path()
+        idx_doc = json.loads(idx_path.read_text(encoding="utf-8"))
+        for unhyd in ("svc_0", "svc_1"):
+            idx_doc["entries"][unhyd] = {
+                "fields": [],
+                "config_keys": [],
+                "policy": "allow",
+                "created": None,
+                "modified": None,
+                "last_rotated": None,
+                "source": None,
+                "hydrated": False,
+            }
+        idx_path.write_text(json.dumps(idx_doc, indent=2), encoding="utf-8")
+
+        # 1. Cancelling cmd_policy_all at [Y/n] touches ZERO Keychain items at all (not even internal keys)
+        with (
+            patch.dict(ADAPTERS, {}, clear=True),
+            patch.object(
+                kr, "get_password", side_effect=AssertionError("Keychain read before [Y/n]!")
+            ),
+            patch.object(
+                kr, "set_password", side_effect=AssertionError("Keychain write on cancel!")
+            ),
+            patch("builtins.input", return_value="n"),
+        ):
+            cmd_policy_all("session", exclude_mcp=True, yes=False)
+        assert "Cancelled" in capsys.readouterr().out
+
+        # 2. Single-entry & --all updates touch ZERO user secret Keychain items (even unhydrated!)
+        real_get = kr.get_password
+        real_set = kr.set_password
+        allowed_internal = {
+            POLICY_HMAC_KEY_NAME,
+            "__audit_hmac_key__",
+            "__lease_hmac_key__",
+        }
+        policy_anchor_reads = 0
+        policy_anchor_writes = 0
+
+        def _guard_get(service: str, username: str):
+            nonlocal policy_anchor_reads
+            if username not in allowed_internal:
+                raise AssertionError(f"Secret Keychain item read during policy update: {username}")
+            if username == POLICY_HMAC_KEY_NAME:
+                policy_anchor_reads += 1
+            return real_get(service, username)
+
+        def _guard_set(service: str, username: str, password: str):
+            nonlocal policy_anchor_writes
+            if username not in allowed_internal:
+                raise AssertionError(f"Secret Keychain item written during policy update: {username}")
+            if username == POLICY_HMAC_KEY_NAME:
+                policy_anchor_writes += 1
+                assert len(password.encode("utf-8")) < 250
+            return real_set(service, username, password)
+
+        mcp_cfg = tmp_path / "claude.json"
+        mcp_cfg.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "wrapped_srv": {
+                            "command": "passkey",
+                            "args": ["run", "--quiet", "svc_11", "--", "node", "srv.js"],
+                        }
+                    }
+                }
+            )
+        )
+        fake_adapter = ToolAdapter(
+            name="claude",
+            display_name="Claude Code",
+            root_key="mcpServers",
+            global_paths={sys.platform: mcp_cfg},
+        )
+
+        with (
+            patch.dict(ADAPTERS, {"claude": fake_adapter}, clear=True),
+            patch.object(kr, "get_password", side_effect=_guard_get),
+            patch.object(kr, "set_password", side_effect=_guard_set),
+        ):
+            # Single-entry update on unhydrated svc_0
+            with patch.object(sys, "argv", ["passkey", "policy", "svc_0", "prompt", "--json"]):
+                main()
+            single_res = json.loads(capsys.readouterr().out)
+            assert single_res["policy"] == "prompt"
+            assert single_res["updated"] is True
+            assert policy_anchor_writes == 1
+
+            # svc_0 row stays hydrated=False in entries.json!
+            raw_after_single = json.loads(idx_path.read_text(encoding="utf-8"))
+            assert raw_after_single["entries"]["svc_0"]["hydrated"] is False
+            assert raw_after_single["entries"]["svc_0"]["policy"] == "prompt"
+
+            # Bulk --all across all 13 entries with --exclude-mcp (O(1) single anchor write!)
+            policy_anchor_reads = 0
+            policy_anchor_writes = 0
+            with patch.object(
+                sys,
+                "argv",
+                ["passkey", "policy", "--all", "session", "--exclude-mcp", "--yes", "--json"],
+            ):
+                main()
+            bulk_res = json.loads(capsys.readouterr().out)
+            assert bulk_res["updated_count"] == 11  # svc_0..svc_10 (svc_11 & mcp_bg excluded!)
+            assert bulk_res["excluded_mcp"] == ["mcp_bg", "svc_11"]
+            assert policy_anchor_reads == 1
+            assert policy_anchor_writes == 1
+
+        pol_path = get_policies_path()
+        assert pol_path.is_file()
+        if sys.platform != "win32":
+            assert (pol_path.stat().st_mode & 0o777) == 0o600
+
+        # 3. Reading svc_0 via get_entry overlays authoritative 'session' from policies.json & hydrates index
+        loaded_0 = get_entry("svc_0")
+        assert loaded_0 is not None
+        assert loaded_0.policy == "session"
+        assert loaded_0.fields == {"KEY_0": "secret_val_0"}
+        assert loaded_0.config == {"URL_0": "https://svc-0.example.com"}
+        assert get_entry_meta("svc_0").hydrated is True
+
+        # 4. Updating via save_entry and deleting via delete_entry stay synced with policies.json
+        loaded_0.policy = "prompt"
+        save_entry(loaded_0, is_update=True)
+        assert json.loads(pol_path.read_text(encoding="utf-8"))["policies"]["svc_0"] == "prompt"
+
+        assert delete_entry("svc_0") is True
+        assert "svc_0" not in json.loads(pol_path.read_text(encoding="utf-8"))["policies"]
+
+        # 5. KeyringError on __policy_hmac_key__ when policies.json exists fails closed with KeychainAccessError
+        from passkey.keychain import verify_policy_store
+
+        with (
+            patch.object(kr, "get_password", side_effect=KeyringError("-128")),
+            pytest.raises(KeychainAccessError, match=r"policies\.json"),
+        ):
+            verify_policy_store()

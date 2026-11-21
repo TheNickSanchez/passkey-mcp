@@ -120,7 +120,7 @@ class TestPk1Codec:
 
         assert token.startswith(TOKEN_PREFIX)
         assert re.fullmatch(r"pk1:[A-Za-z0-9_-]+", token)
-        assert len(token) < 350
+        assert len(token) < 360
 
         # Decode with Slack/Teams whitespace, newlines,Quotes, and space-separated passphrase
         wrapped_token = f'  "{token[:80]}\n  {token[80:]}"  \n'

@@ -17,8 +17,8 @@ How `passkey-mcp` layers OS keychain ACLs, native macOS Touch ID (`LAContext`), 
 | Secrets printed to `stdout`/`stderr` by crashes or debug logs | **Yes** | `SecretMasker` scrubs raw UTF-8 and JSON-escaped secret values (`len >= 4`) to `<concealed by passkey>` across pipe chunk boundaries. |
 | Secrets exposed in `ps` process `argv` or shell history | **Yes** | CLI never accepts secret values or `pk1:` share tokens on `argv`; interactive input uses masked TTY (`prompt_secret`) / `getpass`, and `passkey request` uses `osascript -` stdin + env attributes. |
 | Untrusted repo `.env.passkey` / `.passkey.toml` exfiltration | **Yes** | SHA-256 manifest digest verified against HMAC-signed `trusted_projects.json` (`__trust_hmac_key__` in keychain); requires Touch ID / human approval. |
-| Agent editing `leases.json`, `trusted_projects.json`, or `audit.log` | **Yes** | All three stores are authenticated with independent 256-bit HMAC-SHA256 keys stored in the OS keychain (`0o600` on disk). |
-| Local tampering of `entries.json` (`policy` downgrade to `allow`) | **Yes** | `entries.json` caches secret-free discovery metadata only; all secret-releasing paths (`run`, `exec`, `inject`, `mount`, `plugin run`, `browser-fill`) enforce the authoritative `policy` inside the OS Keychain payload and self-heal `entries.json`. |
+| Agent editing `leases.json`, `trusted_projects.json`, `policies.json`, or `audit.log` | **Yes** | All four stores are authenticated with independent 256-bit HMAC-SHA256 keys stored in the OS keychain (`0o600` on disk); `__policy_hmac_key__` additionally anchors the SHA-256 digest and record count of `policies.json` to block edit, rollback/replay, and file-deletion attacks. |
+| Local tampering of `entries.json` (`policy` downgrade to `allow`) | **Yes** | `entries.json` caches secret-free discovery metadata only; all secret-releasing paths (`run`, `exec`, `inject`, `mount`, `plugin run`, `browser-fill`) enforce the authoritative `policy` from HMAC-anchored `policies.json` + the OS Keychain payload and self-heal `entries.json`. |
 | Same-UID malware / root compromise on an unlocked machine | **No (OS boundary)** | Same-UID processes can inspect child `/proc/<pid>/environ` or call `keyring` under the same Python binary ACL on macOS. Use `policy = prompt` / `session` for defense-in-depth. |
 
 ### Platform Keychain & Auth Reality
@@ -74,6 +74,12 @@ Customize the session lease duration (default `600` seconds / `10m`, max `7d`):
 ```bash
 passkey config agent-session-lease-ttl 30m
 ```
+
+### `O(1)` Zero-Secret-Touch Policy Store (`policies.json` + `__policy_hmac_key__`)
+
+Updating policies via `passkey policy <entry> <mode>` or `passkey policy --all <mode> [--exclude-mcp]` never reads or rewrites individual user secret Keychain items (avoiding per-item macOS `securityd` password popups across Python upgrades):
+* Authoritative policy overrides live in `<data_dir>/policies.json` (`0o600`, atomic temp + `os.replace`) signed with `HMAC-SHA256` and anchored by a single `~165`-byte Keychain root item (`__policy_hmac_key__`) recording `{"v": "pk_policy_v1", "k": ..., "digest": ..., "count": ...}`.
+* Every secret-releasing path (`authorize_entry_access`) and `passkey doctor --deep` (`policy_integrity`) verifies both the HMAC signature and the Keychain-anchored SHA-256 digest + count, blocking direct file edits, replay/rollback of older `policies.json` snapshots, and `rm policies.json` deletion attacks.
 
 ---
 
